@@ -1,0 +1,14 @@
+web/core.cjs
+.data/
+dist/
+node_modules/
+contracts/out/
+bin/
+lib/
+contracts/out-foundry/
+cache/
+# Segredos e configuração local — nunca commitar (use .env.example como modelo)
+.env
+.env.*.local
+.claude/
+*.local.json

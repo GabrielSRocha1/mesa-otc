@@ -1,0 +1,880 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>VERUM OTC — Arquitetura de Produção v0.1</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Sora:wght@500;600;700&family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+:root{
+  --bg:#F4F7FB; --paper:#FFFFFF; --ink:#0B1B33; --ink-2:#3A4A66; --muted:#6B7A94;
+  --blue:#0B4DA2; --blue-2:#0E63C9; --blue-soft:#E4EEFA; --line:#D6DEEA;
+  --green:#0F8A4B; --green-soft:#E3F5EA; --amber:#B7791F; --amber-soft:#FBF1DE;
+  --red:#B42318; --red-soft:#FBE7E5;
+  --sans:"Inter",system-ui,-apple-system,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+  --head:"Sora","Inter",system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;
+  --mono:"JetBrains Mono",ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+  box-sizing:border-box;
+  padding-top:env(safe-area-inset-top,0px); padding-bottom:env(safe-area-inset-bottom,0px);
+}
+@media (prefers-color-scheme: dark){ :root:not([data-theme="light"]){
+  --bg:#0A0E1A; --paper:#111A2E; --ink:#EAF0FA; --ink-2:#C2CEE3; --muted:#8B9AB8;
+  --blue:#6FA8F0; --blue-2:#8CBBF5; --blue-soft:#15274A; --line:#24314D;
+  --green:#4CC97F; --green-soft:#0F2E1E; --amber:#E0B25E; --amber-soft:#3A2C12;
+  --red:#F08A80; --red-soft:#3D1B18;
+}}
+:root[data-theme="dark"]{
+  --bg:#0A0E1A; --paper:#111A2E; --ink:#EAF0FA; --ink-2:#C2CEE3; --muted:#8B9AB8;
+  --blue:#6FA8F0; --blue-2:#8CBBF5; --blue-soft:#15274A; --line:#24314D;
+  --green:#4CC97F; --green-soft:#0F2E1E; --amber:#E0B25E; --amber-soft:#3A2C12;
+  --red:#F08A80; --red-soft:#3D1B18;
+}
+*{box-sizing:inherit}
+html{scroll-padding-top:env(safe-area-inset-top,0px);scroll-behavior:smooth}
+body{margin:0;background:var(--bg);color:var(--ink);font-family:var(--sans);font-size:15.5px;line-height:1.6;-webkit-font-smoothing:antialiased}
+.wrap{max-width:1040px;margin:0 auto;padding:24px 18px 64px}
+header.hero{background:var(--paper);border:1px solid var(--line);border-top:5px solid var(--blue);border-radius:12px;padding:26px 24px;margin-bottom:22px}
+.kicker{font-family:var(--mono);font-size:12px;letter-spacing:.12em;text-transform:uppercase;color:var(--blue);margin:0 0 8px}
+h1{font-family:var(--head);font-size:30px;line-height:1.2;margin:0 0 10px;letter-spacing:-.01em}
+.meta{display:flex;flex-wrap:wrap;gap:10px 18px;font-size:13px;color:var(--muted);margin-top:12px}
+.meta b{color:var(--ink-2);font-weight:600}
+nav.toc{background:var(--paper);border:1px solid var(--line);border-radius:12px;padding:18px 22px;margin-bottom:22px}
+nav.toc h2{margin:0 0 10px;font-size:15px}
+nav.toc ol{margin:0;padding-left:22px;columns:2;column-gap:28px}
+nav.toc li{break-inside:avoid;margin:3px 0;font-size:14px}
+nav.toc a{color:var(--blue);text-decoration:none}
+nav.toc a:hover{text-decoration:underline}
+section{background:var(--paper);border:1px solid var(--line);border-radius:12px;padding:22px 24px;margin-bottom:22px}
+h2{font-family:var(--head);font-size:22px;margin:0 0 14px;padding-bottom:10px;border-bottom:2px solid var(--blue-soft);letter-spacing:-.01em}
+h2 .n{font-family:var(--mono);color:var(--blue);font-size:15px;margin-right:10px}
+h3{font-family:var(--head);font-size:16.5px;margin:22px 0 8px}
+h4{font-family:var(--head);font-size:14.5px;margin:16px 0 6px;color:var(--ink-2)}
+p{margin:8px 0}
+ul,ol{margin:6px 0 10px;padding-left:22px}
+li{margin:4px 0}
+code,.id{font-family:var(--mono);font-size:.88em;background:var(--blue-soft);color:var(--blue);padding:1px 6px;border-radius:5px;white-space:nowrap}
+pre{font-family:var(--mono);font-size:12.5px;background:var(--blue-soft);border:1px solid var(--line);border-radius:8px;padding:14px;overflow-x:auto;line-height:1.5}
+pre code{background:none;padding:0;white-space:pre;color:var(--ink);font-size:inherit}
+.tbl{overflow-x:auto;margin:10px 0 14px;border:1px solid var(--line);border-radius:8px}
+table{border-collapse:collapse;width:100%;min-width:600px;font-size:13.5px}
+th,td{border-bottom:1px solid var(--line);padding:9px 11px;vertical-align:top;text-align:left}
+th{background:var(--blue-soft);font-family:var(--head);font-weight:600;font-size:12.5px;letter-spacing:.02em}
+tr:last-child td{border-bottom:none}
+.adr{border:1px solid var(--line);border-left:4px solid var(--blue);border-radius:0 10px 10px 0;padding:12px 16px;margin:12px 0;background:var(--bg)}
+.adr h4{margin:0 0 6px;color:var(--ink)}
+.adr .row{display:grid;grid-template-columns:110px 1fr;gap:4px 12px;font-size:14px}
+.adr .row b{color:var(--muted);font-weight:600;font-family:var(--mono);font-size:11.5px;letter-spacing:.06em;text-transform:uppercase;padding-top:3px}
+.callout{border-left:4px solid var(--blue);background:var(--blue-soft);padding:12px 16px;border-radius:0 8px 8px 0;margin:14px 0}
+.callout.ok{border-color:var(--green);background:var(--green-soft)}
+.callout.warn{border-color:var(--amber);background:var(--amber-soft)}
+.callout.stop{border-color:var(--red);background:var(--red-soft)}
+.callout p:first-child{margin-top:0}.callout p:last-child{margin-bottom:0}
+.tag{display:inline-block;font-family:var(--mono);font-size:11px;padding:2px 8px;border-radius:999px;border:1px solid var(--line);color:var(--ink-2);margin-right:4px;white-space:nowrap}
+.tag.on{color:var(--green);border-color:var(--green);background:var(--green-soft)}
+.tag.off{color:var(--blue);border-color:var(--blue);background:var(--blue-soft)}
+.tag.both{color:var(--amber);border-color:var(--amber);background:var(--amber-soft)}
+.tag.stop{color:var(--red);border-color:var(--red);background:var(--red-soft)}
+.state{font-family:var(--mono);font-size:12.5px;font-weight:500;color:var(--blue)}
+.grid2{display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:12px}
+.card{border:1px solid var(--line);border-radius:10px;padding:12px 14px;background:var(--bg)}
+.card h4{margin:0 0 6px;color:var(--ink)}
+.card ul{margin:4px 0 0;padding-left:18px;font-size:14px}
+footer{color:var(--muted);font-size:12.5px;text-align:center;margin-top:18px}
+@media (max-width:640px){
+  .wrap{padding:16px 12px 48px} h1{font-size:24px} section{padding:18px 16px} nav.toc ol{columns:1}
+  .adr .row{grid-template-columns:1fr}
+}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<header class="hero">
+  <p class="kicker">Verum Crypto · Infraestrutura Financeira · Principal Architect</p>
+  <h1>VERUM OTC — Arquitetura de Produção</h1>
+  <p style="margin:0;color:var(--ink-2)">Transformação do PRD v0.1 em arquitetura: componentes, interfaces, modelo de dados, contratos, adaptadores multichain, segurança, observabilidade, deploy, DR e testes. Sem implementação.</p>
+  <div class="meta">
+    <span><b>Versão</b> 0.1 — Architecture Freeze Candidate</span>
+    <span><b>Data</b> 24/09/2026</span>
+    <span><b>Base</b> PRD VERUM OTC v0.1 (requisitos RF/RNF/RS/RA/RL/RAS, estados, CA-*)</span>
+    <span><b>Escopo</b> Arquitetura completa; código proibido nesta etapa</span>
+  </div>
+</header>
+
+<nav class="toc">
+  <h2>Sumário</h2>
+  <ol>
+    <li><a href="#s0">Alterações e refinamentos aos requisitos</a></li>
+    <li><a href="#s1">Architecture Decision Records</a></li>
+    <li><a href="#s2">Diagrama textual da arquitetura</a></li>
+    <li><a href="#s3">Componentes</a></li>
+    <li><a href="#s4">Interfaces entre componentes</a></li>
+    <li><a href="#s5">Data model</a></li>
+    <li><a href="#s6">State machine (visão de implementação)</a></li>
+    <li><a href="#s7">Security model</a></li>
+    <li><a href="#s8">Threat model (arquitetural)</a></li>
+    <li><a href="#s9">API boundaries</a></li>
+    <li><a href="#s10">Blockchain adapter design</a></li>
+    <li><a href="#s11">Smart-contract module design e Deal Hash</a></li>
+    <li><a href="#s12">Deployment architecture</a></li>
+    <li><a href="#s13">Disaster recovery</a></li>
+    <li><a href="#s14">Testing strategy</a></li>
+    <li><a href="#s15">Architecture Freeze Candidate</a></li>
+  </ol>
+</nav>
+
+<!-- ===================================================== 0. ALTERAÇÕES -->
+<section id="s0">
+  <h2><span class="n">00</span>Alterações e refinamentos aos requisitos do PRD</h2>
+  <p>Regra desta etapa: nenhum requisito funcional é alterado silenciosamente. O que segue é a lista completa do que muda ou se especializa, com justificativa técnica. Tudo o mais no PRD permanece como está.</p>
+  <div class="tbl"><table>
+    <tr><th>#</th><th>Tipo</th><th>Requisito afetado</th><th>O que muda</th><th>Justificativa técnica</th></tr>
+    <tr><td>R1</td><td><span class="tag warn">Refinamento</span></td><td>Seção 7.2 / RF-022 / transição LIQUIDITY_VERIFIED → AWAITING_SIGNATURES</td><td>O <b>depósito em escrow (funding) ocorre dentro de <span class="state">AWAITING_SIGNATURES</span></b>, como pré-requisito por participante depositante. A transição para <span class="state">FULLY_SIGNED</span> exige N/N aprovações <b>e</b> todas as legs financiadas com finalidade. Nenhum estado novo é criado; o progresso é rastreado por participante/leg.</td><td>Com fundos já em escrow, a N-ésima assinatura torna a liquidação um único <code>settle()</code> permissionless e determinístico. A alternativa (assinar e financiar depois) cria o caso "assinou, mas não depositou" que exigiria timeout de funding em <span class="state">SETTLING</span> e enfraquece a garantia "N/N ⇒ liquida".</td></tr>
+    <tr><td>R2</td><td><span class="tag warn">Restrição v1</span></td><td>RF-050 / RF-041 (Router e Liquidity)</td><td>Na v1 o Router só habilita rotas de tipo <b>P2P</b> (<code>ESCROW_NN</code> e <code>HTLC</code>). Rotas de tipo <b>MARKET</b> (conversão via agregador/DEX) são projetadas na interface, mas desabilitadas por feature flag até aprovação.</td><td>Resolve a questão Q2 do PRD com o menor perímetro de risco: escrow N-de-N é auditável e determinístico; execução de mercado dentro de escrow adiciona risco de slippage/MEV e superfície de contrato. O Liquidity Engine continua obrigatório: em rotas P2P ele valida profundidade de mercado para sanidade de preço (RF-041) e saldo/escrow (RF-043).</td></tr>
+    <tr><td>R3</td><td><span class="tag warn">Especialização</span></td><td>RF-052 / RF-053 (mudança de rota)</td><td>A "rota" P2P inclui, para cada leg: cadeia do escrow, endereço do contrato/programa de escrow, modo (<code>ESCROW_NN</code>/<code>HTLC</code>), ordem de funding, timelocks. Qualquer variação nesses campos é mudança de rota e gera revisão.</td><td>Torna verificável a exigência "execução apenas pela rota assinada": o contrato recalcula o hash a partir do endereço do escrow e da leg que ele mesmo guarda.</td></tr>
+    <tr><td>R4</td><td><span class="tag warn">Especialização</span></td><td>RAS-020 / Seção 8.3 (padrões por rede)</td><td>Para uma leg com escrow em cadeia X, todas as N assinaturas precisam ser <b>verificáveis on-chain em X</b>. O Router trata isso como restrição de viabilidade de rota (matriz na Seção 10.4). Para BTC/HTLC, a verificação N/N é <b>indireta</b> via hash-lock (Seção 11.6).</td><td>Sem isso, RS-003 (condição de liberação verificável on-chain) não é satisfazível em Deals com participantes de chaves heterogêneas.</td></tr>
+    <tr><td>R5</td><td><span class="tag warn">Especialização</span></td><td>RF-005 / Q15 (expiração)</td><td>Expiração padrão 60 min para Deals sem BTC; <b>180 min</b> padrão quando há leg BTC; mínimo 15 min; máximo 24 h. A margem de execução (7.3 item 2) é calculada por rota a partir das finalidades.</td><td>Finalidade BTC (3 confirmações ≈ 30 min, com variância alta) não cabe com segurança em 60 min junto do funding.</td></tr>
+    <tr><td>R6</td><td><span class="tag on">Sem alteração</span></td><td>RF-007, RF-062, RF-071, RF-083, RS-001/002/003, máquina de estados</td><td>Mantidos integralmente. A máquina de estados da Seção 9 do PRD é implementada sem novos estados de Deal.</td><td>—</td></tr>
+  </table></div>
+  <div class="callout warn"><p>R1 a R5 são candidatos a freeze: se algum for rejeitado, as seções 6, 10 e 11 mudam e devem ser reemitidas.</p></div>
+</section>
+
+<!-- ===================================================== 1. ADR -->
+<section id="s1">
+  <h2><span class="n">01</span>Architecture Decision Records</h2>
+  <p>Formato: contexto → decisão → alternativas rejeitadas → consequências. Status de todos: <b>Proposto (freeze candidate)</b>.</p>
+
+  <div class="adr"><h4>ADR-001 · Verificação N-de-N on-chain sempre que a cadeia permitir; backend nunca é signatário</h4><div class="row">
+    <b>Contexto</b><span>RS-002/RS-003 exigem que a liberação de fundos não dependa de um "ok" do backend.</span>
+    <b>Decisão</b><span>Nas cadeias com contratos (EVM, Solana) o escrow recalcula o <code>dealHash</code> e verifica as N assinaturas on-chain no <code>settle()</code>. O backend apenas <em>relaya</em> chamadas permissionless (<code>settle</code>, <code>refund</code>, <code>register</code>) cujo efeito é fixado pelo contrato. Em Bitcoin (sem contratos) a garantia vem de HTLC encadeado ao escrow da outra cadeia.</span>
+    <b>Rejeitado</b><span>Escrow "burro" liberado por chave operacional após validação off-chain (transforma o backend em custodiante de fato).</span>
+    <b>Consequências</b><span>Contratos mais complexos (verificadores de assinatura on-chain); restrição de viabilidade de rota por esquema de chave (R4).</span>
+  </div></div>
+
+  <div class="adr"><h4>ADR-002 · Deal P2P direta na v1; rotas MARKET projetadas mas desabilitadas</h4><div class="row">
+    <b>Contexto</b><span>Q2 do PRD. Conversão via mercado amplia superfície (slippage, MEV, integração com agregadores dentro de escrow).</span>
+    <b>Decisão</b><span>v1: Vendedor entrega <code>assetIn</code>, Comprador entrega <code>assetOut</code>; sem conversão. Interface <code>Route.kind ∈ {ESCROW_NN, HTLC, MARKET}</code>, com <code>MARKET</code> atrás de feature flag e sem contrato implantado.</span>
+    <b>Rejeitado</b><span>Execução de mercado na v1.</span>
+    <b>Consequências</b><span>Liquidity Engine atua como validador de sanidade e de saldo; Router escolhe entre cadeias/modos de escrow, não entre venues.</span>
+  </div></div>
+
+  <div class="adr"><h4>ADR-003 · Deal Hash único cross-chain em SHA-256 sobre serialização canônica com raízes por componente</h4><div class="row">
+    <b>Contexto</b><span>O mesmo hash precisa ser recomputável em EVM (precompile SHA-256, 0x02), Solana (syscall <code>sha256</code>) e off-chain; Keccak não é nativo em Solana/BTC.</span>
+    <b>Decisão</b><span><code>dealHash = SHA256(domainHash ‖ dealId ‖ revision ‖ participantsRoot ‖ legsRoot ‖ pricingHash ‖ routeHash ‖ expiresAt ‖ dealNonce)</code>, onde <code>legsRoot = SHA256(legHash₁ ‖ … ‖ legHashₙ)</code>. Cada escrow recalcula o <em>seu</em> <code>legHashᵢ</code> a partir do que armazena e recebe as raízes irmãs como argumentos (Seção 11.5).</span>
+    <b>Rejeitado</b><span>Hash por cadeia com raiz comum (dobra o número de objetos assinados); Keccak-256 (custo em Solana); JSON canônico hasheado on-chain (custo).</span>
+    <b>Consequências</b><span>Contratos verificam que os termos que executam são exatamente os assinados; off-chain precisa de serialização determinística com testes de propriedade.</span>
+  </div></div>
+
+  <div class="adr"><h4>ADR-004 · Pay Master = aprovador puro na v1</h4><div class="row">
+    <b>Contexto</b><span>Q1 do PRD.</span>
+    <b>Decisão</b><span>Pay Master não possui leg própria e não financia nada; sua assinatura é condição de liberação. Opcionalmente é beneficiário de uma fração do fee, fixada nos termos (via FeeRouter).</span>
+    <b>Rejeitado</b><span>Pay Master como provedor de fundos/rampa fiat (adiciona escopo de pagamento fiat).</span>
+    <b>Consequências</b><span>Pay Master só precisa de carteira em <em>uma</em> cadeia cujo esquema de chave seja verificável nas cadeias de escrow da Deal (R4).</span>
+  </div></div>
+
+  <div class="adr"><h4>ADR-005 · Fee descontado on-chain na leg de pagamento; FeeRouter faz o split</h4><div class="row">
+    <b>Decisão</b><span>O fee (bps + mínimo absoluto) é campo dos termos, descontado de <code>assetOut</code> no <code>settle()</code> e roteado por FeeRouter para tesouraria Verum (e Pay Masters, se configurado). Deságio não é fee: é a diferença entre preço de referência e preço acordado, já refletida em <code>amountOut</code>.</span>
+    <b>Consequências</b><span>Sem leg extra; contabilidade lê eventos <code>FeeCollected</code>.</span>
+  </div></div>
+
+  <div class="adr"><h4>ADR-006 · Cada parte paga o gás dos próprios depósitos; settle/refund são permissionless e relayados por um keeper sem poder discricionário</h4><div class="row">
+    <b>Decisão</b><span>Depósito/aprovação: transação assinada pela carteira do usuário. <code>register</code>/<code>settle</code>/<code>refund</code>: qualquer endereço pode chamar; o keeper Verum chama por conveniência com chave em KMS cuja política permite apenas esses seletores/instruções. Custo do keeper é recuperado pelo fee.</span>
+    <b>Consequências</b><span>Se o keeper morrer, usuários chamam diretamente (RL-021); a chave do keeper comprometida não move fundos para lugar algum além dos destinos fixos.</span>
+  </div></div>
+
+  <div class="adr"><h4>ADR-007 · Funding em AWAITING_SIGNATURES (R1), ordem de funding definida pela rota</h4><div class="row">
+    <b>Decisão</b><span><code>ESCROW_NN</code>: Vendedor e Comprador depositam em qualquer ordem, ambos antes de FULLY_SIGNED. <code>HTLC</code> (leg BTC): a parte da cadeia de contrato financia primeiro com timelock longo; a parte BTC financia depois com timelock curto (Seção 11.6).</span>
+  </div></div>
+
+  <div class="adr"><h4>ADR-008 · Cadeias v1: Solana (mainnet-beta), Ethereum (mainnet) e Bitcoin; ZEC transparente e Tron na v1.1</h4><div class="row">
+    <b>Decisão</b><span>Três adaptadores independentes: <code>BitcoinSettlementAdapter</code>, <code>EvmSettlementAdapter</code> (parametrizado por chainId), <code>SolanaSettlementAdapter</code>. ZEC t-addr reutiliza a família UTXO do adaptador Bitcoin com parâmetros próprios (v1.1). USDT/USDC v1: mints/contratos canônicos em Ethereum e Solana.</span>
+  </div></div>
+
+  <div class="adr"><h4>ADR-009 · Movimento de preço fora da banda após N/N → BLOCKED + reembolso (Q12-a)</h4><div class="row">
+    <b>Decisão</b><span>Não existe revisão automática após FULLY_SIGNED; a máquina de estados do PRD permanece intacta. A banda tolerada é campo dos termos e é aplicada off-chain na SETTLEMENT_VALIDATION (o contrato não consulta preço).</span>
+  </div></div>
+
+  <div class="adr"><h4>ADR-010 · Apenas carteiras de chave externa (EOA / keypair) na v1</h4><div class="row">
+    <b>Decisão</b><span>Sem EIP-1271 nem multisig Solana como participante. Esquemas suportados: secp256k1-ECDSA (EVM, BTC via assinatura de mensagem ECDSA) e Ed25519 (Solana). Bitcoin Taproot/BIP-322 Schnorr → v1.1 (não verificável nativamente nas cadeias de escrow).</span>
+  </div></div>
+
+  <div class="adr"><h4>ADR-011 · Identidade de sessão = carteira (challenge/response), e-mail opcional</h4><div class="row">
+    <b>Decisão</b><span>Login por assinatura de desafio no padrão da rede (SIWE-like para EVM, SIWS-like para Solana, mensagem ECDSA para BTC). Sessão = JWT de curta duração + refresh, ligada ao endereço. E-mail opcional só para notificação.</span>
+  </div></div>
+
+  <div class="adr"><h4>ADR-012 · Monólito modular em TypeScript, processos separados por papel, PostgreSQL como sistema de registro, Redis como cache, NATS JetStream como event bus</h4><div class="row">
+    <b>Contexto</b><span>Consistência forte por Deal (RNF-002), time pequeno, ecossistema Verum já em TypeScript/Next.js + Rust para Solana.</span>
+    <b>Decisão</b><span>Um repositório (monorepo) com módulos de fronteira explícita (OTC Engine, Price, Liquidity, Router, Risk, Signature, Settlement, Adapters). Executáveis: <code>api</code>, <code>engine-worker</code>, <code>adapter-worker-{btc,evm,sol}</code>, <code>keeper</code>, <code>indexer-{btc,evm,sol}</code>, <code>expiry-scheduler</code>. Estado da Deal é <b>event-sourced</b> em Postgres (tabela de eventos + projeção), com <b>outbox transacional</b> publicando no NATS.</span>
+    <b>Rejeitado</b><span>Microserviços independentes com bancos próprios (quebra RNF-002 e complica auditoria); Rust para todo o backend (velocidade de entrega).</span>
+    <b>Consequências</b><span>Aritmética em <code>bigint</code> obrigatória; lint proibindo <code>number</code> para quantias; módulos Rust apenas para o programa Solana.</span>
+  </div></div>
+
+  <div class="adr"><h4>ADR-013 · Contratos imutáveis por versão; AssetRegistry on-chain é allowlist governada por multisig com timelock</h4><div class="row">
+    <b>Decisão</b><span>Sem proxies upgradeable nos escrows. Uma nova versão é um novo deploy; Deals existentes terminam no contrato onde nasceram. Allowlist de tokens aceitos pelo escrow é alterável por multisig 2-de-3 (ops Verum) com timelock de 24 h; a remoção de token não afeta Deals já registradas.</span>
+    <b>Consequências</b><span>Correções exigem migração de versão; em troca, nenhum caminho de upgrade pode redirecionar fundos.</span>
+  </div></div>
+
+  <div class="adr"><h4>ADR-014 · EmergencyControls: pausa apenas de <em>entrada</em> (register/deposit/settle); refund nunca é pausável</h4><div class="row">
+    <b>Decisão</b><span>Guardian multisig pode pausar registro, depósito e liquidação. Reembolso após expiração e reembolso de Deal cancelada/superseded são <em>sempre</em> executáveis. Não existe função de saque administrativo.</span>
+  </div></div>
+
+  <div class="adr"><h4>ADR-015 · Price Engine com mínimo de 3 fontes e agregação por mediana ponderada; Liquidity Engine com snapshot de profundidade multi-venue</h4><div class="row">
+    <b>Decisão</b><span>Fontes v1 (lista a congelar): oráculos on-chain (Pyth em Solana, Chainlink em EVM), 2–3 exchanges centralizadas via API pública e agregadores de DEX (Jupiter para Solana, um agregador EVM). Cada fonte tem peso, TTL e limiar de desvio. Snapshots são persistidos e referenciados pelo hash de pricing nos termos.</span>
+  </div></div>
+</section>
+
+<!-- ===================================================== 2. DIAGRAMA -->
+<section id="s2">
+  <h2><span class="n">02</span>Diagrama textual da arquitetura</h2>
+<pre><code>                          ┌──────────────────────────── EDGE ────────────────────────────┐
+                          │  Cloudflare (WAF, DDoS, rate-limit L7, TLS, bot management)   │
+                          └──────────────────────────────┬───────────────────────────────┘
+                                                         │ HTTPS / WSS
+┌──────────────────────┐                     ┌───────────▼───────────┐
+│  FRONTEND            │  REST + SSE/WS      │  API (BFF)            │
+│  Next.js (self-host) │◄───────────────────►│  auth, RBAC, rate-    │
+│  wallet adapters:    │                     │  limit, idempotency,  │
+│  EVM / Solana / BTC  │                     │  validação de schema  │
+└──────────────────────┘                     └───────────┬───────────┘
+                                                         │ in-process / NATS request-reply
+┌────────────────────────────────────────────────────────▼──────────────────────────────────────┐
+│                                   OTC ENGINE (núcleo, agnóstico de cadeia)                     │
+│  Deal aggregate · máquina de estados · revisões · orquestração de verificações · expiração     │
+│                                                                                               │
+│   ┌───────────────┐ ┌───────────────┐ ┌───────────────┐ ┌──────────────┐ ┌─────────────────┐ │
+│   │ ASSET REGISTRY│ │ PRICE ENGINE  │ │LIQUIDITY ENG. │ │ ROUTER ENGINE│ │  RISK ENGINE    │ │
+│   │ canônico +    │ │ agregador     │ │ profundidade  │ │ rotas P2P    │ │ carteira, preço,│ │
+│   │ verificação   │ │ multi-fonte   │ │ multi-venue   │ │ viabilidade  │ │ limites, tx mon.│ │
+│   └───────────────┘ └───────────────┘ └───────────────┘ └──────────────┘ └─────────────────┘ │
+│   ┌───────────────────────────┐            ┌────────────────────────────────────────────────┐ │
+│   │ SIGNATURE ENGINE          │            │ SETTLEMENT ENGINE (orquestrador off-chain)     │ │
+│   │ canonicalização, dealHash,│            │ validação 7.3 · lock · sequência de legs ·     │ │
+│   │ envelopes, verificação    │            │ reconciliação on-chain · reembolso             │ │
+│   └───────────────────────────┘            └───────────────────────┬────────────────────────┘ │
+└────────────────────────────────────────────────────────────────────┼──────────────────────────┘
+                                                                     │ SettlementAdapter (porta)
+                   ┌───────────────────────────┬──────────────────────┼──────────────────────────┐
+                   ▼                           ▼                      ▼                          │
+        ┌────────────────────┐      ┌────────────────────┐   ┌────────────────────┐              │
+        │ BITCOIN ADAPTER    │      │ EVM ADAPTER        │   │ SOLANA ADAPTER     │  BLOCKCHAIN  │
+        │ HTLC (miniscript), │      │ DealManager/Escrow │   │ Programa Anchor    │  ADAPTERS    │
+        │ bitcoind/electrs,  │      │ Solidity, viem,    │   │ (escrow NN),       │              │
+        │ indexer UTXO       │      │ indexer de eventos │   │ RPC + Geyser/WS    │              │
+        └─────────┬──────────┘      └─────────┬──────────┘   └─────────┬──────────┘              │
+                  ▼                           ▼                        ▼                          │
+             Bitcoin network             Ethereum (+L2)            Solana mainnet-beta            │
+                                                                                                  │
+┌───────────────────────────── PLANO DE DADOS E PLATAFORMA ──────────────────────────────────────┐
+│  DATABASE  PostgreSQL 16 (eventos + projeções, outbox)      CACHE  Redis 7 (sessões, nonces,   │
+│            réplica de leitura, PITR                                 rate-limit, cotações TTL)   │
+│  EVENT BUS NATS JetStream (deal.*, price.*, chain.*, risk.*, audit.*)                           │
+│  AUDIT LOG tabela append-only com hash chain → arquivo WORM em object storage (S3 Object Lock) │
+│  MONITORING OpenTelemetry → Prometheus / Grafana / Loki / Tempo → Alertmanager → on-call        │
+│  KEEPER (chave em KMS, política restrita)   EXPIRY SCHEDULER   INDEXERS on-chain (por cadeia)  │
+└────────────────────────────────────────────────────────────────────────────────────────────────┘</code></pre>
+
+  <h3>Fluxo principal (sequência resumida)</h3>
+<pre><code>Vendedor → API: POST /deals (termos)                          OTC: DRAFT → CREATED
+Participantes → API: conectar (challenge/response)            OTC: WALLETS_CONNECTED (Risk: carteira OK)
+OTC → AssetRegistry/Adapters: verificar contrato/mint, saldo  OTC: ASSETS_VERIFIED
+OTC → Price → Liquidity → Router: cotação, sanidade, rota      OTC: LIQUIDITY_VERIFIED (termos congelados, dealHash)
+Keeper → Adapters: register(dealCommitment) em cada escrow     evento chain.deal.registered
+Depositantes → carteira → Escrow: deposit(dealId, leg)        indexer → evento chain.deposit.final
+Todos → carteira: assinar envelope(dealHash)                   Signature Engine valida; k/N
+N-ésima assinatura + todas as legs financiadas                OTC: FULLY_SIGNED → SETTLEMENT_VALIDATION
+Settlement Engine: reverificações 7.3, lock                   OTC: SETTLING
+Keeper → Escrow.settle(assinaturas, raízes irmãs [, preimage]) contrato recalcula hash, verifica N/N, libera + fee
+Indexers: finalidade por leg                                   OTC: SETTLED
+(expiração em qualquer ponto anterior)                          OTC: EXPIRED → refund permissionless → REFUNDED</code></pre>
+</section>
+
+<!-- ===================================================== 3. COMPONENTES -->
+<section id="s3">
+  <h2><span class="n">03</span>Componentes</h2>
+  <div class="tbl"><table>
+    <tr><th>Componente</th><th>Responsabilidade</th><th>Não faz</th><th>Tecnologia</th><th>Processo</th></tr>
+    <tr><td><b>Frontend</b></td><td>Criar Deal, conectar carteira, revisar termos, depositar, assinar, acompanhar status, comprovantes. Constrói transações de depósito a partir de <em>intents</em> retornados pela API e as envia à carteira do usuário.</td><td>Calcular hash, preço, rota ou validar assinaturas (só exibe o que a API retorna e o que a carteira mostra).</td><td>Next.js + TypeScript; wagmi/viem; @solana/wallet-adapter; sats-connect (Xverse/Unisat/Leather). Self-hosted, sem CDN de layout.</td><td><code>web</code></td></tr>
+    <tr><td><b>API (BFF)</b></td><td>Autenticação por carteira, sessão, RBAC, rate limiting, idempotência, validação de schema, tradução REST↔comandos do OTC Engine, streaming de eventos (SSE/WS) por Deal.</td><td>Lógica de negócio de Deal.</td><td>NestJS (Node 22 LTS), zod/JSON-Schema, OpenAPI 3.1.</td><td><code>api</code></td></tr>
+    <tr><td><b>OTC Engine</b></td><td>Aggregate <code>Deal</code> event-sourced; máquina de estados; revisões; orquestração de verificações; expiração síncrona em toda transição; publicação de eventos.</td><td>Qualquer chamada direta a RPC de blockchain; qualquer código específico de cadeia.</td><td>TypeScript, módulo puro (sem I/O de cadeia), <code>bigint</code>.</td><td><code>engine-worker</code></td></tr>
+    <tr><td><b>Asset Registry</b></td><td>Registro canônico off-chain (assinado, four-eyes), resolução de <code>assetId</code>, políticas de verificação por padrão de token; espelho da allowlist on-chain.</td><td>Aceitar ativo por símbolo.</td><td>Postgres + serviço; allowlist on-chain nos escrows.</td><td><code>engine-worker</code></td></tr>
+    <tr><td><b>Price Engine</b></td><td>Coleta de fontes, normalização, agregação (mediana ponderada), detecção de anomalia, snapshots persistidos com TTL, cálculo de USD/deságio/fee/slippage/líquido.</td><td>Decidir se a Deal avança (só reporta).</td><td>Coletores por fonte com circuit breaker; Redis para cotações quentes.</td><td><code>engine-worker</code></td></tr>
+    <tr><td><b>Liquidity Engine</b></td><td>Snapshot de profundidade por venue (order books CEX públicos, pools/agregadores DEX), slippage estimado para o tamanho, score de venue; em rotas P2P, validação de saldo/escrow.</td><td>Executar ordens (v1).</td><td>Coletores por venue; normalização em USD.</td><td><code>engine-worker</code></td></tr>
+    <tr><td><b>Router Engine</b></td><td>Enumerar rotas viáveis (cadeia de escrow por leg, modo, ordem de funding, timelocks), aplicar restrição de esquemas de assinatura (R4), pontuar (custo, tempo, risco) e produzir <code>Route</code> + <code>routeHash</code>.</td><td>Escolher venues de mercado (v1).</td><td>Motor de regras determinístico; mesma entrada ⇒ mesma rota.</td><td><code>engine-worker</code></td></tr>
+    <tr><td><b>Risk Engine</b></td><td>Verificação de carteira (idade, listas, interação com contratos maliciosos), limites por Deal/carteira/período, anomalia de preço (consome Price), monitoramento de transações, decisão <code>ALLOW / REVIEW / BLOCK</code>, emissão de <code>RiskEvent</code>.</td><td>Liquidar ou desbloquear.</td><td>Regras + provedores externos de screening (a congelar).</td><td><code>engine-worker</code></td></tr>
+    <tr><td><b>Signature Engine</b></td><td>Serialização canônica dos termos, cálculo do <code>dealHash</code> e raízes, emissão de nonces, construção de envelopes por esquema (EIP-712, Solana off-chain message, mensagem ECDSA BTC), verificação off-chain, contagem k/N por revisão.</td><td>Guardar chave privada de qualquer natureza.</td><td>Biblioteca compartilhada (mesma usada nos testes de equivalência com os contratos).</td><td><code>engine-worker</code></td></tr>
+    <tr><td><b>Settlement Engine</b></td><td>Reverificações 7.3, lock por Deal, sequência de legs por rota, construção de chamadas <code>settle/refund</code> via adaptadores, acompanhamento até finalidade, reconciliação on-chain, transição SETTLED/BLOCKED/REFUNDED.</td><td>Assinar transações de usuário; escolher rota alternativa.</td><td>Orquestrador com saga persistida (por leg).</td><td><code>engine-worker</code> + <code>keeper</code></td></tr>
+    <tr><td><b>Blockchain Adapters</b></td><td>Implementações de <code>SettlementAdapter</code> por cadeia: verificação de ativo, saldo, construção de intents de depósito, register/settle/refund, leitura de estado, estimativa de custo, política de finalidade, indexação de eventos.</td><td>Conhecer a máquina de estados da Deal.</td><td>BTC: bitcoind + electrs, miniscript; EVM: viem + Foundry; Solana: @solana/web3.js + Anchor.</td><td><code>adapter-worker-*</code>, <code>indexer-*</code></td></tr>
+    <tr><td><b>Database</b></td><td>Sistema de registro: eventos de Deal, projeções, entidades, outbox, auditoria.</td><td>—</td><td>PostgreSQL 16, PITR, réplica de leitura.</td><td>gerenciado</td></tr>
+    <tr><td><b>Cache</b></td><td>Sessões, nonces de desafio, rate limiting, cotações quentes, locks curtos.</td><td>Ser fonte de verdade de nada.</td><td>Redis 7 (persistência AOF apenas para nonces).</td><td>gerenciado</td></tr>
+    <tr><td><b>Event Bus</b></td><td>Entrega at-least-once de eventos de domínio e de cadeia entre processos; replay para reconstrução.</td><td>Substituir o outbox como fonte de verdade.</td><td>NATS JetStream (streams por domínio, consumidores duráveis).</td><td>cluster 3 nós</td></tr>
+    <tr><td><b>Monitoring</b></td><td>Métricas, logs, traces, alertas, dashboards, monitores on-chain e de liquidação.</td><td>—</td><td>OpenTelemetry, Prometheus, Grafana, Loki, Tempo, Alertmanager.</td><td>plataforma</td></tr>
+    <tr><td><b>Audit Log</b></td><td>Registro append-only encadeado por hash de todo evento relevante; exportação WORM; verificação offline de hash/assinaturas.</td><td>Ser editável.</td><td>Tabela Postgres com trigger anti-update/delete + arquivo diário em S3 Object Lock.</td><td><code>audit-exporter</code></td></tr>
+  </table></div>
+</section>
+
+<!-- ===================================================== 4. INTERFACES -->
+<section id="s4">
+  <h2><span class="n">04</span>Interfaces entre componentes</h2>
+  <p>Contratos de interface (assinaturas de porta). Não são implementação: definem o que cada módulo expõe e consome. Tipos numéricos monetários são sempre <code>bigint</code> em unidades base.</p>
+
+  <h3>4.1 API → OTC Engine (comandos)</h3>
+<pre><code>CreateDeal(actor, terms: DealTermsInput, expiresInSec, idempotencyKey) → DealId
+ConnectWallet(dealId, role, address, chain, proof: ChallengeSignature) → ParticipantStatus
+RequestApprovalEnvelope(dealId, role) → Envelope            // inclui nonce, dealHash, campos legíveis
+SubmitApproval(dealId, role, signature) → SignatureCount     // k/N
+CancelDeal(dealId, actor)                                    // só antes de FULLY_SIGNED
+GetDeal(dealId, actor) → DealView                            // projeção filtrada por papel
+SubscribeDeal(dealId, actor) → Stream&lt;DealEvent&gt;
+// backoffice
+BlockDeal(dealId, operator, reason) ; TriggerRefund(dealId, operator) ; CloseBlocked(dealId, operator)</code></pre>
+
+  <h3>4.2 OTC Engine → engines internos (consultas síncronas, determinísticas)</h3>
+<pre><code>AssetRegistry.resolve(assetRef) → CanonicalAsset | NotCanonical
+AssetRegistry.verifyOnChain(asset, adapter) → AssetVerification{ok, evidence, checkedAt}
+PriceEngine.quote(legs[], sizeUsdHint) → PriceSnapshot{referencePrices[], sources[], dispersion, anomaly, validUntil}
+PriceEngine.computeEconomics(legs[], snapshot, feePolicy, discount) → Economics{usdValues, discount, fee, maxSlippageBps, netAmounts, networkCosts}
+LiquidityEngine.assess(legs[], sizeUsd) → LiquidityAssessment{sufficient, depth, slippageEst, venues[], risk}
+RouterEngine.plan(deal, participantsKeySchemes, adaptersCaps) → RouteCandidates[] ; RouterEngine.select(candidates) → Route
+RouterEngine.revalidate(route, now) → Viable | NotViable(reason)
+RiskEngine.assessWallet(address, chain) → {level, findings[]}
+RiskEngine.assessDeal(deal) → ALLOW | REVIEW | BLOCK
+SignatureEngine.canonicalize(terms) → CanonicalTerms ; .hash(canonical) → DealHash + Roots
+SignatureEngine.issueNonce(dealId, revision, participant) → Nonce
+SignatureEngine.buildEnvelope(scheme, dealHash, participant, nonce, summary) → Envelope
+SignatureEngine.verify(envelope, signature, expectedSigner) → Valid | Invalid(reason)</code></pre>
+
+  <h3>4.3 Settlement Engine ↔ Blockchain Adapters (porta <code>SettlementAdapter</code>)</h3>
+<pre><code>interface SettlementAdapter {
+  readonly chain: ChainRef                        // {network, chainId}
+  capabilities(): AdapterCapabilities             // {escrowNN, htlc, verifiableSigSchemes[], nativeAsset, tokenStandards[], finality}
+  verifyAsset(asset: CanonicalAsset): Promise&lt;AssetVerification&gt;
+  getBalance(address, asset): Promise&lt;bigint&gt;
+  estimateCost(op: 'deposit'|'register'|'settle'|'refund', ctx): Promise&lt;NetworkCost&gt;
+  buildRegisterCall(commitment: DealCommitment): UnsignedCall          // permissionless, keeper
+  buildDepositIntent(deal, leg, depositor): DepositIntent              // assinado pela carteira do usuário
+  buildSettleCall(deal, sigs: SignatureSet, roots: SiblingRoots, extra?: {preimage?}): UnsignedCall
+  buildRefundCall(deal, leg): UnsignedCall                              // permissionless
+  submit(call: SignedCall): Promise&lt;TxRef&gt;
+  getDealState(dealId): Promise&lt;OnChainDealState&gt;                      // REGISTERED|FUNDED|SETTLED|REFUNDED|NONE
+  watch(txRef): AsyncIterable&lt;TxStatus&gt;                                 // pending → included → final | reverted
+  finalityPolicy(): FinalityPolicy                                      // confirmações/commitment por tipo de op
+}</code></pre>
+
+  <h3>4.4 Eventos (NATS JetStream) — assunto, produtor, consumidores</h3>
+  <div class="tbl"><table>
+    <tr><th>Assunto</th><th>Produtor</th><th>Consumidores</th><th>Conteúdo mínimo</th></tr>
+    <tr><td><code>deal.state.changed</code></td><td>OTC Engine (via outbox)</td><td>API (stream para UI), Notifier, Audit, Monitoring</td><td>dealId, revision, from, to, at, cause</td></tr>
+    <tr><td><code>deal.revision.created</code></td><td>OTC Engine</td><td>Signature Engine (novos nonces), Notifier, Keeper (re-register)</td><td>dealId, revision, dealHash, diff resumido</td></tr>
+    <tr><td><code>deal.signature.accepted</code> / <code>.rejected</code></td><td>Signature Engine</td><td>OTC Engine, API, Audit, Risk</td><td>dealId, revision, role, count k/N, motivo</td></tr>
+    <tr><td><code>chain.{btc|evm|sol}.deal.registered / deposit.seen / deposit.final / settled / refunded / reverted</code></td><td>Indexers</td><td>Settlement Engine, OTC Engine, Monitoring</td><td>dealId, leg, txRef, confirmações, bloco/slot</td></tr>
+    <tr><td><code>price.snapshot.created</code> / <code>price.anomaly</code></td><td>Price Engine</td><td>Risk Engine, Monitoring</td><td>assetIds, mediana, dispersão, fontes</td></tr>
+    <tr><td><code>risk.event</code></td><td>Risk Engine</td><td>OTC Engine (BLOCK), Audit, Alerting</td><td>dealId?, wallet?, severidade, regra</td></tr>
+    <tr><td><code>settlement.leg.updated</code></td><td>Settlement Engine</td><td>OTC Engine, API, Monitoring</td><td>dealId, legIndex, subestado, txRef</td></tr>
+    <tr><td><code>audit.event</code></td><td>Todos (via outbox)</td><td>Audit Log writer/exporter</td><td>envelope canônico (Seção 7.9)</td></tr>
+  </table></div>
+  <p>Regras: (1) todo evento nasce na mesma transação Postgres do estado que o gerou (outbox); (2) consumidores são idempotentes por <code>eventId</code>; (3) o OTC Engine é o único produtor de <code>deal.state.changed</code>.</p>
+
+  <h3>4.5 Contratos on-chain ↔ Keeper/Indexers</h3>
+<pre><code>EVM DealManager:  register(commitment) · deposit(dealId, legIdx) · settle(dealId, sigs[], siblingRoots, pricingHash, routeHash [, preimage])
+                  refund(dealId, legIdx) · events: DealRegistered, Deposited, Settled, Refunded, FeeCollected, Paused
+Solana program:   register · deposit · settle (com ix Ed25519/Secp256k1 precedentes) · refund · eventos via logs/CPI events
+Bitcoin:          sem contrato; HTLC output (miniscript); "eventos" = UTXO visto / gasto (claim revela preimage) / timelock expirado</code></pre>
+</section>
+
+<!-- ===================================================== 5. DATA MODEL -->
+<section id="s5">
+  <h2><span class="n">05</span>Data model (conceitual)</h2>
+  <p>Postgres. Convenções: PK <code>id UUIDv7</code>; timestamps <code>timestamptz</code> UTC; quantias <code>NUMERIC(78,0)</code> (unidades base); endereços normalizados (EVM lowercase+checksum armazenado; Solana base58; BTC bech32 canônico). A Deal é event-sourced: <code>deal_event</code> é a verdade, <code>deal</code> é projeção.</p>
+
+  <div class="tbl"><table>
+    <tr><th>Entidade</th><th>Campos principais</th><th>Relacionamentos</th><th>Índices / restrições</th></tr>
+    <tr><td><b>User</b></td><td>id, created_at, email (opcional, verificado), notification_prefs, role (<code>participant</code> | <code>operator</code> | <code>auditor</code>), mfa_enabled (operadores)</td><td>1:N Wallet</td><td>UNIQUE(email) parcial; operadores exigem mfa_enabled</td></tr>
+    <tr><td><b>Wallet</b></td><td>id, user_id, network, chain_id, address, key_scheme (<code>secp256k1</code>|<code>ed25519</code>), first_seen_at, risk_level, risk_checked_at</td><td>N:1 User; 1:N DealParticipant</td><td>UNIQUE(network, chain_id, address); INDEX(address)</td></tr>
+    <tr><td><b>Deal</b> (projeção)</td><td>id, revision, state, deal_hash, participants_root, legs_root, pricing_hash, route_hash, deal_nonce, required_signatures, valid_signatures, created_by_wallet_id, expires_at, price_valid_until, funded_legs, terms_json (canônico da revisão corrente), share_token (opaco), version (otimista)</td><td>1:N DealParticipant, Leg, Signature, Settlement, Fee, RiskEvent, DealEvent; N:1 Route, PriceSnapshot</td><td>INDEX(state, expires_at) — scheduler; UNIQUE(share_token); INDEX(created_by_wallet_id); CHECK(valid_signatures ≤ required_signatures)</td></tr>
+    <tr><td><b>DealEvent</b></td><td>id, deal_id, seq, type, payload_json, actor, at, prev_hash, hash</td><td>N:1 Deal</td><td>UNIQUE(deal_id, seq); append-only (trigger)</td></tr>
+    <tr><td><b>DealParticipant</b></td><td>id, deal_id, role (<code>SELLER</code>|<code>BUYER</code>|<code>PAYMASTER_1</code>|<code>PAYMASTER_2</code>), wallet_id, network, chain_id, address, key_scheme, connected_at, proof_signature, funding_required (bool), funding_status</td><td>N:1 Deal, N:1 Wallet</td><td>UNIQUE(deal_id, role); UNIQUE(deal_id, address) — mesmo endereço não ocupa dois papéis</td></tr>
+    <tr><td><b>Leg</b> (novo, derivado do PRD)</td><td>id, deal_id, index, asset_network_id, amount_base, from_participant_id, to_participant_id, escrow_chain, escrow_contract, mode (<code>ESCROW_NN</code>|<code>HTLC</code>), leg_hash, funding_tx_id, status</td><td>N:1 Deal, N:1 AssetNetwork</td><td>UNIQUE(deal_id, index)</td></tr>
+    <tr><td><b>Asset</b></td><td>id, code (<code>BTC</code>, <code>USDT</code>…), display_name, issuer, category (native|stablecoin|token)</td><td>1:N AssetNetwork</td><td>UNIQUE(code)</td></tr>
+    <tr><td><b>AssetNetwork</b></td><td>id, asset_id, network, chain_id, contract_or_mint (null para nativo), asset_identifier (CAIP-19), decimals, token_standard, expected_code_hash / mint_authority / freeze_authority, status (<code>active</code>|<code>suspended</code>|<code>deprecated</code>), verification_sources_json, approved_by_a, approved_by_b, registry_signature</td><td>N:1 Asset; 1:N Leg</td><td>UNIQUE(network, chain_id, contract_or_mint); UNIQUE(asset_identifier); INDEX(status)</td></tr>
+    <tr><td><b>PriceSnapshot</b></td><td>id, taken_at, valid_until, quotes_json [{source, asset_identifier, price_usd, at, weight}], reference_json, dispersion_bps, anomaly (bool), pricing_hash</td><td>1:N Deal (revisões)</td><td>INDEX(taken_at); UNIQUE(pricing_hash)</td></tr>
+    <tr><td><b>LiquiditySource</b></td><td>id, kind (<code>oracle</code>|<code>cex</code>|<code>dex_aggregator</code>|<code>dex_pool</code>), name, network?, config_json, weight, trust_score, breaker_state, last_ok_at, failures_24h</td><td>referenciada em PriceSnapshot.quotes e LiquidityAssessment</td><td>UNIQUE(name)</td></tr>
+    <tr><td><b>LiquidityAssessment</b> (novo)</td><td>id, deal_id, revision, sufficient, depth_json, slippage_bps_est, venues_json, assessed_at</td><td>N:1 Deal</td><td>UNIQUE(deal_id, revision)</td></tr>
+    <tr><td><b>Route</b></td><td>id, kind (<code>ESCROW_NN</code>|<code>HTLC</code>|<code>MARKET</code>), legs_plan_json (cadeia/contrato/ordem/timelocks por leg), settlement_mode, est_cost_json, est_time_sec, score, route_hash</td><td>1:N Deal</td><td>UNIQUE(route_hash)</td></tr>
+    <tr><td><b>Signature</b></td><td>id, deal_id, revision, participant_id, scheme, envelope_json, signature_bytes, nonce, signed_hash, received_at, verification_result, status (<code>valid</code>|<code>invalid</code>|<code>superseded</code>|<code>replaced</code>)</td><td>N:1 Deal, N:1 DealParticipant</td><td>UNIQUE(deal_id, revision, participant_id) WHERE status='valid' (índice parcial); INDEX(deal_id, revision)</td></tr>
+    <tr><td><b>Nonce</b> (novo)</td><td>id, kind (<code>challenge</code>|<code>approval</code>), value, deal_id?, revision?, participant_id?, issued_at, expires_at, consumed_at</td><td>—</td><td>UNIQUE(value); UNIQUE(kind, deal_id, revision, participant_id) parcial; INDEX(expires_at)</td></tr>
+    <tr><td><b>Settlement</b></td><td>id, deal_id, revision, status (<code>VALIDATING</code>|<code>EXECUTING</code>|<code>CONFIRMING</code>|<code>DONE</code>|<code>FAILED</code>|<code>REFUNDING</code>|<code>REFUNDED</code>), lock_token, started_at, finished_at, legs_status_json, failure_reason</td><td>N:1 Deal; 1:N Transaction</td><td>UNIQUE(deal_id) — <b>uma liquidação por Deal, jamais duas</b>; INDEX(status, started_at)</td></tr>
+    <tr><td><b>Transaction</b></td><td>id, settlement_id?, deal_id, leg_index?, chain, tx_ref (hash/signature/txid:vout), kind (<code>register</code>|<code>deposit</code>|<code>settle</code>|<code>refund</code>|<code>htlc_lock</code>|<code>htlc_claim</code>), submitted_by (<code>user</code>|<code>keeper</code>|<code>external</code>), status, block_ref, confirmations, final_at, raw_json</td><td>N:1 Deal, N:1 Settlement</td><td>UNIQUE(chain, tx_ref); INDEX(deal_id, kind); INDEX(status) parcial para pendentes</td></tr>
+    <tr><td><b>Fee</b></td><td>id, deal_id, revision, kind (<code>platform</code>|<code>paymaster_share</code>), asset_network_id, amount_base, bps, recipient_address, collected_tx_id</td><td>N:1 Deal</td><td>INDEX(deal_id)</td></tr>
+    <tr><td><b>RiskEvent</b></td><td>id, deal_id?, wallet_id?, rule, severity, decision (<code>ALLOW</code>|<code>REVIEW</code>|<code>BLOCK</code>), evidence_json, at, reviewed_by?, review_note</td><td>N:1 Deal / Wallet</td><td>INDEX(deal_id); INDEX(severity, at)</td></tr>
+    <tr><td><b>AuditEvent</b></td><td>id, seq (global), at, actor_type, actor_id, category, deal_id?, payload_hash, payload_json, prev_hash, hash, exported_batch_id</td><td>—</td><td>UNIQUE(seq); append-only; INDEX(deal_id, seq)</td></tr>
+    <tr><td><b>Outbox</b></td><td>id, aggregate, aggregate_id, subject, payload_json, created_at, published_at</td><td>—</td><td>INDEX(published_at) parcial WHERE NULL</td></tr>
+    <tr><td><b>IdempotencyKey</b></td><td>key, actor_id, request_hash, response_json, created_at</td><td>—</td><td>PK(key, actor_id); TTL 24 h</td></tr>
+  </table></div>
+
+  <h3>5.1 Regras de integridade que o banco impõe (não apenas a aplicação)</h3>
+  <ul>
+    <li><code>deal_event</code> e <code>audit_event</code>: triggers que rejeitam UPDATE/DELETE; o papel de aplicação não tem privilégio de TRUNCATE.</li>
+    <li><code>settlement.deal_id</code> UNIQUE: a segunda tentativa de criar uma liquidação para a mesma Deal falha na base — primeira linha de defesa contra dupla liquidação.</li>
+    <li>Assinatura válida por (deal, revisão, participante) é única via índice parcial: reassinatura marca a anterior como <code>replaced</code> na mesma transação.</li>
+    <li><code>deal.version</code> para lock otimista + <code>SELECT … FOR UPDATE</code> na linha da Deal em toda transição (RNF-002).</li>
+    <li>Quantias nunca em <code>float</code>/<code>double</code>; tipo <code>NUMERIC(78,0)</code> com CHECK ≥ 0.</li>
+  </ul>
+</section>
+
+<!-- ===================================================== 6. STATE MACHINE -->
+<section id="s6">
+  <h2><span class="n">06</span>State machine — visão de implementação</h2>
+  <p>Estados e transições são os da Seção 9 do PRD, sem alteração. Aqui: como o OTC Engine as executa.</p>
+
+  <h3>6.1 Mecânica</h3>
+  <ul>
+    <li>Transição = função pura <code>apply(state, event) → state'</code> sobre o aggregate reconstruído dos eventos; guardas avaliadas com <code>now</code> do backend (NTP verificado; deriva &gt; 2 s desliga transições sensíveis a tempo — FS-18).</li>
+    <li>Toda transição roda em uma transação: <code>FOR UPDATE</code> na Deal → checar expiração → checar guardas → gravar <code>deal_event</code> → atualizar projeção → gravar outbox → gravar audit. Tudo ou nada.</li>
+    <li>Expiração dupla: (a) síncrona em toda transição/assinatura; (b) <code>expiry-scheduler</code> varre <code>INDEX(state, expires_at)</code> a cada 5 s e emite <code>Expire</code>; a mesma transição é idempotente (segunda chegada é no-op).</li>
+    <li>Transições proibidas não existem como código: a tabela de transições é um mapa fechado; qualquer par (estado, evento) fora do mapa lança <code>IllegalTransition</code> e é auditado (CA-50).</li>
+  </ul>
+
+  <h3>6.2 Progresso interno em AWAITING_SIGNATURES (R1) — sem novos estados de Deal</h3>
+  <div class="tbl"><table>
+    <tr><th>Participante</th><th>Passos</th><th>Condição para contar</th></tr>
+    <tr><td>Depositante (Vendedor, Comprador)</td><td>1) carteira envia <code>deposit</code> ao escrow (ou lock HTLC) → 2) indexer confirma finalidade → 3) assina envelope</td><td>Assinatura só é aceita após <code>funding_status = FINAL</code> da sua leg (evita assinatura sem fundos e mantém "N/N ⇒ liquida")</td></tr>
+    <tr><td>Pay Master</td><td>Assina envelope</td><td>Sem pré-condição de funding</td></tr>
+  </table></div>
+  <p><b>Guarda de FULLY_SIGNED:</b> <code>valid_signatures == required_signatures ∧ ∀leg: funding_status == FINAL ∧ now &lt; expires_at</code>.</p>
+
+  <h3>6.3 Sub-estados do Settlement (entidade, não da Deal)</h3>
+<pre><code>VALIDATING ──ok──► EXECUTING ──txs enviadas──► CONFIRMING ──finalidade em todas as legs──► DONE   (Deal: SETTLED)
+    │                  │                          │
+    └──falha──────────►└──────────────────────────┴──► FAILED (Deal: BLOCKED) ──► REFUNDING ──► REFUNDED (Deal: REFUNDED)</code></pre>
+
+  <h3>6.4 Nova revisão (RF-007) — passo a passo</h3>
+  <ol>
+    <li>Evento <code>TermsChanged</code> (causa: edição, rota inviável, cotação vencida fora da banda).</li>
+    <li>Assinaturas da revisão N → <code>superseded</code>; nonces de aprovação da revisão N → consumidos/expirados.</li>
+    <li>Legs financiadas na revisão N: o escrow guarda depósitos por <code>(dealId, revision)</code>; o keeper chama <code>refundSuperseded(dealId, revisionN)</code> (permissionless; devolve ao depositante). Só após reembolso final a nova revisão abre funding. Alternativa mais barata (depósito "portável" entre revisões quando ativo/quantia/destino da leg não mudaram) fica como freeze item F-9.</li>
+    <li>Deal volta a <span class="state">ASSETS_VERIFIED</span>; reverificação de preço/liquidez/rota; novo <code>dealHash</code>; <code>register</code> da nova revisão on-chain; novos nonces.</li>
+  </ol>
+</section>
+
+<!-- ===================================================== 7. SECURITY MODEL -->
+<section id="s7">
+  <h2><span class="n">07</span>Security model</h2>
+
+  <h3>7.1 Authentication</h3>
+  <ul>
+    <li>Sem senha. Fluxo: <code>GET /auth/challenge?address&amp;chain</code> → mensagem com domínio, URI, nonce (Redis, TTL 5 min, uso único), <code>issuedAt</code>, <code>chainId</code>; carteira assina; <code>POST /auth/verify</code> valida no esquema da rede; emite access JWT (10 min, <code>sub = chain:address</code>, <code>kid</code> rotativo, assinado por chave em KMS) + refresh token opaco (7 dias, rotativo, revogável, armazenado com hash).</li>
+    <li>Operadores: mesmo fluxo + MFA TOTP/WebAuthn obrigatório + allowlist de endereços + IP allowlist opcional.</li>
+    <li>Sessão vinculada ao endereço: uma sessão só pode agir em Deals onde esse endereço é participante (ou papel operador).</li>
+  </ul>
+
+  <h3>7.2 Authorization (RBAC + ABAC)</h3>
+  <div class="tbl"><table>
+    <tr><th>Ação</th><th>Participante (papel na Deal)</th><th>Operador</th><th>Auditor</th><th>Keeper (máquina)</th></tr>
+    <tr><td>Criar Deal</td><td>Qualquer carteira autenticada</td><td>—</td><td>—</td><td>—</td></tr>
+    <tr><td>Ver Deal</td><td>Só se participante (via share_token + sessão)</td><td>Sim</td><td>Sim (somente leitura)</td><td>Leitura técnica</td></tr>
+    <tr><td>Editar termos</td><td>Criador, antes da 1ª assinatura da revisão; depois, edição = nova revisão</td><td>—</td><td>—</td><td>—</td></tr>
+    <tr><td>Conectar carteira / assinar</td><td>Só no próprio papel</td><td>—</td><td>—</td><td>—</td></tr>
+    <tr><td>Cancelar</td><td>Qualquer participante obrigatório, antes de FULLY_SIGNED (Q18-a assumido)</td><td>—</td><td>—</td><td>—</td></tr>
+    <tr><td>Bloquear / disparar refund / fechar BLOCKED</td><td>—</td><td>Sim, com MFA e motivo; auditado</td><td>—</td><td>Refund automático por expiração</td></tr>
+    <tr><td>Alterar Asset Registry</td><td>—</td><td>Dois operadores distintos (four-eyes)</td><td>—</td><td>—</td></tr>
+    <tr><td>Liquidar</td><td colspan="4"><b>Ninguém.</b> Liquidação é consequência do contrato com N/N; o keeper só transporta a chamada.</td></tr>
+  </table></div>
+
+  <h3>7.3 Wallet verification</h3>
+  <ul>
+    <li>Prova de controle: assinatura do desafio de login + assinatura de vinculação à Deal (<code>bindWallet(dealId, role, nonce)</code>), ambas verificadas no esquema da rede.</li>
+    <li>Screening (Risk Engine): idade do endereço, volume histórico, listas de sanção (provedor a congelar), interação com contratos/mints marcados, cluster de mixers. Resultado cacheado 24 h; recheck na SETTLEMENT_VALIDATION.</li>
+    <li>Formato/checksum/tipo de conta validados pelo adaptador (RS-022): EVM EIP-55; Solana chave na curva (rejeita PDA como participante); BTC tipo de script suportado.</li>
+  </ul>
+
+  <h3>7.4 Rate limiting</h3>
+  <div class="tbl"><table>
+    <tr><th>Camada</th><th>Chave</th><th>Limite inicial</th></tr>
+    <tr><td>Edge (Cloudflare)</td><td>IP / ASN</td><td>300 req/min; challenge em anomalia</td></tr>
+    <tr><td>API</td><td>IP, sessão, dealId, endpoint</td><td>Challenge: 10/min por IP; assinatura: 5/min por (deal, participante); criação de Deal: 20/h por carteira; leitura: 120/min por sessão</td></tr>
+    <tr><td>Interno</td><td>fonte de preço/liquidez, RPC por cadeia</td><td>Token bucket por fonte; circuit breaker abre após 5 falhas/60 s</td></tr>
+  </table></div>
+
+  <h3>7.5 Replay protection e nonce management</h3>
+  <ul>
+    <li>Dois tipos de nonce, ambos emitidos pelo backend, uso único, persistidos (tabela <code>nonce</code>) e espelhados no Redis para verificação rápida: <b>challenge</b> (login/bind, TTL 5 min) e <b>approval</b> (por (deal, revisão, participante), TTL = <code>expires_at</code>).</li>
+    <li>Envelope assinado contém domínio (<code>VerumOTC/1/prod</code>), <code>chainId</code>, <code>dealId</code>, <code>revision</code>, <code>role</code>, <code>signer</code>, <code>nonce</code>, <code>expiresAt</code>, <code>dealHash</code>: impossível reutilizar entre Deals, revisões, cadeias, ambientes ou papéis.</li>
+    <li>On-chain: <code>NonceManager</code> registra o nonce de aprovação consumido em <code>settle()</code>; um mesmo <code>(dealId, revision)</code> só liquida uma vez; <code>dealId</code> é único por contrato.</li>
+  </ul>
+
+  <h3>7.6 Idempotency</h3>
+  <ul>
+    <li>Todo POST/PUT exige <code>Idempotency-Key</code> (UUID). Chave + hash do corpo armazenados 24 h; repetição com o mesmo corpo devolve a resposta original; corpo diferente → 409.</li>
+    <li>Comandos internos carregam <code>commandId</code>; o aggregate rejeita comando já aplicado (lista em memória por Deal + <code>deal_event.payload.commandId</code>).</li>
+    <li>Envio de transação pelo keeper: antes de enviar, lê <code>getDealState</code> on-chain e <code>transaction</code> pendente; se já existe <code>settle</code> em voo para o par (deal, leg), não envia outra (FS-11/FS-12).</li>
+  </ul>
+
+  <h3>7.7 API security</h3>
+  <ul>
+    <li>TLS 1.3, HSTS, CSP estrita (sem CDN externa além de Google Fonts), CORS restrito ao domínio do frontend, cookies <code>Secure; HttpOnly; SameSite=Strict</code> para refresh.</li>
+    <li>Validação de schema em entrada e saída (OpenAPI 3.1 + zod); rejeição de campos desconhecidos; limites de tamanho de payload.</li>
+    <li>Segregação: API pública (participantes), API de backoffice (rede privada + VPN/Zero-Trust), API interna keeper/indexers (mTLS).</li>
+    <li>Respostas de erro sem detalhes internos; IDs opacos; <code>share_token</code> de 32 bytes aleatórios.</li>
+  </ul>
+
+  <h3>7.8 Secret management e key management</h3>
+  <div class="tbl"><table>
+    <tr><th>Segredo/chave</th><th>Onde vive</th><th>Quem usa</th><th>Poder máximo</th><th>Rotação</th></tr>
+    <tr><td>Chave do keeper (EVM, Solana)</td><td>KMS/HSM (nunca exportável); política: assinar apenas transações cujo destino é o contrato Verum e o seletor/instrução ∈ {register, settle, refund, refundSuperseded}</td><td><code>keeper</code></td><td>Relayar chamadas permissionless; nenhuma discricionariedade sobre destino/valor</td><td>Trimestral; multi-chave com allowlist no contrato (opcional)</td></tr>
+    <tr><td>Chave de assinatura de JWT</td><td>KMS</td><td><code>api</code></td><td>Emitir sessões</td><td>Mensal, <code>kid</code> rotativo</td></tr>
+    <tr><td>Chave de assinatura do Asset Registry</td><td>KMS; exige dois aprovadores</td><td>Operadores</td><td>Publicar entradas de registro</td><td>Anual</td></tr>
+    <tr><td>Guardian multisig (pausa) e Admin multisig (allowlist com timelock)</td><td>Hardware wallets de 3 pessoas (2-de-3)</td><td>Ops Verum</td><td>Pausar entradas; alterar allowlist com 24 h de atraso; <b>nunca sacar</b></td><td>Substituição de signatário via próprio multisig</td></tr>
+    <tr><td>Credenciais de fontes/RPC</td><td>Vault (ou secret manager da nuvem), injetadas em runtime</td><td>engines/adapters</td><td>Leitura de dados</td><td>Trimestral</td></tr>
+    <tr><td>DB, NATS, Redis</td><td>Vault, dinâmicas quando possível</td><td>serviços</td><td>Acesso por papel de menor privilégio</td><td>Automática</td></tr>
+  </table></div>
+  <p>Nenhum segredo em código, imagem de container, variável de ambiente em texto plano ou log. Scanner de segredos no CI.</p>
+
+  <h3>7.9 Audit logging</h3>
+  <ul>
+    <li>Evento canônico: <code>{seq, at, actorType, actorId, category, dealId?, payload, payloadHash, prevHash, hash}</code>; <code>hash = SHA256(prevHash ‖ payloadHash ‖ seq ‖ at)</code>.</li>
+    <li>Escrita na mesma transação do evento de domínio; exportação horária para S3 com Object Lock (WORM) + publicação diária do hash de cabeça em uma transação on-chain (Solana, custo desprezível) como âncora de integridade.</li>
+    <li>Verificador offline reconstrói cadeia, recalcula <code>dealHash</code> de cada revisão e reverifica assinaturas (RNF-011, CA-44).</li>
+  </ul>
+
+  <h3>7.10 WAF</h3>
+  <ul>
+    <li>Cloudflare WAF com regras gerenciadas OWASP + regras customizadas: bloquear payloads com padrões de seed phrase (12/24 palavras BIP-39) em qualquer campo — defesa contra phishing embutido e erro do usuário; bloquear métodos não usados; geoblock configurável.</li>
+    <li>Bot management no fluxo de challenge; proteção de origem (só aceita tráfego do edge).</li>
+  </ul>
+
+  <h3>7.11 Circuit breakers</h3>
+  <div class="tbl"><table>
+    <tr><th>Breaker</th><th>Abre quando</th><th>Efeito</th><th>Nunca afeta</th></tr>
+    <tr><td>Por fonte de preço/liquidez</td><td>5 falhas ou latência &gt; 3 s em 60 s; desvio sistemático vs mediana</td><td>Fonte excluída; se fontes válidas &lt; 3 → Deals não avançam</td><td>Reembolsos</td></tr>
+    <tr><td>Por RPC/cadeia</td><td>Erros consecutivos, lag de bloco &gt; limiar, reorg detectado</td><td>Adaptador em modo somente-leitura; Deals dessa cadeia param antes de SETTLING</td><td>Refund direto pelo usuário no contrato</td></tr>
+    <tr><td>Global "settlement halt"</td><td>Operador (MFA) ou alerta crítico (divergência estado interno × on-chain)</td><td>Nenhuma Deal entra em SETTLING; keeper não relaya <code>settle</code></td><td>Refund por expiração continua</td></tr>
+    <tr><td>On-chain pause (guardian)</td><td>Incidente de contrato</td><td>Sem register/deposit/settle</td><td>Refund (ADR-014)</td></tr>
+  </table></div>
+
+  <h3>7.12 Monitoring &amp; alerting de segurança</h3>
+  <ul>
+    <li>Alertas P1: tentativa de liquidação rejeitada pelo contrato; divergência entre <code>settlement</code> interno e estado on-chain; chave de keeper usada fora dos seletores permitidos (KMS audit); alteração de allowlist agendada; pausa acionada; falha de exportação de auditoria.</li>
+    <li>Alertas P2: pico de assinaturas inválidas; pico de challenges; fonte de preço rebaixada; Deal em SETTLING &gt; 2× tempo estimado.</li>
+  </ul>
+</section>
+
+<!-- ===================================================== 8. THREAT MODEL -->
+<section id="s8">
+  <h2><span class="n">08</span>Threat model (arquitetural)</h2>
+  <p>Complementa TM-01..18 do PRD com as ameaças que a arquitetura introduz ou resolve. Limites de confiança: usuário/carteira · edge · API · núcleo · adapters/keeper · contratos · fontes externas · operadores.</p>
+  <div class="tbl"><table>
+    <tr><th>ID</th><th>Ameaça</th><th>Limite de confiança</th><th>Controle arquitetural</th><th>Residual</th></tr>
+    <tr><td>TA-01</td><td>Backend registra on-chain termos diferentes dos exibidos/assinados</td><td>núcleo → contratos</td><td>Contrato recalcula <code>dealHash</code> a partir da leg que ele guarda + raízes irmãs; assinaturas só validam se os termos on-chain forem os assinados (Seção 11.5)</td><td>Baixo</td></tr>
+    <tr><td>TA-02</td><td>Frontend comprometido troca o <code>dealHash</code> no envelope</td><td>usuário ↔ frontend</td><td>Envelope EIP-712/Solana exibe campos legíveis (ativos, quantias, contraparte, expiração); contrato cruza campos legíveis com a leg armazenada; SRI e CSP no frontend</td><td>Médio (usuário que não lê a carteira)</td></tr>
+    <tr><td>TA-03</td><td>Keeper comprometido</td><td>adapters/keeper</td><td>Chave só relaya funções permissionless de efeito fixo; política KMS; contrato não distingue keeper de qualquer chamador</td><td>Baixo (DoS por não relayar; usuários chamam direto)</td></tr>
+    <tr><td>TA-04</td><td>Operador malicioso</td><td>operadores</td><td>Sem endpoint de liquidação; bloqueio só leva a refund; registry four-eyes; MFA; auditoria WORM com âncora on-chain</td><td>Baixo (DoS de Deals por bloqueio; detectável)</td></tr>
+    <tr><td>TA-05</td><td>Comprometimento do multisig guardian/admin</td><td>contratos</td><td>Pausa não retém fundos (refund vive); allowlist com timelock 24 h e monitor de agendamento; sem função de saque</td><td>Baixo</td></tr>
+    <tr><td>TA-06</td><td>Reorg em cadeia de escrow após "final"</td><td>contratos ↔ adapters</td><td>Políticas de finalidade conservadoras (Seção 10.3); indexers detectam reorg e emitem <code>reverted</code>; Deal → BLOCKED</td><td>Baixo</td></tr>
+    <tr><td>TA-07</td><td>HTLC: contraparte não reivindica e timelocks se cruzam</td><td>Bitcoin ↔ contrato</td><td>Timelock BTC &lt; timelock contrato com margem ≥ 2 h + finalidade; monitor de janelas; claim automático pelo frontend/keeper assim que preimage aparece on-chain</td><td>Médio (exige participantes/keeper online)</td></tr>
+    <tr><td>TA-08</td><td>Fonte de preço envenenada ou oráculo stale</td><td>fontes externas</td><td>Mediana ponderada ≥ 3 fontes, TTL por leitura, detecção de dispersão/salto, breaker por fonte; preço não é lido pelo contrato</td><td>Médio (colusão de maioria das fontes)</td></tr>
+    <tr><td>TA-09</td><td>Race entre expiração e settle</td><td>núcleo ↔ contratos</td><td>Contrato exige <code>block.timestamp &lt; expiresAt − margem</code>; off-chain exige margem de execução; em disputa, o contrato vence e o off-chain reconcilia</td><td>Baixo</td></tr>
+    <tr><td>TA-10</td><td>Perda do banco de dados</td><td>plataforma</td><td>Fundos on-chain com refund permissionless; reconstrução de estado a partir dos indexers + auditoria WORM (Seção 13)</td><td>Baixo</td></tr>
+    <tr><td>TA-11</td><td>Dependência de RPC único</td><td>adapters</td><td>≥ 2 provedores por cadeia + nó próprio para BTC; quorum de leitura para estados críticos</td><td>Baixo</td></tr>
+    <tr><td>TA-12</td><td>Token com hooks/extensões maliciosas (Token-2022 transfer hook, ERC-777)</td><td>contratos</td><td>Allowlist on-chain + verificação de extensões pelo adaptador (RA-021); escrow usa checks de saldo antes/depois</td><td>Baixo</td></tr>
+    <tr><td>TA-13</td><td>Vazamento de dados via logs/traces</td><td>plataforma</td><td>Redação de payloads sensíveis no OTel; assinaturas e envelopes nunca em log; acesso a Loki/Tempo por papel</td><td>Baixo</td></tr>
+  </table></div>
+</section>
+
+<!-- ===================================================== 9. API BOUNDARIES -->
+<section id="s9">
+  <h2><span class="n">09</span>API boundaries</h2>
+
+  <h3>9.1 API pública (frontend ↔ API) — REST + SSE</h3>
+  <div class="tbl"><table>
+    <tr><th>Método</th><th>Rota</th><th>Função</th><th>Auth</th></tr>
+    <tr><td>GET</td><td><code>/v1/auth/challenge</code></td><td>Emite desafio para endereço/cadeia</td><td>—</td></tr>
+    <tr><td>POST</td><td><code>/v1/auth/verify</code></td><td>Valida assinatura do desafio; emite sessão</td><td>—</td></tr>
+    <tr><td>POST</td><td><code>/v1/auth/refresh</code> · <code>/logout</code></td><td>Rotação/revogação</td><td>refresh</td></tr>
+    <tr><td>GET</td><td><code>/v1/assets</code></td><td>Registro canônico ativo (por rede)</td><td>sessão</td></tr>
+    <tr><td>POST</td><td><code>/v1/deals</code></td><td>Cria Deal (DRAFT→CREATED)</td><td>sessão + Idempotency-Key</td></tr>
+    <tr><td>GET</td><td><code>/v1/deals/{id}</code></td><td>Projeção da Deal filtrada por papel</td><td>sessão participante</td></tr>
+    <tr><td>GET</td><td><code>/v1/deals/{id}/events</code> (SSE)</td><td>Stream de estado, k/N, legs</td><td>sessão participante</td></tr>
+    <tr><td>POST</td><td><code>/v1/deals/{id}/participants/{role}/bind</code></td><td>Vincula carteira ao papel (prova de controle)</td><td>sessão</td></tr>
+    <tr><td>PATCH</td><td><code>/v1/deals/{id}/terms</code></td><td>Edita termos → nova revisão</td><td>criador</td></tr>
+    <tr><td>GET</td><td><code>/v1/deals/{id}/legs/{i}/deposit-intent</code></td><td>Intent de depósito para a carteira assinar (unsigned tx / HTLC output)</td><td>depositante</td></tr>
+    <tr><td>POST</td><td><code>/v1/deals/{id}/legs/{i}/deposit-tx</code></td><td>Informa txRef enviado (o indexer confirma; opcional)</td><td>depositante</td></tr>
+    <tr><td>GET</td><td><code>/v1/deals/{id}/approval-envelope</code></td><td>Envelope tipado + nonce para assinar</td><td>participante</td></tr>
+    <tr><td>POST</td><td><code>/v1/deals/{id}/approvals</code></td><td>Submete assinatura; retorna k/N</td><td>participante</td></tr>
+    <tr><td>POST</td><td><code>/v1/deals/{id}/cancel</code></td><td>Cancela (pré-FULLY_SIGNED)</td><td>participante obrigatório</td></tr>
+    <tr><td>POST</td><td><code>/v1/deals/{id}/htlc/preimage</code></td><td>Vendedor BTC entrega preimage após FULLY_SIGNED (ou chama settle direto)</td><td>vendedor</td></tr>
+    <tr><td>GET</td><td><code>/v1/deals/{id}/receipt</code></td><td>Comprovante com hashes e verificação</td><td>participante</td></tr>
+  </table></div>
+
+  <h3>9.2 API de backoffice (rede privada)</h3>
+  <p><code>/ops/deals</code> (listar/inspecionar), <code>/ops/deals/{id}/block</code>, <code>/ops/deals/{id}/refund</code>, <code>/ops/deals/{id}/close</code>, <code>/ops/registry/assets</code> (propor/aprovar), <code>/ops/risk/events</code>, <code>/ops/breakers</code> (ver/abrir/fechar), <code>/ops/audit/verify</code>. Todos com MFA, motivo obrigatório e auditoria.</p>
+
+  <h3>9.3 Fronteiras internas</h3>
+  <ul>
+    <li><b>API → OTC Engine:</b> comandos por NATS request-reply (ou in-process em dev). A API nunca escreve nas tabelas de Deal.</li>
+    <li><b>OTC Engine → engines:</b> chamadas síncronas em processo, puras/determinísticas, com timeout; resultados persistidos como evidência (snapshots, assessments).</li>
+    <li><b>Settlement Engine → Adapters:</b> porta <code>SettlementAdapter</code>; adapters rodam em processos próprios e expõem a porta via NATS (isolamento de falhas de RPC).</li>
+    <li><b>Indexers → núcleo:</b> apenas eventos <code>chain.*</code>; nunca comandos.</li>
+    <li><b>Keeper:</b> consome <code>settlement.leg.updated</code> e <code>deal.state.changed</code>; só conhece <code>UnsignedCall</code>s que os adapters constroem; assina via KMS.</li>
+  </ul>
+</section>
+
+<!-- ===================================================== 10. ADAPTERS -->
+<section id="s10">
+  <h2><span class="n">10</span>Blockchain adapter design</h2>
+
+  <h3>10.1 Princípio</h3>
+  <p>O OTC Engine conhece apenas <code>ChainRef</code>, <code>CanonicalAsset</code>, <code>Leg</code>, <code>Route</code> e a porta <code>SettlementAdapter</code>. Tudo o que é específico (formatos de endereço, construção de transação, ABI/IDL, scripts, finalidade, RPC) vive no adaptador. Um novo adaptador é registrado por <code>ChainRef</code> em um <code>AdapterRegistry</code>; o Router consulta <code>capabilities()</code> para saber o que cada cadeia pode fazer.</p>
+
+  <h3>10.2 Implementações</h3>
+  <div class="tbl"><table>
+    <tr><th></th><th>BitcoinSettlementAdapter</th><th>EvmSettlementAdapter</th><th>SolanaSettlementAdapter</th></tr>
+    <tr><td>Escrow</td><td>HTLC output (miniscript: <code>or(and(pk(receiver), sha256(H)), and(pk(sender), older(T)))</code>), P2WSH/P2TR script-path</td><td>Contrato <code>VerumOtcEscrow v1</code> (Solidity, Foundry)</td><td>Programa Anchor <code>verum_otc</code> com PDAs por Deal e cofres por leg</td></tr>
+    <tr><td>Verifica assinaturas de aprovação</td><td>Não (sem contratos). N/N garantido indiretamente via hash-lock (11.6)</td><td>secp256k1 nativo (<code>ecrecover</code>); Ed25519 por biblioteca on-chain (custo alto em L1 — restringe rota; ver 10.4)</td><td>Ed25519 e secp256k1 via programas nativos + introspecção de instruções</td></tr>
+    <tr><td>Ativos v1</td><td>BTC</td><td>ETH, USDT, USDC (Ethereum mainnet)</td><td>SOL, USDT, USDC (SPL)</td></tr>
+    <tr><td>Verificação de ativo</td><td>Rede/cluster, tipo de script</td><td>Bytecode hash, proxy/implementação, decimals/symbol, ausência de ERC-777 hooks</td><td>Mint, autoridades, decimals, programa (SPL/Token-2022), extensões</td></tr>
+    <tr><td>Depósito (intent)</td><td>PSBT com output HTLC de valor exato</td><td>tx <code>deposit(dealId, leg)</code> com <code>approve</code>/<code>permit</code> prévio para ERC-20; ETH via <code>msg.value</code></td><td>ix <code>deposit</code> com transfer para cofre PDA (SOL ou SPL)</td></tr>
+    <tr><td>Settle</td><td>Claim tx gastando HTLC com preimage (carteira do recebedor ou keeper com chave-de-claim?) → ver 11.6: o recebedor assina o claim</td><td><code>settle(dealId, sigs[], roots, pricingHash, routeHash [, preimage])</code></td><td>ix <code>settle</code> precedida das ix de verificação de assinatura</td></tr>
+    <tr><td>Refund</td><td>Tx gastando HTLC pelo caminho de timelock (sender)</td><td><code>refund(dealId, leg)</code> permissionless após <code>expiresAt</code> (ou superseded/cancelled)</td><td>ix <code>refund</code> idem</td></tr>
+    <tr><td>Leitura/indexação</td><td>bitcoind próprio + electrs; watch de scriptPubKey do HTLC; detecção de gasto e extração de preimage</td><td>Logs de eventos via WS + poll; 2 provedores + reorg tracking</td><td>Geyser/WS <code>logsSubscribe</code> + poll <code>getSignaturesForAddress</code>; commitment <code>finalized</code></td></tr>
+    <tr><td>Custo</td><td>Estimativa por vbytes × feerate (mempool)</td><td>EIP-1559 base+priority</td><td>Lamports + prioridade</td></tr>
+  </table></div>
+
+  <h3>10.3 Política de finalidade (valores propostos — freeze F-6)</h3>
+  <div class="tbl"><table>
+    <tr><th>Cadeia</th><th>Depósito / lock considerado FINAL</th><th>Settle / refund considerado FINAL</th><th>Tempo típico</th></tr>
+    <tr><td>Bitcoin</td><td>3 confirmações (6 para valor &gt; limiar USD configurável)</td><td>3 confirmações</td><td>~30 min (alta variância)</td></tr>
+    <tr><td>Ethereum</td><td>Bloco <em>finalized</em> (≈ 2 epochs)</td><td><em>finalized</em></td><td>~13–15 min</td></tr>
+    <tr><td>Solana</td><td>commitment <em>finalized</em></td><td><em>finalized</em></td><td>~15–30 s</td></tr>
+  </table></div>
+
+  <h3>10.4 Matriz de verificabilidade de assinaturas (restrição de rota — R4)</h3>
+  <div class="tbl"><table>
+    <tr><th>Signatário com chave…</th><th>Escrow em Ethereum</th><th>Escrow em Solana</th><th>Leg em Bitcoin (HTLC)</th></tr>
+    <tr><td>secp256k1 (EVM ou BTC-ECDSA)</td><td>Nativo (<code>ecrecover</code>)</td><td>Nativo (programa Secp256k1)</td><td>Indireto (hash-lock)</td></tr>
+    <tr><td>Ed25519 (Solana)</td><td>Biblioteca on-chain (~0.5–1 M gas) — <b>desabilitado em L1 na v1</b>; viável em L2</td><td>Nativo (programa Ed25519)</td><td>Indireto (hash-lock)</td></tr>
+  </table></div>
+  <p>Consequência prática v1: uma Deal com participante Solana-keyed e leg em Ethereum L1 não tem rota viável de escrow em Ethereum; o Router tentará colocar o escrow N/N na cadeia que verifica todas as chaves (Solana) e a leg ETH… não existe leg ETH em escrow Solana. Logo, <b>na v1, Deals com escrow em Ethereum L1 exigem que todos os N participantes tenham chave secp256k1</b>. Isso é uma limitação declarada (freeze F-7), resolvível com L2 ou com o verificador Ed25519 on-chain.</p>
+
+  <h3>10.5 Isolamento e resiliência</h3>
+  <ul>
+    <li>Cada adaptador é um processo com seu próprio breaker, seus RPCs e seu indexer; falha de um não afeta os outros.</li>
+    <li>Leituras críticas (estado da Deal on-chain antes de settle) exigem concordância de 2 provedores ou do nó próprio.</li>
+    <li>Adapters são <em>stateless</em> quanto à Deal; tudo o que persistem são cursores de indexação (bloco/slot/altura) em Postgres.</li>
+    <li>Conformance suite: um mesmo conjunto de testes de contrato de interface roda contra os três adaptadores em nós locais (Seção 14).</li>
+  </ul>
+</section>
+
+<!-- ===================================================== 11. CONTRATOS -->
+<section id="s11">
+  <h2><span class="n">11</span>Smart-contract module design e Deal Hash</h2>
+
+  <h3>11.1 Divisão ON-CHAIN / OFF-CHAIN por módulo</h3>
+  <div class="tbl"><table>
+    <tr><th>Módulo</th><th>ON-CHAIN (EVM / Solana)</th><th>OFF-CHAIN (backend)</th><th>Bitcoin</th></tr>
+    <tr><td><b>DealManager</b></td><td><span class="tag on">on-chain</span> Registro de <em>commitment</em> por Deal: <code>dealId</code>, <code>revision</code>, participantes (chave + esquema + papel), <code>expiresAt</code>, legs locais (ativo, quantia, from, to), status (<code>REGISTERED → FUNDED → SETTLED | REFUNDED | SUPERSEDED</code>). Único por <code>dealId</code>.</td><td><span class="tag off">off-chain</span> Aggregate completo, máquina de estados, revisões, orquestração, projeções, notificações.</td><td>Só off-chain; o "registro" é o script HTLC derivável dos termos.</td></tr>
+    <tr><td><b>Escrow</b></td><td><span class="tag on">on-chain</span> Cofres por (dealId, leg); <code>deposit</code> de valor exato; libera apenas via <code>settle</code>; devolve via <code>refund</code>.</td><td>Construção de intents; acompanhamento.</td><td>HTLC output.</td></tr>
+    <tr><td><b>SignatureValidator</b></td><td><span class="tag on">on-chain</span> Biblioteca: EIP-712 + <code>ecrecover</code> (EVM); introspecção de ix Ed25519/Secp256k1 (Solana). Verifica N assinaturas contra o hash recomputado.</td><td><span class="tag both">espelho</span> Signature Engine pré-valida com a mesma lógica (bit-exact) para feedback de UI e contagem k/N.</td><td>Off-chain (mensagem ECDSA); N/N indireto.</td></tr>
+    <tr><td><b>SettlementEngine</b></td><td><span class="tag on">on-chain</span> <code>settle()</code>: recomputa hash, verifica N/N, verifica expiração e status, marca SETTLED, transfere legs locais e fee em uma única transação atômica.</td><td><span class="tag off">off-chain</span> Orquestração cross-chain, ordem das chamadas, reconciliação, sub-estados.</td><td>Claim/refund por script.</td></tr>
+    <tr><td><b>FeeRouter</b></td><td><span class="tag on">on-chain</span> Split determinístico do fee (tesouraria, Pay Master share) conforme campos do commitment; evento <code>FeeCollected</code>.</td><td>Configuração de política de fee (bps, mínimo) que entra nos termos; contabilidade.</td><td>Fee cobrado na leg de contrato da Deal (nunca na leg BTC).</td></tr>
+    <tr><td><b>AssetRegistry</b></td><td><span class="tag on">on-chain</span> Allowlist mínima de tokens que o escrow aceita (endereço/mint), governada por admin multisig + timelock.</td><td><span class="tag off">off-chain</span> Registro canônico completo (RA-*), verificação, four-eyes, status.</td><td>Só BTC nativo.</td></tr>
+    <tr><td><b>NonceManager</b></td><td><span class="tag on">on-chain</span> Unicidade de <code>dealId</code>; nonces de aprovação consumidos em <code>settle</code>; guarda de "já liquidado".</td><td><span class="tag off">off-chain</span> Emissão e ciclo de vida de nonces (challenge/approval).</td><td>Off-chain.</td></tr>
+    <tr><td><b>EmergencyControls</b></td><td><span class="tag on">on-chain</span> <code>pause()</code>/<code>unpause()</code> pelo guardian sobre <code>register/deposit/settle</code>. <b>Sem</b> pausa de <code>refund</code>. Sem sweep/withdraw admin.</td><td><span class="tag off">off-chain</span> Settlement halt (breaker global), bloqueio por Deal.</td><td>Parar de coordenar; timelocks devolvem.</td></tr>
+  </table></div>
+  <div class="callout stop"><p><b>Invariante de custódia:</b> em nenhum módulo existe função cujo efeito seja transferir fundos para um destino que não seja (a) o destinatário fixado na leg do commitment (em <code>settle</code>), (b) o depositante original (em <code>refund</code>), (c) a tesouraria/Pay Master fixados no commitment (fee). Não há <code>withdraw</code>, <code>sweep</code>, <code>setRecipient</code> ou <code>upgradeTo</code>.</p></div>
+
+  <h3>11.2 Deal Hash — campos exatos da mensagem assinada</h3>
+<pre><code>domainHash        = SHA256("VERUM_OTC" ‖ schemaVersion ‖ environment)         // "prod" | "testnet" | "dev"
+participantsRoot  = SHA256( Σᵢ SHA256(roleᵢ ‖ networkᵢ ‖ chainIdᵢ ‖ keySchemeᵢ ‖ addressᵢ) )   // ordem fixa: SELLER, BUYER, PM1, PM2
+legHashᵢ          = SHA256( indexᵢ ‖ assetIdentifierᵢ ‖ networkᵢ ‖ chainIdᵢ ‖ contractOrMintᵢ ‖ tokenStandardᵢ ‖ decimalsᵢ
+                          ‖ amountBaseUnitsᵢ ‖ fromAddressᵢ ‖ toAddressᵢ ‖ escrowChainᵢ ‖ escrowContractᵢ ‖ modeᵢ )
+legsRoot          = SHA256( legHash₀ ‖ legHash₁ [‖ legHash₂ …] )
+pricingHash       = SHA256( referencePriceIn ‖ referencePriceOut ‖ quoteTimestamp ‖ priceValidUntil ‖ usdValueIn ‖ usdValueOut
+                          ‖ discountBps ‖ discountAbs ‖ platformFeeBps ‖ platformFeeAbs ‖ paymasterShareBps
+                          ‖ maxSlippageBps ‖ maxPriceDriftBps ‖ networkCostEstimates ‖ netAmountSeller ‖ netAmountBuyer ‖ priceSnapshotId )
+routeHash         = SHA256( routeId ‖ kind ‖ Σ legPlan(escrowChain, escrowContract, mode, fundingOrder, timelock) ‖ htlcHashH? )
+dealHash          = SHA256( domainHash ‖ dealId ‖ revision ‖ participantsRoot ‖ legsRoot ‖ pricingHash ‖ routeHash ‖ expiresAt ‖ dealNonce )</code></pre>
+  <div class="tbl"><table>
+    <tr><th>Campo exigido</th><th>Onde entra</th><th>Observação</th></tr>
+    <tr><td>dealId</td><td><code>dealHash</code> (direto) e commitment on-chain</td><td>UUIDv7 → 16 bytes; único por contrato (NonceManager)</td></tr>
+    <tr><td>chain</td><td><code>participantsRoot</code> (cadeia de cada signatário) e <code>legHash</code>/<code>routeHash</code> (cadeia de cada leg/escrow)</td><td>chainId numérico (EVM), cluster (Solana), <code>mainnet</code> (BTC)</td></tr>
+    <tr><td>contract</td><td><code>legHash.escrowContract</code>, <code>routeHash</code>; e no <em>domain separator</em> do envelope</td><td>Impede uso do hash em outro deploy do contrato</td></tr>
+    <tr><td>seller, buyer, payMasters</td><td><code>participantsRoot</code></td><td>Adicionar/remover participante altera a raiz ⇒ novo hash (regra "nenhum participante entra ou sai após a 1ª assinatura sem invalidar")</td></tr>
+    <tr><td>assetIn, assetOut</td><td><code>legHash₀</code> (venda) e <code>legHash₁</code> (pagamento) — identificador canônico completo</td><td>Nunca só símbolo</td></tr>
+    <tr><td>amountIn, amountOut</td><td><code>legHash</code> (unidades base)</td><td>Inteiros</td></tr>
+    <tr><td>price, discount, fees</td><td><code>pricingHash</code></td><td>Inclui banda de deriva e slippage máximo</td></tr>
+    <tr><td>route</td><td><code>routeHash</code> + campos de escrow em cada <code>legHash</code></td><td>Mudou a rota ⇒ mudou o hash</td></tr>
+    <tr><td>expiration</td><td><code>dealHash</code> (direto) e commitment on-chain</td><td>Contrato compara com <code>block.timestamp</code>/Clock</td></tr>
+    <tr><td>nonce</td><td><code>dealNonce</code> (por Deal/revisão) no <code>dealHash</code>; nonce de aprovação por participante no envelope</td><td>Dois níveis: Deal e signatário</td></tr>
+  </table></div>
+
+  <h3>11.3 Envelope assinado por participante (o que a carteira mostra e assina)</h3>
+<pre><code>EVM (EIP-712)
+  domain  = { name:"VerumOTC", version:"1", chainId, verifyingContract: &lt;DealManager&gt; }
+  struct DealApproval {
+    bytes32 dealHash; bytes16 dealId; uint32 revision; uint8 role; address signer;
+    uint256 approvalNonce; uint64 expiresAt;
+    // campos legíveis, cruzados on-chain com a leg armazenada:
+    string  assetIn; uint256 amountIn; string assetOut; uint256 amountOut; address counterparty;
+  }
+Solana (off-chain message, Ed25519)
+  header = "\xffsolana offchain" ‖ version ‖ formato ‖ len ; corpo = serialização Borsh do mesmo DealApproval (chainId = cluster)
+  verificação: ix do programa Ed25519 (ou Secp256k1) precedendo a ix `settle`, com introspecção via Instructions sysvar
+Bitcoin (ECDSA message signing, BIP-137)
+  mensagem = "VerumOTC/1/" ‖ env ‖ "\n" ‖ JSON canônico do DealApproval ; verificada off-chain (e recuperável via ecrecover/Secp256k1 se
+  o mesmo signatário precisar ser verificado em um escrow de contrato)</code></pre>
+
+  <h3>11.4 Como cada ataque é impedido</h3>
+  <div class="tbl"><table>
+    <tr><th>Ataque</th><th>Mecanismo</th></tr>
+    <tr><td><b>Replay attack</b></td><td>Envelope inclui domínio (app/versão/ambiente), <code>chainId</code>, <code>verifyingContract</code>, <code>dealId</code>, <code>revision</code>, <code>role</code>, <code>signer</code>, <code>approvalNonce</code> (uso único, consumido on-chain no settle e off-chain na aceitação) e <code>expiresAt</code>. Mesma assinatura em outra Deal/revisão/cadeia/ambiente/contrato falha por hash diferente; na mesma Deal falha por nonce consumido ou status SETTLED.</td></tr>
+    <tr><td><b>Signature substitution</b></td><td>Cada assinatura é verificada contra o <em>endereço do papel</em> armazenado no commitment (participantsRoot recomputada on-chain a partir dos participantes registrados). Uma assinatura válida de outro endereço, ou do endereço certo em outro papel, não fecha a contagem. Não existe agregação: o contrato conta N verificações individuais, uma por papel, sem repetição.</td></tr>
+    <tr><td><b>Parameter manipulation</b></td><td>O contrato não confia no hash recebido: recomputa <code>legHash</code> da própria leg (armazenada no register), <code>participantsRoot</code> dos participantes armazenados e <code>expiresAt</code> armazenado; combina com as raízes irmãs fornecidas (<code>pricingHash</code>, <code>routeHash</code>, outros <code>legHash</code>) e compara o resultado com o hash que as N assinaturas cobrem. Se o backend alterou valor, destino, ativo, expiração ou escrow no register, o hash recomputado difere e as assinaturas não validam. Os campos legíveis do envelope também são cruzados com a leg. Off-chain, RF-007 garante que qualquer edição vira nova revisão.</td></tr>
+    <tr><td><b>Double settlement</b></td><td>Camadas: (1) <code>settlement.deal_id UNIQUE</code> no banco; (2) lock <code>FOR UPDATE</code> + versão otimista; (3) keeper lê estado on-chain antes de enviar; (4) contrato: <code>status == FUNDED</code> exigido, transição para <code>SETTLED</code> antes das transferências (checks-effects-interactions / Anchor account state), <code>dealId</code> único, nonces consumidos; (5) indexer detecta segundo <code>Settled</code> impossível e alerta P1.</td></tr>
+  </table></div>
+
+  <h3>11.5 Fluxo <code>settle()</code> (EVM, pseudo-especificação — não é código)</h3>
+<pre><code>entradas: dealId, signatures[N], siblingLegHashes[], pricingHash, routeHash, (preimage se HTLC encadeado)
+1. require(!paused); d = deals[dealId]; require(d.status == FUNDED); require(block.timestamp &lt; d.expiresAt - EXEC_MARGIN)
+2. legHashLocal   = SHA256(d.leg…)                     // da leg armazenada no register
+   legsRoot       = SHA256(ordenar(legHashLocal, siblingLegHashes…) por index)
+   participants   = SHA256(Σ SHA256(d.participants[i]…))
+   dealHash       = SHA256(domainHash ‖ dealId ‖ d.revision ‖ participants ‖ legsRoot ‖ pricingHash ‖ routeHash ‖ d.expiresAt ‖ d.nonce)
+3. para i em 0..N-1: signer = recover(EIP712(DealApproval{dealHash, …, role=i, nonce=d.approvalNonce[i]}), signatures[i])
+   require(signer == d.participants[i].address); require(!nonceUsed[dealId][i]); nonceUsed[dealId][i] = true
+4. se rota HTLC: require(sha256(preimage) == d.htlcHash); emit PreimageRevealed(dealId, preimage)
+5. d.status = SETTLED                                  // efeito antes de interações
+6. fee = FeeRouter.split(d.leg.amount, d.feeBps, d.feeAbs, d.pmShareBps) ; transfer(leg.to, amount - fee); transfer(treasury, feeT); transfer(pm, feePm)
+7. emit Settled(dealId, revision, dealHash)</code></pre>
+  <p>Solana: mesma lógica com contas PDA (<code>deal</code>, <code>vault_leg_i</code>), verificação das ix Ed25519/Secp256k1 pela sysvar de instruções, e transições de estado gravadas antes das CPIs de transferência.</p>
+
+  <h3>11.6 Bitcoin: N/N indireto via HTLC encadeado</h3>
+  <p>Exemplo: Vendedor entrega BTC (leg₀, Bitcoin), Comprador entrega USDC (leg₁, Solana), Pay Master aprova.</p>
+  <ol>
+    <li>Vendedor gera segredo <code>S</code>; <code>H = SHA256(S)</code> entra no <code>routeHash</code> (todos assinam sabendo <code>H</code>).</li>
+    <li><b>Funding 1 (contrato):</b> Comprador deposita USDC no escrow Solana; a liberação para o Vendedor exige N/N assinaturas <b>e</b> preimage de <code>H</code>; timelock de refund = <code>expiresAt</code> (T_long).</li>
+    <li><b>Funding 2 (BTC):</b> Vendedor cria HTLC: Comprador pode gastar com preimage de <code>H</code>; Vendedor recupera após T_short, com <code>T_short ≤ expiresAt − 2 h − finalidadeBTC</code>. O Router só permite este funding após finalidade do funding 1 (evita BTC travado sem contrapartida).</li>
+    <li>Todos assinam o envelope (Vendedor só após HTLC final; Comprador após depósito final).</li>
+    <li><b>Settle:</b> N/N ⇒ Vendedor (ou keeper com <code>S</code> recebido do Vendedor por canal autenticado) chama <code>settle(…, S)</code> no Solana: USDC vai ao Vendedor, <code>S</code> fica público on-chain.</li>
+    <li>Comprador (frontend/keeper com a carteira do Comprador assinando) gasta o HTLC com <code>S</code> → recebe BTC. Sem N/N, <code>S</code> nunca é revelado e ninguém gasta o HTLC pelo caminho de hash; após T_short o Vendedor recupera.</li>
+  </ol>
+  <div class="callout warn"><p>Ponto de atenção arquitetural: entre o passo 5 e o 6 o Comprador precisa ficar online (ou delegar o claim). O keeper pode preparar a transação de claim, mas ela é assinada pela carteira do Comprador; alternativa (chave de claim delegada ao keeper, limitada a esse output) é freeze item F-8.</p></div>
+</section>
+
+<!-- ===================================================== 12. DEPLOY -->
+<section id="s12">
+  <h2><span class="n">12</span>Deployment architecture</h2>
+
+  <h3>12.1 Ambientes</h3>
+  <div class="tbl"><table>
+    <tr><th>Ambiente</th><th>Cadeias</th><th>Fundos</th><th>Dados</th><th>Chaves</th><th>Acesso</th></tr>
+    <tr><td><b>development</b></td><td>Nós locais: <code>bitcoind -regtest</code>, <code>anvil</code>, <code>solana-test-validator</code>; fontes de preço mockadas</td><td>Nenhum real. <b>Sem credencial de mainnet no ambiente</b> (bloqueado por política de rede/egress)</td><td>Postgres/Redis/NATS locais (compose)</td><td>Chaves geradas localmente, descartáveis</td><td>Desenvolvedores</td></tr>
+    <tr><td><b>testnet/devnet</b></td><td>Bitcoin signet/testnet4, Ethereum Sepolia, Solana devnet; fontes reais em modo leitura</td><td>Tokens de teste</td><td>Cluster compartilhado, reset periódico</td><td>KMS de teste</td><td>Equipe + parceiros de piloto</td></tr>
+    <tr><td><b>staging</b></td><td>Mesmas testnets (escrita) + leitura de mainnet para preço/liquidez</td><td>Tokens de teste</td><td>Réplica de topologia de produção; dados sintéticos</td><td>KMS de staging</td><td>QA, release</td></tr>
+    <tr><td><b>production</b></td><td>Mainnets; contratos auditados; <b>limites baixos no lançamento</b> (valor máximo por Deal) elevados por etapas</td><td>Reais</td><td>Multi-AZ, PITR</td><td>KMS/HSM prod; multisigs em hardware</td><td>Zero-trust; backoffice via VPN</td></tr>
+  </table></div>
+  <div class="callout stop"><p>Promoção de código: <code>dev → testnet → staging → prod</code> com o mesmo artefato (imagem imutável, SBOM, assinatura). Endereços de contratos por ambiente vivem em configuração assinada; um build de produção rejeita iniciar se detectar chainId de testnet e vice-versa (<code>environment</code> está no <code>domainHash</code>, então assinaturas de testnet não valem em prod).</p></div>
+
+  <h3>12.2 Topologia de produção</h3>
+<pre><code>Cloudflare (WAF/CDN)  →  Ingress (mTLS interno)  →  Kubernetes gerenciado, 2 zonas
+  web (2+ réplicas)   api (3+)   engine-worker (2, líder por partição de dealId)   keeper (1 ativo + 1 standby, lease)
+  adapter-worker-btc / evm / sol (2 cada)   indexer-btc / evm / sol (1 ativo + standby, cursor em Postgres)
+  expiry-scheduler (1 ativo, lease)   audit-exporter (1)   notifier (2)
+Dados: PostgreSQL gerenciado (primário + réplica síncrona em outra zona, PITR 35 dias) · Redis (3 nós) · NATS JetStream (3 nós, replicação 3)
+Nós de cadeia: bitcoind + electrs próprios (2 zonas); Ethereum e Solana via 2 provedores RPC + 1 nó próprio Solana (opcional, freeze)
+Observabilidade: Prometheus/Alertmanager, Grafana, Loki, Tempo (retenção 30/30/14 dias); on-call via PagerDuty/Telegram</code></pre>
+
+  <h3>12.3 Deploy de contratos</h3>
+  <ol>
+    <li>Build reproduzível (Foundry / Anchor verifiable build), auditoria externa, publicação de código verificado.</li>
+    <li>Deploy por cerimônia com multisig; parâmetros imutáveis (tesouraria, guardian, admin, timelock) fixados no construtor/initialize único.</li>
+    <li>Registro dos endereços na configuração assinada e no Asset Registry (allowlist inicial via timelock).</li>
+    <li>Smoke test em mainnet com Deal de valor mínimo entre carteiras Verum.</li>
+  </ol>
+
+  <h3>12.4 CI/CD</h3>
+  <ul>
+    <li>Pipeline: lint (regra "no-number-for-amounts"), unit, property, contract tests, conformance de adaptadores em nós locais, SAST, scanner de segredos, build de imagem, assinatura (cosign), deploy por ambiente com aprovação manual para staging→prod.</li>
+    <li>Migrações de banco versionadas, forward-only, com verificação de compatibilidade de eventos (schema registry de <code>deal_event.type</code>).</li>
+  </ul>
+</section>
+
+<!-- ===================================================== 13. DR -->
+<section id="s13">
+  <h2><span class="n">13</span>Disaster recovery</h2>
+  <div class="callout ok"><p><b>Premissa central:</b> os fundos nunca dependem do backend. Em qualquer catástrofe da plataforma, todo depósito é recuperável pelo próprio depositante após <code>expiresAt</code> (refund permissionless / timelock). O DR trata de <em>disponibilidade e reconstrução de estado</em>, não de proteção de fundos.</p></div>
+
+  <h3>13.1 Objetivos</h3>
+  <div class="tbl"><table>
+    <tr><th>Componente</th><th>RPO</th><th>RTO</th><th>Mecanismo</th></tr>
+    <tr><td>PostgreSQL (registro)</td><td>≤ 30 s</td><td>≤ 30 min</td><td>Réplica síncrona em outra zona; PITR 35 dias; backup diário cifrado em outra região</td></tr>
+    <tr><td>Audit Log</td><td>0 (transação conjunta) / ≤ 1 h (cópia WORM)</td><td>≤ 1 h</td><td>Exportação horária S3 Object Lock; âncora diária on-chain</td></tr>
+    <tr><td>NATS JetStream</td><td>0 (outbox é fonte)</td><td>≤ 15 min</td><td>Streams reconstruíveis a partir do outbox</td></tr>
+    <tr><td>Redis</td><td>Perda aceitável (exceto nonces, que também estão em Postgres)</td><td>≤ 5 min</td><td>Recriação; sessões expiram e usuários reautenticam</td></tr>
+    <tr><td>Estado on-chain</td><td>0</td><td>—</td><td>É a verdade; indexers reconstroem projeções a partir de cursores</td></tr>
+  </table></div>
+
+  <h3>13.2 Cenários e runbooks (resumo)</h3>
+  <div class="tbl"><table>
+    <tr><th>Cenário</th><th>Resposta</th></tr>
+    <tr><td>Perda da zona primária</td><td>Failover automático do Postgres; Kubernetes reprograma pods na zona secundária; keeper/scheduler/indexers assumem por lease. Verificar Deals em SETTLING: reconciliar com on-chain antes de retomar o keeper.</td></tr>
+    <tr><td>Corrupção/perda total do banco</td><td>1) Settlement halt; 2) restaurar PITR; 3) rodar <em>reconciler</em>: para cada Deal em estado não-terminal, ler estado on-chain via 2 provedores e aplicar transições faltantes; 4) verificar cadeia de auditoria contra cópia WORM e âncora on-chain; 5) liberar halt.</td></tr>
+    <tr><td>Backend indisponível por horas com Deals abertas</td><td>Deals expiram por relógio on-chain; usuários reembolsam direto no contrato (documentação pública com instruções e interface mínima estática hospedada separadamente — <em>"refund console"</em>). Ao voltar, reconciliar.</td></tr>
+    <tr><td>Comprometimento de chave do keeper</td><td>Revogar no KMS; contrato não é afetado (sem poder). Rotacionar; auditoria KMS para detectar uso anômalo.</td></tr>
+    <tr><td>Vulnerabilidade em contrato</td><td>Guardian pausa register/deposit/settle; Deals abertas expiram e reembolsam; novo deploy v2; Deals novas só no v2.</td></tr>
+    <tr><td>Provedor RPC comprometido/instável</td><td>Breaker isola; leitura por quorum evita decisão errada; nó próprio como desempate para BTC/Solana.</td></tr>
+    <tr><td>Reorg profundo</td><td>Indexer detecta; Deals afetadas → BLOCKED; análise manual; refund quando aplicável.</td></tr>
+  </table></div>
+  <p>Exercícios de DR trimestrais (game days): restauração de PITR em ambiente isolado + reconciliação; simulação de perda de zona em staging; teste do "refund console" em testnet.</p>
+</section>
+
+<!-- ===================================================== 14. TESTES -->
+<section id="s14">
+  <h2><span class="n">14</span>Testing strategy</h2>
+  <div class="tbl"><table>
+    <tr><th>Camada</th><th>O que cobre</th><th>Ferramentas</th><th>Critério de saída</th></tr>
+    <tr><td><b>Unit</b></td><td>Máquina de estados (todas as transições permitidas e proibidas — CA-50), aritmética bigint, cálculos de economics, regras de risco</td><td>Vitest</td><td>100% das transições do mapa; mutation score ≥ 80% no núcleo</td></tr>
+    <tr><td><b>Property-based</b></td><td>Serialização canônica e <code>dealHash</code> (determinismo, sensibilidade a cada campo — qualquer mudança altera o hash), envelopes por esquema</td><td>fast-check</td><td>Sem contraexemplos em 10⁵ casos por propriedade</td></tr>
+    <tr><td><b>Equivalência off-chain ↔ on-chain</b></td><td>Mesmos vetores de teste produzem o mesmo hash e o mesmo veredito de assinatura no Signature Engine, no contrato EVM e no programa Solana</td><td>Vetores JSON compartilhados; Foundry; Anchor tests</td><td>Bit-exact em todos os vetores</td></tr>
+    <tr><td><b>Contratos</b></td><td>Fuzzing e invariantes: "nenhuma função move fundos para fora de {to, depositante, tesouraria, PM}"; "settle exige N/N"; "refund sempre possível após expiresAt"; "pause não bloqueia refund"; reentrância; tokens com hooks</td><td>Foundry (fuzz/invariant), Anchor + Bankrun, Echidna/Medusa opcional</td><td>Invariantes sem violação; cobertura de branches ≥ 95%; auditoria externa sem achados altos abertos</td></tr>
+    <tr><td><b>Conformance de adaptadores</b></td><td>Suite única contra BTC regtest, anvil, test-validator: verifyAsset, deposit intent, register/settle/refund, finalidade, reorg simulado</td><td>Testcontainers</td><td>Os três adaptadores passam a mesma suite</td></tr>
+    <tr><td><b>Integração / E2E</b></td><td>Fluxos completos 3/3 e 4/4; expiração com refund; revisão após assinatura; cancelamento; bloqueio; HTLC BTC↔Solana; FS-01..25 do PRD como cenários nomeados</td><td>Playwright + nós locais; depois testnets</td><td>Todos os CA-* do PRD verdes</td></tr>
+    <tr><td><b>Concorrência e caos</b></td><td>Duas liquidações simultâneas; queda do engine durante SETTLING; queda do keeper; deriva de relógio; RPC devolvendo dados inconsistentes; partição NATS</td><td>Jepsen-like scripts, toxiproxy, kill -9 em pipeline</td><td>Zero dupla liquidação; recuperação sem intervenção</td></tr>
+    <tr><td><b>Segurança</b></td><td>SAST/DAST, dependências, testes de replay entre ambientes/cadeias, tentativa de liquidação por operador, WAF (seed phrase em payload), pentest externo antes do prod</td><td>Semgrep, ZAP, revisão manual, auditoria</td><td>Sem achados críticos/altos</td></tr>
+    <tr><td><b>Carga</b></td><td>1.000 Deals abertas, 50 assinaturas/s, SSE para 5.000 clientes; latência de verificação ≤ 10 s (RNF-006)</td><td>k6</td><td>RNF-005/006/007 atendidos</td></tr>
+    <tr><td><b>Piloto testnet</b></td><td>2 semanas com usuários reais em testnet; depois mainnet com limite baixo</td><td>—</td><td>Sem incidente P1; métrica de invariante = 0</td></tr>
+  </table></div>
+</section>
+
+<!-- ===================================================== 15. FREEZE -->
+<section id="s15">
+  <h2><span class="n">15</span>ARCHITECTURE FREEZE CANDIDATE</h2>
+  <p>Lista exata do que precisa ser <b>aprovado</b> antes de iniciar o frontend. Cada item tem a decisão proposta neste documento; aprovar = aceitar a proposta; rejeitar = reemitir as seções indicadas.</p>
+  <div class="tbl"><table>
+    <tr><th>#</th><th>Item a aprovar</th><th>Proposta neste documento</th><th>Se rejeitado, muda</th></tr>
+    <tr><td>F-1</td><td>Refinamentos R1–R5 aos requisitos</td><td>Funding em AWAITING_SIGNATURES; só rotas P2P na v1; rota inclui escrow por leg; matriz de verificabilidade; expiração 60/180 min</td><td>Seções 6, 10, 11; PRD 7.2/9</td></tr>
+    <tr><td>F-2</td><td>Papel do Pay Master (ADR-004)</td><td>Aprovador puro, com share de fee opcional</td><td>Legs, FeeRouter, modelo de dados</td></tr>
+    <tr><td>F-3</td><td>Cadeias e ativos da v1 (ADR-008)</td><td>Solana + Ethereum L1 + Bitcoin; USDT/USDC em Solana e Ethereum; ZEC e Tron na v1.1</td><td>Adaptadores, registry inicial, matriz R4</td></tr>
+    <tr><td>F-4</td><td>Deal Hash e envelope (ADR-003, 11.2, 11.3)</td><td>SHA-256, raízes por componente, recomputação on-chain; EIP-712 / Solana off-chain message / BIP-137</td><td>Contratos, Signature Engine, vetores de teste</td></tr>
+    <tr><td>F-5</td><td>Modelo de custódia e governança on-chain (ADR-001, 013, 014)</td><td>Contratos imutáveis; guardian pausa sem tocar refund; admin allowlist com timelock 24 h; keeper sem poder</td><td>Todos os módulos de contrato</td></tr>
+    <tr><td>F-6</td><td>Política de finalidade (10.3) e margens de execução</td><td>BTC 3/6 conf.; ETH finalized; Solana finalized</td><td>Tempos, expiração, timelocks HTLC</td></tr>
+    <tr><td>F-7</td><td>Limitação v1: escrow em Ethereum L1 exige todos os signatários secp256k1</td><td>Aceitar limitação; Ed25519 on-chain em L2 na v1.1</td><td>Router, contratos EVM, custo</td></tr>
+    <tr><td>F-8</td><td>Claim do HTLC BTC pelo Comprador</td><td>Assinado pela carteira do Comprador (online) — sem delegação</td><td>Adaptador BTC, UX pós-settle</td></tr>
+    <tr><td>F-9</td><td>Depósito em revisão superseded</td><td>Reembolso automático e novo depósito na nova revisão (sem "portabilidade")</td><td>Contratos, 6.4</td></tr>
+    <tr><td>F-10</td><td>Fee e deságio (ADR-005)</td><td>Fee bps + mínimo descontado de assetOut on-chain; deságio embutido em amountOut</td><td>FeeRouter, pricingHash</td></tr>
+    <tr><td>F-11</td><td>Gás e keeper (ADR-006)</td><td>Cada parte paga depósito; settle/refund relayados pelo keeper, permissionless</td><td>Adaptadores, UX</td></tr>
+    <tr><td>F-12</td><td>Fontes de preço/liquidez e limiares (ADR-015)</td><td>Pyth/Chainlink + 2–3 CEX + Jupiter/agregador EVM; ≥ 3 fontes; desvio máx. 150 bps; TTL 30 s</td><td>Price/Liquidity Engines, Risk</td></tr>
+    <tr><td>F-13</td><td>Stack e topologia (ADR-012, Seção 12)</td><td>TypeScript/NestJS monólito modular, Postgres, Redis, NATS, Kubernetes, Cloudflare; Solidity/Foundry; Anchor</td><td>Tudo de plataforma</td></tr>
+    <tr><td>F-14</td><td>Identidade e sessão (ADR-011) e cancelamento (Q18-a)</td><td>Login por carteira; e-mail opcional; qualquer participante obrigatório cancela antes de FULLY_SIGNED</td><td>API, RBAC, UI</td></tr>
+    <tr><td>F-15</td><td>Compliance (Q17 do PRD)</td><td><b>Não decidido aqui</b> — arquitetura suporta (a) só screening on-chain e (c) KYC acima de limite via provedor externo. Precisa de decisão de negócio.</td><td>Onboarding, Risk Engine, retenção de dados</td></tr>
+    <tr><td>F-16</td><td>Provedor de screening de carteiras e limites de risco iniciais (RS-050)</td><td>Provedor a nomear; limites de lançamento: US$ 25k por Deal, US$ 100k/carteira/dia (propostos)</td><td>Risk Engine</td></tr>
+    <tr><td>F-17</td><td>Contrato de API pública (Seção 9.1) e formato dos eventos SSE</td><td>Como especificado</td><td>Frontend não pode começar sem isso</td></tr>
+    <tr><td>F-18</td><td>Design system da interface</td><td>Azul/branco/verde do PRD (RF-093), institucional, ≤ 5 telas (CA-60); tipografia Sora/Inter/JetBrains Mono; HTML autocontido sem CDN de layout</td><td>Frontend</td></tr>
+  </table></div>
+  <div class="callout ok"><p><b>Mínimo para iniciar o frontend:</b> F-1, F-2, F-3, F-14, F-17 e F-18. Os demais bloqueiam contratos, engines e adaptadores, mas não a construção das telas contra a API especificada (mocks conforme Seção 9.1).</p></div>
+</section>
+
+<footer>VERUM OTC · Arquitetura de Produção v0.1 · Freeze Candidate · sem implementação.</footer>
+</div>
+</body>
+</html>

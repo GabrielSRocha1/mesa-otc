@@ -1,0 +1,60 @@
+# Regras Prometheus — VERUM OTC (severidades: page = acorda alguém; ticket = próxima janela útil)
+groups:
+- name: verum-otc-settlement
+  rules:
+  - alert: OtcSettlementFailed
+    expr: increase(otc_settlements_total{result="failed"}[10m]) > 0
+    labels: { severity: page }
+    annotations: { summary: "Liquidação falhou (Deal BLOCKED). Verificar reembolsos pendentes e incidente de risco." }
+  - alert: OtcSettlementReconciled
+    expr: increase(otc_settlements_total{result="reconciled"}[1h]) > 0
+    labels: { severity: ticket }
+    annotations: { summary: "Liquidação reconciliada a partir do estado on-chain (processo caiu no meio da execução)." }
+  - alert: OtcInvariantViolationAttempts
+    expr: increase(otc_invariant_violations_total{kind=~"double_settlement_attempt|SETTLEMENT_ALREADY_EXECUTED|SIGNATURE_INVALID"}[15m]) > 3
+    labels: { severity: page }
+    annotations: { summary: "Tentativas repetidas de violar invariantes (dupla liquidação/assinatura inválida) — possível ataque." }
+  - alert: OtcDealsStuckSettling
+    expr: otc_active_deals{state="SETTLING"} > 0 and changes(otc_active_deals{state="SETTLING"}[30m]) == 0
+    labels: { severity: page }
+    annotations: { summary: "Deals em SETTLING sem progresso há 30 min — verificar RPC/finalidade e rodar /ops/settlement/recover." }
+  - alert: OtcRefundsPending
+    expr: otc_active_deals{state="REFUNDING"} > 0 and changes(otc_active_deals{state="REFUNDING"}[1h]) == 0
+    labels: { severity: page }
+    annotations: { summary: "Reembolsos pendentes há 1h (RPC fora ou timelock). Fundos de clientes em custódia além do previsto." }
+- name: verum-otc-dependencies
+  rules:
+  - alert: OtcRpcErrors
+    expr: sum by (chain) (rate(otc_adapter_errors_total[5m])) > 0.05
+    labels: { severity: page }
+    annotations: { summary: "Erros de RPC/adaptador na cadeia {{ $labels.chain }}." }
+  - alert: OtcPriceBreakerOpen
+    expr: otc_price_breaker_open == 1
+    labels: { severity: page }
+    annotations: { summary: "Disjuntor de preço aberto: nenhuma Deal nova avança. Investigar fontes antes de POST /ops/price/breaker/reset." }
+  - alert: OtcPriceAnomalies
+    expr: increase(otc_price_anomalies_total[15m]) > 0
+    labels: { severity: ticket }
+    annotations: { summary: "Anomalia entre fontes de preço detectada." }
+  - alert: OtcSignatureRejections
+    expr: sum(rate(otc_signatures_rejected_total[5m])) > 1
+    labels: { severity: ticket }
+    annotations: { summary: "Rejeição elevada de assinaturas (bug de cliente ou tentativa de fraude)." }
+- name: verum-otc-api
+  rules:
+  - alert: OtcHttp5xx
+    expr: sum(rate(otc_http_requests_total{status=~"5.."}[5m])) / sum(rate(otc_http_requests_total[5m])) > 0.01
+    labels: { severity: page }
+    annotations: { summary: "Taxa de 5xx acima de 1%." }
+  - alert: OtcHttpLatency
+    expr: histogram_quantile(0.95, sum by (le, route) (rate(otc_http_request_seconds_bucket[5m]))) > 0.5
+    labels: { severity: ticket }
+    annotations: { summary: "p95 de latência HTTP > 500 ms na rota {{ $labels.route }}." }
+  - alert: OtcRateLimited
+    expr: sum(rate(otc_http_requests_total{status="429"}[5m])) > 5
+    labels: { severity: ticket }
+    annotations: { summary: "Muitas respostas 429 — abuso de API ou limite mal calibrado." }
+  - alert: OtcApiDown
+    expr: up{job="verum-otc"} == 0
+    labels: { severity: page }
+    annotations: { summary: "API VERUM OTC fora do ar." }

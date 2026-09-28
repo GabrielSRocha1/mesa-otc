@@ -1,0 +1,304 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="verum-otc-api" content="">
+<title>VERUM OTC — Confirmar carteira</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Sora:wght@600;700;800&family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@500&display=swap" rel="stylesheet">
+<style>
+:root{
+  --bg:#080d1a; --bg-2:#0a1122; --panel:#0f1a30; --line:#1c2b48; --line-2:#223350;
+  --ink:#e8eefc; --ink-2:#aebbd4; --ink-3:#7788a6;
+  --green:#22c55e; --green-soft:rgba(34,197,94,.14); --blue:#4f9bff; --blue-soft:rgba(79,155,255,.14);
+  --amber:#eab308; --amber-soft:rgba(234,179,8,.14); --red:#ef4444;
+  --purple:#a855f7; --purple-soft:rgba(168,85,247,.14);
+  --f-head:"Sora",system-ui,sans-serif; --f-body:"Inter",system-ui,sans-serif; --f-mono:"JetBrains Mono",ui-monospace,monospace;
+}
+*,*::before,*::after{box-sizing:border-box}
+html,body{margin:0;min-height:100%}
+body{
+  background:radial-gradient(1000px 500px at 80% -10%,rgba(79,155,255,.07),transparent 60%),radial-gradient(800px 400px at 0% 110%,rgba(34,197,94,.05),transparent 55%),var(--bg);
+  color:var(--ink);font-family:var(--f-body);font-size:14px;line-height:1.5;-webkit-font-smoothing:antialiased;
+  display:grid;place-items:center;padding:24px;
+}
+h1,h2,h3{font-family:var(--f-head);margin:0;letter-spacing:-.01em}
+.card{width:100%;max-width:460px;background:linear-gradient(180deg,var(--panel),var(--bg-2));border:1px solid var(--line);border-radius:18px;padding:30px;box-shadow:0 24px 60px rgba(0,0,0,.4)}
+.brand{display:flex;align-items:center;gap:11px;margin-bottom:24px}
+.brand .mark{width:38px;height:38px;border-radius:10px;background:var(--blue-soft);border:1px solid var(--line-2);display:grid;place-items:center}
+.brand svg{width:22px;height:22px}
+.brand .name{font-family:var(--f-head);font-weight:800;font-size:16px}
+.brand .tag{font-size:11px;color:var(--ink-3)}
+.eyebrow{display:inline-flex;align-items:center;gap:7px;font-size:11.5px;font-weight:600;text-transform:uppercase;letter-spacing:.05em;color:var(--purple);background:var(--purple-soft);border:1px solid var(--purple);padding:5px 11px;border-radius:999px;margin-bottom:14px}
+.eyebrow svg{width:13px;height:13px;stroke:currentColor;fill:none;stroke-width:2}
+h1{font-size:22px;margin-bottom:8px}
+.sub{color:var(--ink-2);font-size:13.5px;margin-bottom:22px}
+.sub b{color:var(--ink)}
+.role-box{display:flex;align-items:center;gap:13px;padding:14px;border:1px solid var(--line);border-radius:12px;background:var(--bg-2);margin-bottom:20px}
+.role-box .ri{width:40px;height:40px;flex:none;border-radius:10px;display:grid;place-items:center}
+.role-box .ri svg{width:20px;height:20px;stroke:#fff;fill:none;stroke-width:2}
+.r-sell{background:#3b82f6}.r-buy{background:#22c55e}.r-pm2{background:#a855f7}
+.role-box .rl{font-size:11px;color:var(--ink-3);text-transform:uppercase;letter-spacing:.04em}
+.role-box .rn{font-family:var(--f-head);font-weight:700;font-size:16px}
+.role-box .rnet{font-size:12px;color:var(--ink-3);margin-top:1px}
+.btn{display:inline-flex;align-items:center;justify-content:center;gap:9px;width:100%;height:50px;border-radius:12px;border:1px solid var(--line-2);background:var(--panel);color:var(--ink);font:inherit;font-weight:700;font-size:15px;cursor:pointer;transition:.15s}
+.btn:hover{border-color:var(--blue);color:#fff}
+.btn:disabled{opacity:.5;cursor:not-allowed}
+.btn svg{width:18px;height:18px;stroke:currentColor;fill:none;stroke-width:2}
+.btn-primary{background:linear-gradient(135deg,#22c55e,#16a34a);border:none;color:#04240f;box-shadow:0 10px 26px rgba(34,197,94,.28)}
+.btn-primary:hover{filter:brightness(1.06);color:#04240f}
+.alt{text-align:center;margin-top:14px;font-size:13px;color:var(--ink-3)}
+.alt a{color:var(--blue);cursor:pointer;text-decoration:none}.alt a:hover{text-decoration:underline}
+.note{display:flex;gap:9px;align-items:flex-start;font-size:12px;color:var(--ink-3);margin-top:18px;padding-top:16px;border-top:1px solid var(--line)}
+.note svg{width:15px;height:15px;flex:none;stroke:var(--green);fill:none;stroke-width:2;margin-top:1px}
+.state{text-align:center;padding:8px 0}
+.state .ic{width:64px;height:64px;border-radius:50%;display:grid;place-items:center;margin:0 auto 16px}
+.state .ic svg{width:32px;height:32px;fill:none;stroke-width:2.4}
+.ic.ok{background:var(--green-soft)}.ic.ok svg{stroke:var(--green)}
+.ic.err{background:rgba(239,68,68,.14)}.ic.err svg{stroke:var(--red)}
+.ic.wait{background:var(--amber-soft)}.ic.wait svg{stroke:var(--amber)}
+.mono{font-family:var(--f-mono);font-size:12px;color:var(--ink-2);word-break:break-all}
+.spin{width:18px;height:18px;border:2px solid rgba(255,255,255,.3);border-top-color:#fff;border-radius:50%;animation:sp .7s linear infinite;display:inline-block}
+@keyframes sp{to{transform:rotate(360deg)}}
+.hidden{display:none}
+.toast-wrap{position:fixed;top:18px;left:50%;transform:translateX(-50%);display:flex;flex-direction:column;gap:8px;z-index:50}
+.toast{padding:11px 16px;border-radius:11px;border:1px solid var(--line-2);background:#0d1730;font-size:13px;box-shadow:0 12px 30px rgba(0,0,0,.4);max-width:88vw}
+.toast.err{border-color:var(--red);color:#fecaca}.toast.ok{border-color:var(--green);color:#bbf7d0}
+</style>
+</head>
+<body>
+<div class="card" id="card">
+  <div class="brand">
+    <div class="mark"><svg viewBox="0 0 24 24" fill="none"><path d="M3 4l6 16 3-8 3 8 6-16" stroke="#4f9bff" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></svg></div>
+    <div><div class="name">VERUM OTC</div><div class="tag">Confirmação de carteira</div></div>
+  </div>
+  <div id="body"><div class="state"><div class="spin" style="margin:20px auto"></div><p class="sub" style="text-align:center;margin:14px 0 0">Carregando convite…</p></div></div>
+</div>
+<div class="toast-wrap" id="toasts"></div>
+
+<script>
+(function(){
+  "use strict";
+  const $ = s => document.querySelector(s);
+  const META = document.querySelector('meta[name="verum-otc-api"]');
+  const API = ((META && META.content) || '/').replace(/\/$/,'');
+  const ROLE = { SELLER:{label:'Vendedor',cls:'r-sell',ico:'<circle cx="12" cy="8" r="4"/><path d="M4 20a8 8 0 0116 0"/>'},
+                 BUYER:{label:'Comprador',cls:'r-buy',ico:'<path d="M4 21V8l8-5 8 5v13"/><path d="M9 21v-6h6v6"/>'},
+                 PAYMASTER_2:{label:'Pay Master 2',cls:'r-pm2',ico:'<circle cx="9" cy="8" r="3"/><path d="M3.5 19a5.5 5.5 0 0111 0M17 7a2.5 2.5 0 010 5"/>'} };
+  const NETLABEL = { multichain:'Multichain (Verum)', ethereum:'Ethereum', solana:'Solana', bitcoin:'Bitcoin', bsc:'BNB Smart Chain', polygon:'Polygon', tron:'Tron', arbitrum:'Arbitrum One', base:'Base', avalanche:'Avalanche C-Chain', cronos:'Cronos EVM', optimism:'Optimism', xrp:'XRP Ledger', zcash:'Zcash', ton:'TON', aptos:'Aptos', near:'NEAR', algorand:'Algorand', stellar:'Stellar' };
+  // Assinatura só funciona p/ solana/ethereum/bitcoin no backend. Verum é Solana
+  // por baixo e o getAddresses traz todas as redes — então mapeamos a rede
+  // escolhida para uma auth suportada (EVM→ethereum, bitcoin→bitcoin, resto→solana).
+  const EVM_KEYS=['ethereum','bsc','polygon','arbitrum','base','avalanche','cronos','optimism'];
+  function authNetFor(net){ if(net==='bitcoin') return 'bitcoin'; if(EVM_KEYS.indexOf(net)>=0) return 'ethereum'; return 'solana'; }
+
+  function toast(msg,type){ const el=document.createElement('div'); el.className='toast '+(type||''); el.textContent=msg; $('#toasts').appendChild(el); setTimeout(()=>{el.style.opacity='0';el.style.transition='opacity .3s';setTimeout(()=>el.remove(),300);},3200); }
+
+  async function api(path,opts){
+    opts=opts||{}; const headers={'accept':'application/json'};
+    if(opts.body!==undefined) headers['content-type']='application/json';
+    if(opts.token) headers['authorization']='Bearer '+opts.token;
+    const res=await fetch(API+path,{method:opts.method||'GET',headers,body:opts.body!==undefined?JSON.stringify(opts.body):undefined});
+    let data=null; try{ data=await res.json(); }catch(e){}
+    if(!res.ok){ const m=(data&&(data.message||data.error))||('Erro '+res.status); const e=new Error(m); e.status=res.status; throw e; }
+    return data;
+  }
+
+  // token do convite a partir do caminho /convite/<token> (ou /invite/<token>)
+  function inviteToken(){
+    const m = location.pathname.match(/\/(?:convite|invite)\/([^/?#]+)/);
+    if(m) return decodeURIComponent(m[1]);
+    return new URLSearchParams(location.search).get('token') || '';
+  }
+  const shortAddr = a => a && a.length>12 ? a.slice(0,6)+'…'+a.slice(-4) : a;
+  function hexAddr(){ let h='0x'; const c='0123456789abcdef'; for(let i=0;i<40;i++) h+=c[Math.floor(Math.random()*16)]; return h; }
+
+  /* ---------- carteira injetada (EVM / Phantom / Unisat) ---------- */
+  const B58='123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz';
+  function bs58encode(bytes){ const b=bytes instanceof Uint8Array?bytes:new Uint8Array(bytes); let n=0n; for(const x of b) n=n*256n+BigInt(x); let out=''; while(n>0n){ out=B58[Number(n%58n)]+out; n/=58n; } for(const x of b){ if(x!==0) break; out='1'+out; } return out; }
+  const walletErr = (msg,code) => { const e=new Error(msg); e.code=code; return e; };
+  // Provedor Solana — Verum Wallet (preferencial), depois Solflare.
+  function solProvider(){
+    const w=window;
+    if(w.verum) return w.verum;
+    if(w.solflare && (w.solflare.isSolflare || typeof w.solflare.connect==='function')) return w.solflare;
+    if(w.solana && (w.solana.isVerum || w.solana.isSolflare)) return w.solana;
+    return null;
+  }
+  // Provider EVM da Verum via EIP-6963 (rdns com.verumcrypto.wallet). Sem isto, a
+  // MetaMask ocuparia window.ethereum e o pedido iria pra ela. Guarda o provider
+  // escolhido em ethProvider p/ assinar a mensagem com a MESMA carteira.
+  let ethProvider=null;
+  function findVerumEthProvider(){
+    return new Promise(resolve=>{
+      let picked=null;
+      const onAnn=e=>{ const d=e&&e.detail; if(d&&d.provider&&((d.info&&d.info.rdns==='com.verumcrypto.wallet')||d.provider.isVerum)) picked=d.provider; };
+      window.addEventListener('eip6963:announceProvider',onAnn);
+      try{ window.dispatchEvent(new Event('eip6963:requestProvider')); }catch(e){}
+      setTimeout(()=>{
+        window.removeEventListener('eip6963:announceProvider',onAnn);
+        if(!picked){ const e=window.ethereum; if(e&&e.isVerum) picked=e; else if(e&&Array.isArray(e.providers)) picked=e.providers.find(p=>p&&p.isVerum)||null; }
+        resolve(picked||window.ethereum||null);
+      },350);
+    });
+  }
+  async function connectWallet(network){
+    const w=window;
+    if(network==='ethereum'){ const p=await findVerumEthProvider(); if(!p) throw walletErr('Verum Wallet (EVM) não encontrada','NO_WALLET'); ethProvider=p; const accs=await p.request({method:'eth_requestAccounts'}); const address=accs&&accs[0]; if(!address) throw walletErr('Nenhuma conta EVM retornada','NO_WALLET'); return {address,network}; }
+    if(network==='solana'){
+      const p=solProvider(); if(!p) throw walletErr('Carteira Verum Wallet não encontrada','NO_WALLET');
+      const r=await p.connect();
+      const pk=(r&&r.publicKey)?r.publicKey:p.publicKey;
+      if(!pk) throw walletErr('Não foi possível ler o endereço da carteira Solana','NO_WALLET');
+      return {address:pk.toString(),network};
+    }
+    if(network==='bitcoin'){ if(!w.unisat) throw walletErr('Carteira Bitcoin (Unisat) não encontrada','NO_WALLET'); const [address]=await w.unisat.requestAccounts(); return {address,network}; }
+    throw walletErr('Rede não suportada','NO_WALLET');
+  }
+  async function signMessage(network,address,message){
+    const w=window;
+    if(network==='ethereum'){ const p=ethProvider||w.ethereum; if(!p) throw walletErr('Verum Wallet (EVM) não encontrada','NO_WALLET'); return p.request({method:'personal_sign',params:[message,address]}); }
+    if(network==='solana'){ const p=solProvider(); if(!p) throw walletErr('Carteira Verum Wallet não encontrada','NO_WALLET'); const r=await p.signMessage(new TextEncoder().encode(message),'utf8'); const sig=(r&&r.signature)?r.signature:r; return typeof sig==='string'?sig:bs58encode(sig); }
+    if(network==='bitcoin') return w.unisat.signMessage(message,'ecdsa');
+    throw walletErr('Rede não suportada','NO_WALLET');
+  }
+
+  // Saldo via RPC público a partir do endereço conectado (não passa pela extensão).
+  const BAL_RPC={ solana:'https://api.mainnet-beta.solana.com', ethereum:'https://ethereum-rpc.publicnode.com' };
+  async function walletBalance(address,network){
+    try{
+      if(network==='solana'){
+        const r=await fetch(BAL_RPC.solana,{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({jsonrpc:'2.0',id:1,method:'getBalance',params:[address]})});
+        const j=await r.json(); const lamports=j&&j.result&&typeof j.result.value==='number'?j.result.value:null;
+        if(lamports==null) return null; return (lamports/1e9).toLocaleString('pt-BR',{maximumFractionDigits:4})+' SOL';
+      }
+      if(network==='ethereum'){
+        const r=await fetch(BAL_RPC.ethereum,{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({jsonrpc:'2.0',id:1,method:'eth_getBalance',params:[address,'latest']})});
+        const j=await r.json(); if(!j||!j.result) return null; const eth=Number(BigInt(j.result))/1e18;
+        return eth.toLocaleString('pt-BR',{maximumFractionDigits:5})+' ETH';
+      }
+      if(network==='bitcoin'){
+        const r=await fetch('https://blockstream.info/api/address/'+encodeURIComponent(address));
+        if(!r.ok) return null; const j=await r.json(); const cs=j.chain_stats||{}; const sats=(cs.funded_txo_sum||0)-(cs.spent_txo_sum||0);
+        return (sats/1e8).toLocaleString('pt-BR',{maximumFractionDigits:8})+' BTC';
+      }
+    }catch(e){}
+    return null;
+  }
+
+  // Endereços multichain que a Verum expõe (getAddresses) — para a OTC ler
+  // saldo em todas as redes suportadas pela carteira.
+  async function collectVerumAddresses(){
+    try{
+      const p=window.verum;
+      if(p&&typeof p.getAddresses==='function'){
+        // getAddresses pode NÃO resolver (extensão sem relay p/ VERUM_ADDRESSES_REQUEST).
+        // Corremos contra um timeout p/ NUNCA travar a conexão após assinar.
+        const to=new Promise(res=>setTimeout(()=>res(null),2500));
+        const r=await Promise.race([Promise.resolve(p.getAddresses()).catch(()=>null),to]);
+        if(r&&Array.isArray(r.addresses)) return r.addresses.filter(a=>a&&a.network&&a.address).map(a=>({network:String(a.network),address:String(a.address)}));
+      }
+    }catch(e){}
+    return [];
+  }
+  function fmtAmt(n){ if(n==null) return '—'; const abs=Math.abs(n); const d=abs>=1?4:abs>=0.0001?6:8; return Number(n).toLocaleString('pt-BR',{maximumFractionDigits:d}); }
+  function fmtUsd(n){ if(n==null) return ''; return '$'+Number(n).toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2}); }
+
+  /* ---------- fluxo ---------- */
+  let invite=null; const token=inviteToken();
+
+  function render(){
+    const b=$('#body');
+    if(!token){ return renderState('err','Link inválido','Este link de convite não contém um código válido.'); }
+    if(invite.status==='expired'){ return renderState('err','Convite expirado','Peça ao Pay Master para gerar um novo link.'); }
+    if(invite.status==='confirmed'){ return renderState('ok','Carteira já confirmada','Esta carteira já foi conectada à mesa. Nada mais a fazer.'); }
+    const r=ROLE[invite.role]||{label:invite.role,cls:'',ico:''};
+    const pm=invite.payMaster||{}; const who=pm.org||pm.name||'um Pay Master';
+    b.innerHTML=
+      '<span class="eyebrow"><svg viewBox="0 0 24 24"><rect x="5" y="11" width="14" height="9" rx="2"/><path d="M8 11V8a4 4 0 018 0v3"/></svg>Convite de conexão</span>'+
+      '<h1>Conecte sua carteira</h1>'+
+      '<p class="sub"><b>'+esc(who)+'</b> convidou você para conectar sua carteira à mesa de operação, no papel abaixo. Você confirma pela sua própria carteira — <b>sem acessar a conta do Pay Master</b>.</p>'+
+      '<div class="role-box"><div class="ri '+r.cls+'"><svg viewBox="0 0 24 24">'+r.ico+'</svg></div>'+
+        '<div><div class="rl">Seu papel</div><div class="rn">'+r.label+'</div><div class="rnet">Rede: '+(NETLABEL[invite.network]||invite.network)+'</div></div></div>'+
+      '<button class="btn btn-primary" id="btnConfirm"><svg viewBox="0 0 24 24"><rect x="3" y="6" width="18" height="13" rx="2"/><path d="M16 12h2M3 10h18"/></svg>Conectar Verum Wallet e confirmar</button>'+
+      '<div class="alt">Não tem carteira instalada? <a id="btnDemo">Usar modo demonstração</a></div>'+
+      '<div class="note"><svg viewBox="0 0 24 24"><path d="M12 3l7 3v5c0 5-3 8-7 10-4-2-7-5-7-10V6z"/><path d="M9 12l2 2 4-4"/></svg><span>Assinar a mensagem apenas prova que você controla a carteira. Não movimenta fundos nem concede permissões.</span></div>';
+    $('#btnConfirm').addEventListener('click',realConfirm);
+    $('#btnDemo').addEventListener('click',demoConfirm);
+  }
+
+  function renderState(kind,title,msg,extra){
+    const ic = kind==='ok'?'<path d="M5 13l4 4L19 7"/>':kind==='err'?'<circle cx="12" cy="12" r="9"/><path d="M15 9l-6 6M9 9l6 6"/>':'<circle cx="12" cy="12" r="9"/><path d="M12 8v4l2 2"/>';
+    $('#body').innerHTML='<div class="state"><div class="ic '+kind+'"><svg viewBox="0 0 24 24">'+ic+'</svg></div><h1 style="text-align:center">'+esc(title)+'</h1><p class="sub" style="text-align:center;margin-top:8px">'+esc(msg)+'</p>'+(extra||'')+'</div>';
+  }
+  const esc = s => String(s==null?'':s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+
+  function busy(on,label){ const btn=$('#btnConfirm'); if(!btn) return; btn.disabled=on; btn.innerHTML=on?'<span class="spin"></span>'+(label||'Aguarde…'):'Conectar Verum Wallet e confirmar'; }
+
+  // Caminho real: conecta carteira injetada, assina o desafio, verifica e confirma.
+  async function realConfirm(){
+    // A rede escolhida (invite.network) pode ser 'multichain' ou qualquer das 18;
+    // a PROVA de posse usa a rede de auth suportada (Verum = Solana por baixo).
+    const net=authNetFor(invite.network);
+    try{
+      busy(true,'Conectando carteira…');
+      const w=await connectWallet(net);
+      busy(true,'Assine o desafio…');
+      const ch=await api('/v1/auth/challenge?network='+encodeURIComponent(net)+'&address='+encodeURIComponent(w.address));
+      const signature=await signMessage(net,w.address,ch.message);
+      const issuedAt=(ch.message.match(/Emitido em: (.+)/)||[])[1];
+      const expiresAt=(ch.message.match(/Expira em: (.+)/)||[])[1];
+      const ver=await api('/v1/auth/verify',{method:'POST',body:{network:net,address:w.address,nonce:ch.nonce,signature,issuedAt,expiresAt}});
+      busy(true,'Confirmando…');
+      const addresses=await collectVerumAddresses();
+      await api('/v1/portal/mesa/invites/'+encodeURIComponent(token)+'/confirm',{method:'POST',token:ver.token,body:{addresses}});
+      success(w.address, addresses);
+    }catch(ex){
+      if(ex.code==='NO_WALLET'){ toast(ex.message+' — tente o modo demonstração.','err'); busy(false); return; }
+      toast(ex.message||'Falha ao confirmar','err'); busy(false);
+    }
+  }
+
+  // Modo demo (apenas em OTC_ENV=dev no servidor): confirma com endereço simulado, sem assinatura.
+  async function demoConfirm(){
+    const net=authNetFor(invite.network); const address=net==='ethereum'?hexAddr():('demo'+Math.random().toString(36).slice(2,10));
+    try{
+      await api('/v1/portal/mesa/invites/'+encodeURIComponent(token)+'/confirm',{method:'POST',body:{address,network:net}});
+      success(address);
+    }catch(ex){ toast(ex.message||'Modo demo indisponível neste ambiente','err'); }
+  }
+
+  function success(address, addresses){
+    const multi=Array.isArray(addresses)&&addresses.length>1;
+    renderState('ok','Carteira conectada!','Sua carteira foi conectada à mesa como '+((ROLE[invite.role]||{}).label||invite.role)+'. O Pay Master já vê a confirmação em tempo real. Você pode fechar esta página.',
+      '<div class="mono" style="text-align:center;margin-top:14px">'+esc(shortAddr(address))+'</div>'+
+      (multi?'<div style="text-align:center;margin-top:4px;font-size:12px;color:var(--ink-3)">Carteira multichain · '+addresses.length+' redes</div>':'')+
+      '<div id="pf" style="margin-top:14px;font-size:12.5px;color:var(--ink-3)">Lendo saldos…</div>');
+    const list=(multi||( Array.isArray(addresses)&&addresses.length))?addresses:[{network:authNetFor(invite.network),address:address}];
+    api('/v1/chains/balances',{method:'POST',body:{addresses:list}}).then(res=>{
+      const el=$('#pf'); if(!el) return; const items=(res&&res.items)||[];
+      if(!items.length){ el.textContent='Nenhuma rede com saldo.'; return; }
+      const row=(l,r,ind)=>'<div style="display:flex;justify-content:space-between;gap:10px;padding:5px 0;border-bottom:1px solid var(--line);'+(ind?'padding-left:14px':'')+'"><span style="color:'+(ind?'var(--ink-3)':'var(--ink-2)')+'">'+l+'</span><span class="mono" style="color:var(--ink)">'+r+'</span></div>';
+      const val=it=>{ const v=it.valueUsd!=null?' · '+fmtUsd(it.valueUsd):''; return esc(fmtAmt(it.amount)+' '+it.symbol+v); };
+      const rows=items.map(it=>{
+        let right; if(it.supported===false) right='não suportada'; else if(!it.ok) right='indisponível'; else right=val(it);
+        let html=row('<b>'+esc(it.displayName||it.network)+'</b>',right,false);
+        (it.tokens||[]).filter(t=>t&&t.amount>0).forEach(t=>{ html+=row(esc(t.symbol),val(t),true); });
+        return html;
+      }).join('');
+      const total=(res&&res.totalUsd)?'<div style="margin-top:8px;text-align:right;color:var(--ink);font-weight:600">Total ≈ '+fmtUsd(res.totalUsd)+'</div>':'';
+      el.innerHTML=rows+total;
+    }).catch(()=>{ const el=$('#pf'); if(el) el.textContent='Não foi possível ler os saldos agora.'; });
+  }
+
+  (async function init(){
+    if(!token){ render(); return; }
+    try{ invite=await api('/v1/portal/mesa/invites/'+encodeURIComponent(token)); render(); }
+    catch(ex){ renderState('err','Convite não encontrado',ex.message||'Este convite não existe ou expirou.'); }
+  })();
+})();
+</script>
+</body>
+</html>

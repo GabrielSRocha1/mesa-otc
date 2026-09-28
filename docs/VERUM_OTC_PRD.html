@@ -1,0 +1,778 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>VERUM OTC — Product Requirements Document v0.1</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Sora:wght@500;600;700&family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+:root{
+  --bg:#F4F7FB; --paper:#FFFFFF; --ink:#0B1B33; --ink-2:#3A4A66; --muted:#6B7A94;
+  --blue:#0B4DA2; --blue-2:#0E63C9; --blue-soft:#E4EEFA; --line:#D6DEEA;
+  --green:#0F8A4B; --green-soft:#E3F5EA; --amber:#B7791F; --amber-soft:#FBF1DE;
+  --red:#B42318; --red-soft:#FBE7E5;
+  --sans:"Inter",system-ui,-apple-system,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+  --head:"Sora","Inter",system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;
+  --mono:"JetBrains Mono",ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+  box-sizing:border-box;
+  padding-top:env(safe-area-inset-top,0px); padding-bottom:env(safe-area-inset-bottom,0px);
+}
+@media (prefers-color-scheme: dark){ :root:not([data-theme="light"]){
+  --bg:#0A0E1A; --paper:#111A2E; --ink:#EAF0FA; --ink-2:#C2CEE3; --muted:#8B9AB8;
+  --blue:#6FA8F0; --blue-2:#8CBBF5; --blue-soft:#15274A; --line:#24314D;
+  --green:#4CC97F; --green-soft:#0F2E1E; --amber:#E0B25E; --amber-soft:#3A2C12;
+  --red:#F08A80; --red-soft:#3D1B18;
+}}
+:root[data-theme="dark"]{
+  --bg:#0A0E1A; --paper:#111A2E; --ink:#EAF0FA; --ink-2:#C2CEE3; --muted:#8B9AB8;
+  --blue:#6FA8F0; --blue-2:#8CBBF5; --blue-soft:#15274A; --line:#24314D;
+  --green:#4CC97F; --green-soft:#0F2E1E; --amber:#E0B25E; --amber-soft:#3A2C12;
+  --red:#F08A80; --red-soft:#3D1B18;
+}
+*{box-sizing:inherit}
+html{scroll-padding-top:env(safe-area-inset-top,0px); scroll-behavior:smooth}
+body{margin:0;background:var(--bg);color:var(--ink);font-family:var(--sans);font-size:15.5px;line-height:1.6;-webkit-font-smoothing:antialiased}
+.wrap{max-width:980px;margin:0 auto;padding:24px 18px 64px}
+header.hero{background:var(--paper);border:1px solid var(--line);border-top:5px solid var(--blue);border-radius:12px;padding:26px 24px;margin-bottom:22px}
+.kicker{font-family:var(--mono);font-size:12px;letter-spacing:.12em;text-transform:uppercase;color:var(--blue);margin:0 0 8px}
+h1{font-family:var(--head);font-size:30px;line-height:1.2;margin:0 0 10px;letter-spacing:-.01em}
+.meta{display:flex;flex-wrap:wrap;gap:10px 18px;font-size:13px;color:var(--muted);margin-top:12px}
+.meta b{color:var(--ink-2);font-weight:600}
+nav.toc{background:var(--paper);border:1px solid var(--line);border-radius:12px;padding:18px 22px;margin-bottom:22px}
+nav.toc h2{margin:0 0 10px;font-size:15px}
+nav.toc ol{margin:0;padding-left:22px;columns:2;column-gap:28px}
+nav.toc li{break-inside:avoid;margin:3px 0;font-size:14px}
+nav.toc a{color:var(--blue);text-decoration:none}
+nav.toc a:hover{text-decoration:underline}
+section{background:var(--paper);border:1px solid var(--line);border-radius:12px;padding:22px 24px;margin-bottom:22px}
+h2{font-family:var(--head);font-size:22px;margin:0 0 14px;padding-bottom:10px;border-bottom:2px solid var(--blue-soft);letter-spacing:-.01em}
+h2 .n{font-family:var(--mono);color:var(--blue);font-size:15px;margin-right:10px}
+h3{font-family:var(--head);font-size:16.5px;margin:22px 0 8px;color:var(--ink)}
+h4{font-family:var(--head);font-size:14.5px;margin:16px 0 6px;color:var(--ink-2)}
+p{margin:8px 0}
+ul,ol{margin:6px 0 10px;padding-left:22px}
+li{margin:4px 0}
+code,.id{font-family:var(--mono);font-size:.88em;background:var(--blue-soft);color:var(--blue);padding:1px 6px;border-radius:5px;white-space:nowrap}
+pre{font-family:var(--mono);font-size:13px;background:var(--blue-soft);border:1px solid var(--line);border-radius:8px;padding:14px;overflow-x:auto;line-height:1.5}
+pre code{background:none;padding:0;white-space:pre;color:var(--ink)}
+.tbl{overflow-x:auto;margin:10px 0 14px;border:1px solid var(--line);border-radius:8px}
+table{border-collapse:collapse;width:100%;min-width:560px;font-size:13.5px}
+th,td{border-bottom:1px solid var(--line);padding:9px 11px;vertical-align:top;text-align:left}
+th{background:var(--blue-soft);color:var(--ink);font-family:var(--head);font-weight:600;font-size:12.5px;letter-spacing:.02em}
+tr:last-child td{border-bottom:none}
+.req{display:grid;grid-template-columns:96px 1fr;gap:0 12px;padding:9px 0;border-bottom:1px dashed var(--line)}
+.req:last-child{border-bottom:none}
+.req .id{align-self:start;justify-self:start;font-size:12px}
+.req .must{font-family:var(--mono);font-size:10.5px;color:var(--green);letter-spacing:.08em;margin-left:6px}
+.callout{border-left:4px solid var(--blue);background:var(--blue-soft);padding:12px 16px;border-radius:0 8px 8px 0;margin:14px 0}
+.callout.ok{border-color:var(--green);background:var(--green-soft)}
+.callout.warn{border-color:var(--amber);background:var(--amber-soft)}
+.callout.stop{border-color:var(--red);background:var(--red-soft)}
+.callout p:first-child{margin-top:0}.callout p:last-child{margin-bottom:0}
+.tag{display:inline-block;font-family:var(--mono);font-size:11px;padding:2px 8px;border-radius:999px;border:1px solid var(--line);color:var(--ink-2);margin-right:4px}
+.tag.ok{color:var(--green);border-color:var(--green);background:var(--green-soft)}
+.tag.stop{color:var(--red);border-color:var(--red);background:var(--red-soft)}
+.tag.warn{color:var(--amber);border-color:var(--amber);background:var(--amber-soft)}
+.state{font-family:var(--mono);font-size:12.5px;font-weight:500;color:var(--blue)}
+.grid2{display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:12px}
+.card{border:1px solid var(--line);border-radius:10px;padding:12px 14px;background:var(--bg)}
+.card h4{margin:0 0 6px}
+.story{border:1px solid var(--line);border-radius:10px;padding:12px 14px;margin:10px 0;background:var(--bg)}
+.story .who{font-family:var(--mono);font-size:11.5px;color:var(--blue);letter-spacing:.06em;text-transform:uppercase}
+.story p{margin:4px 0}
+.story .ac{font-size:13.5px;color:var(--ink-2)}
+footer{color:var(--muted);font-size:12.5px;text-align:center;margin-top:18px}
+@media (max-width:640px){
+  .wrap{padding:16px 12px 48px} h1{font-size:24px} section{padding:18px 16px} nav.toc ol{columns:1}
+  .req{grid-template-columns:1fr;gap:4px 0}
+}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<header class="hero">
+  <p class="kicker">Verum Crypto · Infraestrutura Financeira</p>
+  <h1>VERUM OTC — Product Requirements Document</h1>
+  <p style="margin:0;color:var(--ink-2)">Plataforma institucional de negociação OTC/P2P multichain com liquidação programável, assinaturas N-de-N, verificação de ativos e liquidez, roteamento de execução, antifraude e expiração automática.</p>
+  <div class="meta">
+    <span><b>Versão</b> 0.1 — Fase de Descoberta</span>
+    <span><b>Data</b> 24/09/2026</span>
+    <span><b>Estágio</b> Documentação do produto (sem código, sem arquitetura)</span>
+    <span><b>Convenção</b> DEVE / NÃO DEVE / DEVERIA / PODE (RFC 2119)</span>
+  </div>
+</header>
+
+<nav class="toc">
+  <h2>Sumário</h2>
+  <ol>
+    <li><a href="#s1">Product Requirements Document</a></li>
+    <li><a href="#s2">User Stories</a></li>
+    <li><a href="#s3">Requisitos Funcionais</a></li>
+    <li><a href="#s4">Requisitos Não-Funcionais</a></li>
+    <li><a href="#s5">Requisitos de Segurança</a></li>
+    <li><a href="#s6">Requisitos de Ativos</a></li>
+    <li><a href="#s7">Requisitos de Liquidação</a></li>
+    <li><a href="#s8">Requisitos de Assinatura</a></li>
+    <li><a href="#s9">Máquina de Estados</a></li>
+    <li><a href="#s10">Cenários de Falha</a></li>
+    <li><a href="#s11">Threat Model Inicial</a></li>
+    <li><a href="#s12">Critérios de Aceitação</a></li>
+    <li><a href="#s13">Questões que precisam ser congeladas antes da arquitetura</a></li>
+  </ol>
+</nav>
+
+<!-- ===================================================== 1. PRD -->
+<section id="s1">
+  <h2><span class="n">01</span>Product Requirements Document</h2>
+
+  <h3>1.1 Visão</h3>
+  <p>O VERUM OTC é uma camada de liquidação institucional para trocas bilaterais de ativos digitais entre partes identificadas por carteira. A plataforma coordena a negociação, congela os termos, coleta autorizações criptográficas de todas as carteiras obrigatórias e só então executa a liquidação — nunca antes, nunca parcialmente, nunca após a expiração.</p>
+
+  <h3>1.2 Problema</h3>
+  <ul>
+    <li>Operações OTC hoje dependem de confiança pessoal, mensagens fora de banda e transferências "cegas" — a primeira parte a enviar assume o risco total de contraparte.</li>
+    <li>Não existe, para o operador comum, uma forma simples de garantir que <em>todos</em> os envolvidos (incluindo terceiros que aprovam o pagamento) concordaram exatamente com os mesmos termos.</li>
+    <li>Tokens falsos, preços manipulados e "liquidez fantasma" causam perdas irreversíveis em ambientes multichain.</li>
+    <li>Ferramentas existentes ou são exchanges de varejo (excesso de complexidade visível) ou multisigs genéricos (sem verificação de ativo, preço, liquidez ou rota).</li>
+  </ul>
+
+  <h3>1.3 Objetivo principal</h3>
+  <div class="callout ok">
+    <p><b>Vendedor + Comprador + 1 ou 2 Pay Masters</b> criam uma operação (<em>Deal</em>). A Deal só pode ser liquidada quando <b>todas</b> as carteiras obrigatórias tiverem assinado <b>exatamente os mesmos termos</b> (mesmo <em>deal hash</em>), dentro do prazo de expiração.</p>
+    <p>3 participantes → <b>3/3</b>. 4 participantes → <b>4/4</b>. Falta uma assinatura → <b>NÃO LIQUIDAR</b>. Expirou → <b>NÃO LIQUIDAR</b>. Termos mudaram após assinatura → <b>INVALIDAR</b> assinaturas existentes e exigir nova autorização.</p>
+  </div>
+
+  <h3>1.4 Princípios de produto</h3>
+  <ol>
+    <li><b>N-de-N sem exceções.</b> Não existe quórum parcial, override administrativo ou "modo emergência" que liquide sem todas as assinaturas.</li>
+    <li><b>Não custodial por construção.</b> O backend nunca detém seed, chave privada ou capacidade unilateral de mover fundos.</li>
+    <li><b>Termos imutáveis após assinatura.</b> Qualquer alteração produz uma nova revisão da Deal com novo hash; a anterior morre.</li>
+    <li><b>Verificar antes de prometer.</b> Ativo, contrato/mint, carteira, preço, liquidez e rota são verificados <em>antes</em> de a Deal ser apresentada como executável.</li>
+    <li><b>Tempo é parte do contrato.</b> Cada Deal tem expiração absoluta; o tempo é avaliado em toda transição de estado.</li>
+    <li><b>Complexidade invisível.</b> A interface mostra o que o usuário decide e assina; tudo o mais fica no backend e nos protocolos.</li>
+  </ol>
+
+  <h3>1.5 Personas e papéis</h3>
+  <div class="tbl"><table>
+    <tr><th>Papel</th><th>Descrição</th><th>Obrigatório na assinatura</th></tr>
+    <tr><td><b>Vendedor</b></td><td>Parte que entrega o ativo de venda (<em>leg de saída</em>). Normalmente cria a Deal.</td><td>Sim</td></tr>
+    <tr><td><b>Comprador</b></td><td>Parte que entrega o ativo de pagamento (<em>leg de contrapartida</em>) e recebe o ativo de venda.</td><td>Sim</td></tr>
+    <tr><td><b>Pay Master 1</b></td><td>Carteira de aprovação obrigatória. Sua assinatura é condição de liquidação. Seu papel operacional exato (aprovador, provedor de fundos, beneficiário de fee) é uma decisão a congelar — ver Seção 13.</td><td>Sim</td></tr>
+    <tr><td><b>Pay Master 2</b></td><td>Segunda carteira de aprovação, opcional na criação; quando incluída, torna-se obrigatória (4/4).</td><td>Sim, se incluído</td></tr>
+    <tr><td><b>Operador Verum (backoffice)</b></td><td>Observa, audita, pode <em>bloquear</em> (risco) e disparar reembolso de escrow em rota de falha. <b>Nunca</b> assina, libera ou liquida.</td><td>Não — não é signatário</td></tr>
+  </table></div>
+
+  <h3>1.6 Escopo</h3>
+  <div class="grid2">
+    <div class="card"><h4>Dentro do escopo (v1)</h4>
+      <ul>
+        <li>Criação de Deal com 3 ou 4 participantes e uma ou mais <em>legs</em> de ativo.</li>
+        <li>Conexão de carteira (sem seed/chave privada) e assinatura via carteira.</li>
+        <li>Registro canônico de ativos multichain e verificação de contrato/mint.</li>
+        <li>Price Engine agregado multi-fonte com detecção de anomalia.</li>
+        <li>Liquidity Engine e Router Engine, com rota fazendo parte dos termos assinados.</li>
+        <li>Coleta e validação de assinaturas N-de-N sobre um <em>deal hash</em> canônico.</li>
+        <li>Liquidação programável (escrow / HTLC / coordenada) com prevenção de dupla liquidação.</li>
+        <li>Expiração automática, reembolso de escrow, bloqueio por risco.</li>
+        <li>Trilha de auditoria imutável por Deal.</li>
+      </ul></div>
+    <div class="card"><h4>Fora do escopo (v1)</h4>
+      <ul>
+        <li>Order book, matching automático, carteira própria, staking, lending, alavancagem.</li>
+        <li>Custódia de fundos por Verum.</li>
+        <li>Rampa fiat (on/off-ramp) — só entra se for congelado como papel do Pay Master (Seção 13).</li>
+        <li>Chat interno, social, gamificação, notificações push complexas.</li>
+        <li>Mobile nativo (a UI é web responsiva).</li>
+      </ul></div>
+  </div>
+
+  <h3>1.7 Glossário</h3>
+  <div class="tbl"><table>
+    <tr><th>Termo</th><th>Definição</th></tr>
+    <tr><td><b>Deal</b></td><td>Operação OTC; unidade central do sistema. Possui id, revisão, participantes, legs, termos econômicos, rota, expiração e estado.</td></tr>
+    <tr><td><b>Leg</b></td><td>Um movimento de ativo de uma carteira para outra dentro da Deal (ex.: Vendedor → Comprador: 2,5 BTC).</td></tr>
+    <tr><td><b>Termos</b></td><td>Conjunto canônico e determinístico de campos que definem a Deal e que são assinados. Inclui a rota.</td></tr>
+    <tr><td><b>Deal Hash</b></td><td>Hash criptográfico da serialização canônica dos Termos de uma revisão. É <em>o</em> objeto assinado por todas as carteiras.</td></tr>
+    <tr><td><b>Revisão</b></td><td>Versão dos Termos. Toda alteração incrementa a revisão, gera novo hash e invalida assinaturas anteriores.</td></tr>
+    <tr><td><b>Asset ID canônico</b></td><td>Identificador composto (network + chainId + contrato/mint + standard + decimals + emissor) que define um ativo de forma inequívoca.</td></tr>
+    <tr><td><b>Rota</b></td><td>Caminho de execução escolhido pelo Router Engine (direto P2P, via escrow, via agregador/DEX, HTLC), identificado por <code>routeId</code> e <code>routeHash</code>.</td></tr>
+    <tr><td><b>Escrow</b></td><td>Contrato/programa on-chain que retém um ativo até que a condição de liberação (todas as assinaturas válidas, antes da expiração) seja satisfeita ou devolve ao depositante após expiração.</td></tr>
+    <tr><td><b>Finalidade</b></td><td>Número de confirmações/slots após o qual uma transação é considerada irreversível para fins de liquidação, por rede.</td></tr>
+  </table></div>
+
+  <h3>1.8 Fluxo de alto nível (visão do usuário)</h3>
+  <ol>
+    <li>Vendedor cria a Deal: escolhe ativo de venda, quantidade, ativo de pagamento, contrapartes (por endereço), Pay Masters, prazo.</li>
+    <li>Cada participante abre o link da Deal, conecta a carteira correspondente ao seu papel. O sistema verifica carteiras.</li>
+    <li>O sistema verifica ativos, calcula preço de referência, verifica liquidez e escolhe rota. Apresenta um resumo único: "Você entrega X, recebe Y, custo Z, expira em T".</li>
+    <li>Cada participante assina os Termos na carteira. A tela mostra 0/3 → 1/3 → 2/3 → 3/3.</li>
+    <li>Com N/N assinaturas válidas e dentro do prazo, o sistema revalida tudo e executa a liquidação.</li>
+    <li>Todos recebem confirmação com hashes de transação. Se algo falhar ou expirar, o sistema devolve o que estiver em escrow.</li>
+  </ol>
+
+  <h3>1.9 Métricas de sucesso (produto)</h3>
+  <ul>
+    <li>0 liquidações com assinaturas incompletas, expiradas ou sobre hash divergente (métrica de invariante — deve ser zero absoluto).</li>
+    <li>0 liquidações envolvendo ativo não canônico.</li>
+    <li>Tempo mediano da criação da Deal à liquidação, dado que todos assinam em ≤ 10 min.</li>
+    <li>Taxa de Deals bloqueadas por risco vs. Deals legítimas (falsos positivos monitorados).</li>
+    <li>Taxa de reembolso concluído com sucesso após expiração (deve ser 100%).</li>
+  </ul>
+</section>
+
+<!-- ===================================================== 2. USER STORIES -->
+<section id="s2">
+  <h2><span class="n">02</span>User Stories</h2>
+
+  <h3>Criação e configuração</h3>
+  <div class="story"><span class="who">US-01 · Vendedor</span><p>Como Vendedor, quero criar uma Deal informando o que vendo, o que quero receber, quem compra e quem aprova, para que a negociação fique registrada em termos únicos.</p><p class="ac">Aceite: a Deal nasce em <span class="state">DRAFT</span>, com participantes obrigatórios e uma expiração definida.</p></div>
+  <div class="story"><span class="who">US-02 · Vendedor</span><p>Como Vendedor, quero definir 1 ou 2 Pay Masters, para que a liquidação exija aprovação de terceiros de confiança.</p><p class="ac">Aceite: o número de assinaturas obrigatórias é exatamente igual ao número de participantes (3/3 ou 4/4).</p></div>
+  <div class="story"><span class="who">US-03 · Qualquer participante</span><p>Como participante, quero receber um link/identificador da Deal e ver os termos antes de conectar a carteira, para decidir se participo.</p><p class="ac">Aceite: a visualização é somente leitura e não expõe dados de outras carteiras além do necessário.</p></div>
+
+  <h3>Carteira e identidade</h3>
+  <div class="story"><span class="who">US-04 · Qualquer participante</span><p>Como participante, quero conectar minha carteira e provar que controlo o endereço do meu papel, sem nunca digitar seed phrase ou chave privada.</p><p class="ac">Aceite: a prova é feita por assinatura de mensagem na carteira; o sistema rejeita qualquer endereço que não coincida com o esperado para o papel.</p></div>
+  <div class="story"><span class="who">US-05 · Comprador</span><p>Como Comprador, quero que o sistema me avise se a carteira do Vendedor apresenta sinais de risco, para não avançar cegamente.</p><p class="ac">Aceite: alertas de risco são exibidos antes da etapa de assinatura; risco alto bloqueia a Deal.</p></div>
+
+  <h3>Ativos, preço, liquidez e rota</h3>
+  <div class="story"><span class="who">US-06 · Comprador</span><p>Como Comprador, quero ter certeza de que o "USDT" que vou receber é o USDT canônico daquela rede, para não receber um token falso.</p><p class="ac">Aceite: só ativos do registro canônico são aceitos; contrato/mint é verificado on-chain e exibido na tela de confirmação.</p></div>
+  <div class="story"><span class="who">US-07 · Vendedor</span><p>Como Vendedor, quero ver preço de referência, valor em USD, deságio, fee, slippage, custo de rede e valor líquido em uma única tela, para saber exatamente o que recebo.</p><p class="ac">Aceite: todos os campos são calculados pelo Price Engine e congelados nos Termos.</p></div>
+  <div class="story"><span class="who">US-08 · Qualquer participante</span><p>Como participante, quero que a Deal só apareça como "executável" quando existe liquidez real para a quantidade, para não assinar algo que não pode ser cumprido.</p><p class="ac">Aceite: sem liquidez suficiente, a Deal fica em <span class="state">ASSETS_VERIFIED</span> com explicação e não avança para assinatura.</p></div>
+  <div class="story"><span class="who">US-09 · Pay Master</span><p>Como Pay Master, quero ver a rota de execução que será usada, para aprovar não só o "quê" mas o "como".</p><p class="ac">Aceite: a rota (id + hash) é parte dos Termos e visível no resumo de assinatura.</p></div>
+
+  <h3>Assinatura e liquidação</h3>
+  <div class="story"><span class="who">US-10 · Qualquer participante</span><p>Como participante, quero assinar exatamente os termos exibidos, com a certeza de que ninguém pode alterá-los depois sem que eu precise assinar novamente.</p><p class="ac">Aceite: qualquer alteração de termo/rota gera nova revisão e zera as assinaturas; a UI exibe claramente "termos alterados — nova assinatura necessária".</p></div>
+  <div class="story"><span class="who">US-11 · Qualquer participante</span><p>Como participante, quero ver em tempo real quantas assinaturas faltam (ex.: 2/3) e quem ainda não assinou.</p><p class="ac">Aceite: contador N/N atualizado sem recarregar a página; identidade dos pendentes exibida por papel e endereço abreviado.</p></div>
+  <div class="story"><span class="who">Vendedor / Comprador</span><p>US-12 · Como parte que entrega ativo, quero que a liquidação ocorra automaticamente após N/N, sem que eu precise "confiar" que a outra parte envie primeiro.</p><p class="ac">Aceite: a rota escolhida garante atomicidade ou escrow com reembolso; nenhuma parte fica exposta a perda unilateral na rota padrão.</p></div>
+  <div class="story"><span class="who">US-13 · Qualquer participante</span><p>Como participante, quero saber com certeza que a Deal expirou e que meus fundos em escrow voltaram, para não ficar com dinheiro preso.</p><p class="ac">Aceite: estado <span class="state">EXPIRED</span> → <span class="state">REFUNDING</span> → <span class="state">REFUNDED</span> visível, com hash da transação de reembolso.</p></div>
+  <div class="story"><span class="who">US-14 · Qualquer participante</span><p>Como participante, quero cancelar minha participação antes de assinar (ou antes de todos assinarem), para sair de uma negociação que não me serve.</p><p class="ac">Aceite: cancelamento leva a Deal a <span class="state">CANCELLED</span> e devolve escrow, se houver; após <span class="state">FULLY_SIGNED</span> não há cancelamento unilateral.</p></div>
+
+  <h3>Operação e auditoria</h3>
+  <div class="story"><span class="who">US-15 · Operador Verum</span><p>Como operador, quero bloquear uma Deal com sinais de fraude antes da liquidação e registrar o motivo, sem jamais ter poder de liquidar ou mover fundos.</p><p class="ac">Aceite: bloqueio leva a <span class="state">BLOCKED</span>; a única saída é reembolso/cancelamento; nunca liquidação.</p></div>
+  <div class="story"><span class="who">US-16 · Operador Verum / Auditor</span><p>Como auditor, quero reconstruir toda a linha do tempo de uma Deal (termos por revisão, assinaturas, verificações, hashes de transação) a partir de um registro imutável.</p><p class="ac">Aceite: cada evento tem timestamp, ator, hash anterior e é append-only.</p></div>
+</section>
+
+<!-- ===================================================== 3. RF -->
+<section id="s3">
+  <h2><span class="n">03</span>Requisitos Funcionais</h2>
+
+  <h3>3.1 Deal e participantes</h3>
+  <div class="req"><span class="id">RF-001</span><div>O sistema DEVE permitir criar uma Deal com exatamente um Vendedor, um Comprador e 1 ou 2 Pay Masters. Nenhuma outra composição é válida na v1.</div></div>
+  <div class="req"><span class="id">RF-002</span><div>Cada participante DEVE ser identificado por papel + rede + endereço. O mesmo endereço NÃO DEVE ocupar dois papéis na mesma Deal.</div></div>
+  <div class="req"><span class="id">RF-003</span><div>O número de assinaturas obrigatórias (<code>requiredSignatures</code>) DEVE ser igual ao número de participantes e DEVE ser fixado nos Termos.</div></div>
+  <div class="req"><span class="id">RF-004</span><div>Uma Deal DEVE conter ao menos duas legs opostas (ativo de venda e ativo de pagamento). Cada leg DEVE ter: asset ID canônico, quantidade em unidades base (inteiro), carteira de origem, carteira de destino.</div></div>
+  <div class="req"><span class="id">RF-005</span><div>Cada Deal DEVE ter um <code>expiresAt</code> absoluto (UTC). O criador PODE escolher a duração dentro de limites configurados (padrão e máximo a congelar — Seção 13).</div></div>
+  <div class="req"><span class="id">RF-006</span><div>O sistema DEVE gerar um identificador único de Deal (<code>dealId</code>) e um número de revisão (<code>revision</code>) iniciado em 1.</div></div>
+  <div class="req"><span class="id">RF-007</span><div>Qualquer alteração em campo dos Termos DEVE incrementar <code>revision</code>, recalcular o <code>dealHash</code>, apagar todas as assinaturas coletadas e notificar todos os participantes.</div></div>
+  <div class="req"><span class="id">RF-008</span><div>Antes de <span class="state">FULLY_SIGNED</span>, qualquer participante obrigatório PODE cancelar a Deal. Após <span class="state">FULLY_SIGNED</span>, NÃO DEVE existir cancelamento unilateral.</div></div>
+
+  <h3>3.2 Carteiras</h3>
+  <div class="req"><span class="id">RF-010</span><div>A conexão de carteira DEVE ocorrer exclusivamente por provedores de carteira (extensão, mobile, WalletConnect ou equivalente por rede). O sistema NÃO DEVE exibir campos para seed phrase ou chave privada.</div></div>
+  <div class="req"><span class="id">RF-011</span><div>Ao conectar, o participante DEVE provar controle do endereço assinando um desafio (nonce único, com <code>dealId</code>, papel e timestamp), verificado pelo backend.</div></div>
+  <div class="req"><span class="id">RF-012</span><div>O sistema DEVE rejeitar a conexão se o endereço conectado não coincidir com o endereço registrado para o papel.</div></div>
+  <div class="req"><span class="id">RF-013</span><div>O sistema DEVE executar verificação de carteira (idade, histórico, listas de sanção/risco configuradas, interação com contratos maliciosos conhecidos) e atribuir um nível de risco a cada participante.</div></div>
+  <div class="req"><span class="id">RF-014</span><div>A Deal DEVE avançar para <span class="state">WALLETS_CONNECTED</span> somente quando todos os participantes obrigatórios tiverem carteira conectada e verificada.</div></div>
+
+  <h3>3.3 Ativos</h3>
+  <div class="req"><span class="id">RF-020</span><div>O sistema DEVE manter um Registro Canônico de Ativos (Seção 6) e DEVE aceitar em uma Deal apenas ativos presentes nele.</div></div>
+  <div class="req"><span class="id">RF-021</span><div>Para cada leg, o sistema DEVE verificar on-chain que o contrato/mint corresponde ao registro (código/bytecode ou autoridade de mint, decimals, símbolo, supply plausível) antes de <span class="state">ASSETS_VERIFIED</span>.</div></div>
+  <div class="req"><span class="id">RF-022</span><div>O sistema DEVE verificar saldo suficiente na carteira de origem de cada leg e, quando aplicável, <em>allowance</em>/autorização para o escrow.</div></div>
+  <div class="req"><span class="id">RF-023</span><div>A UI DEVE exibir, no resumo de assinatura, o identificador canônico completo (rede, contrato/mint abreviado com opção de cópia integral) de cada ativo.</div></div>
+
+  <h3>3.4 Price Engine</h3>
+  <div class="req"><span class="id">RF-030</span><div>O Price Engine DEVE consultar no mínimo 3 fontes independentes de preço para cada ativo com cotação de mercado e DEVE registrar cada leitura (fonte, valor, timestamp).</div></div>
+  <div class="req"><span class="id">RF-031</span><div>O preço de referência DEVE ser derivado por agregação robusta (ex.: mediana ponderada) e NÃO DEVE depender de uma única fonte.</div></div>
+  <div class="req"><span class="id">RF-032</span><div>Se a dispersão entre fontes ultrapassar o limiar configurado, ou se uma fonte divergir da mediana além do limiar, o Price Engine DEVE sinalizar anomalia e a Deal NÃO DEVE avançar para assinatura.</div></div>
+  <div class="req"><span class="id">RF-033</span><div>O Price Engine DEVE calcular e congelar nos Termos: preço de referência, valor em USD de cada leg, quantidade do ativo recebido, deságio (percentual e absoluto), fee da plataforma, slippage máximo tolerado, custo estimado de rede por leg e valor líquido por parte.</div></div>
+  <div class="req"><span class="id">RF-034</span><div>Toda cotação DEVE ter validade (<code>priceValidUntil</code>). Cotação vencida antes da assinatura completa DEVE ser reavaliada; se o novo preço sair da banda tolerada, gera nova revisão (RF-007).</div></div>
+
+  <h3>3.5 Liquidity Engine</h3>
+  <div class="req"><span class="id">RF-040</span><div>Antes de <span class="state">LIQUIDITY_VERIFIED</span>, o sistema DEVE verificar que existe liquidez suficiente para a quantidade da Deal em ao menos uma rota viável.</div></div>
+  <div class="req"><span class="id">RF-041</span><div>A verificação DEVE consultar múltiplas fontes quando disponíveis e avaliar: liquidez disponível, profundidade, slippage estimado para o tamanho, fees, volume recente, rota, risco da fonte e disponibilidade/latência.</div></div>
+  <div class="req"><span class="id">RF-042</span><div>Uma Deal NÃO DEVE ser apresentada como executável quando a liquidez disponível for insuficiente ou quando o slippage estimado exceder o máximo tolerado.</div></div>
+  <div class="req"><span class="id">RF-043</span><div>Para rotas puramente P2P (transferência direta de ativo entre as partes, sem conversão), a verificação de liquidez DEVE reduzir-se à verificação de saldo/escrow das partes (RF-022) e o motivo DEVE ser registrado.</div></div>
+
+  <h3>3.6 Router Engine</h3>
+  <div class="req"><span class="id">RF-050</span><div>O Router Engine DEVE enumerar as rotas viáveis, pontuá-las (custo total, slippage, risco, tempo estimado) e selecionar a melhor.</div></div>
+  <div class="req"><span class="id">RF-051</span><div>A rota selecionada DEVE ser representada por <code>routeId</code> + <code>routeHash</code> (hash da descrição determinística da rota) e DEVE fazer parte dos Termos.</div></div>
+  <div class="req"><span class="id">RF-052</span><div>Se após qualquer assinatura a rota deixar de ser viável ou mudar, a revisão atual DEVE ser invalidada (RF-007) e uma nova revisão com a nova rota DEVE exigir novas assinaturas.</div></div>
+  <div class="req"><span class="id">RF-053</span><div>Na <span class="state">SETTLEMENT_VALIDATION</span> o Router Engine DEVE reconfirmar que a rota assinada ainda é executável dentro das tolerâncias assinadas; caso contrário, NÃO DEVE liquidar.</div></div>
+
+  <h3>3.7 Assinaturas</h3>
+  <div class="req"><span class="id">RF-060</span><div>O sistema DEVE apresentar a cada participante os Termos na íntegra e o <code>dealHash</code> antes de solicitar assinatura na carteira.</div></div>
+  <div class="req"><span class="id">RF-061</span><div>O sistema DEVE validar cada assinatura recebida contra o <code>dealHash</code> da revisão corrente, o endereço do papel e o padrão de assinatura da rede (Seção 8); assinaturas inválidas DEVEM ser rejeitadas e registradas.</div></div>
+  <div class="req"><span class="id">RF-062</span><div>O sistema DEVE manter o contador de assinaturas válidas por revisão e DEVE transitar para <span class="state">FULLY_SIGNED</span> somente quando <code>validSignatures == requiredSignatures</code>.</div></div>
+  <div class="req"><span class="id">RF-063</span><div>Uma assinatura de revisão anterior NÃO DEVE ser contabilizada para revisão posterior, mesmo que os campos alterados sejam "irrelevantes".</div></div>
+
+  <h3>3.8 Liquidação</h3>
+  <div class="req"><span class="id">RF-070</span><div>Ao entrar em <span class="state">FULLY_SIGNED</span> o sistema DEVE transitar automaticamente para <span class="state">SETTLEMENT_VALIDATION</span> e executar a lista de verificações da Seção 7.3.</div></div>
+  <div class="req"><span class="id">RF-071</span><div>A liquidação DEVE seguir exclusivamente a rota assinada e DEVE ser idempotente: uma mesma Deal/revisão NÃO DEVE ser liquidada mais de uma vez.</div></div>
+  <div class="req"><span class="id">RF-072</span><div>O sistema DEVE aguardar a finalidade configurada por rede antes de marcar uma leg como concluída e a Deal como <span class="state">SETTLED</span>.</div></div>
+  <div class="req"><span class="id">RF-073</span><div>Em falha parcial durante <span class="state">SETTLING</span>, o sistema DEVE interromper novas legs, transitar para <span class="state">BLOCKED</span> e iniciar a rota de reembolso/compensação definida para a rota.</div></div>
+
+  <h3>3.9 Expiração e reembolso</h3>
+  <div class="req"><span class="id">RF-080</span><div>Um processo de expiração DEVE avaliar continuamente as Deals ativas; ao atingir <code>expiresAt</code> sem <span class="state">SETTLING</span> iniciado, a Deal DEVE ir para <span class="state">EXPIRED</span>.</div></div>
+  <div class="req"><span class="id">RF-081</span><div>A verificação de expiração DEVE ocorrer também de forma síncrona em toda transição de estado e em toda tentativa de aceitar assinatura.</div></div>
+  <div class="req"><span class="id">RF-082</span><div>Se houver fundos em escrow, <span class="state">EXPIRED</span> DEVE transitar para <span class="state">REFUNDING</span> e, após confirmação do reembolso, para <span class="state">REFUNDED</span>. O reembolso DEVE ser executável pelo próprio depositante (sem depender do backend) e o backend DEVE apenas facilitá-lo.</div></div>
+  <div class="req"><span class="id">RF-083</span><div>Uma Deal em <span class="state">EXPIRED</span>, <span class="state">REFUNDING</span>, <span class="state">REFUNDED</span>, <span class="state">CANCELLED</span> ou <span class="state">BLOCKED</span> NÃO DEVE aceitar assinaturas nem entrar em liquidação.</div></div>
+
+  <h3>3.10 Notificações, auditoria e interface</h3>
+  <div class="req"><span class="id">RF-090</span><div>Todo evento relevante (criação, conexão, verificação, revisão, assinatura, transição, transação, bloqueio) DEVE ser registrado em trilha de auditoria append-only com encadeamento por hash.</div></div>
+  <div class="req"><span class="id">RF-091</span><div>Os participantes DEVEM ser notificados (in-app, e opcionalmente e-mail) a cada mudança de estado, nova revisão e assinatura recebida.</div></div>
+  <div class="req"><span class="id">RF-092</span><div>A UI DEVE reduzir-se a: criar Deal, conectar carteira, revisar termos, assinar, acompanhar status, ver comprovantes. Nenhum gráfico de mercado, order book ou elemento de varejo.</div></div>
+  <div class="req"><span class="id">RF-093</span><div>A UI DEVE usar paleta azul (estrutura/informação), branco (superfícies) e verde (ações primárias e confirmações). Estados de erro/bloqueio usam vermelho; atenção usa âmbar. Verde NÃO DEVE ser usado para nada que não seja ação ou confirmação.</div></div>
+</section>
+
+<!-- ===================================================== 4. RNF -->
+<section id="s4">
+  <h2><span class="n">04</span>Requisitos Não-Funcionais</h2>
+  <div class="req"><span class="id">RNF-001</span><div><b>Correção acima de disponibilidade.</b> Em qualquer dúvida (dados inconsistentes, fonte indisponível, relógio suspeito), o sistema DEVE recusar avançar em vez de liquidar.</div></div>
+  <div class="req"><span class="id">RNF-002</span><div><b>Consistência forte para o estado da Deal.</b> Transições de estado DEVEM ser serializadas por Deal (lock/versão otimista); duas transições concorrentes NÃO DEVEM ambas ter sucesso.</div></div>
+  <div class="req"><span class="id">RNF-003</span><div><b>Idempotência.</b> Todo endpoint que altera estado DEVE aceitar chave de idempotência; reenvio DEVE produzir o mesmo resultado sem efeito duplicado.</div></div>
+  <div class="req"><span class="id">RNF-004</span><div><b>Tempo confiável.</b> Servidores DEVEM ter relógio sincronizado (NTP) e o sistema DEVE tolerar deriva máxima definida; expiração DEVE ser avaliada com fonte de tempo do backend, nunca do cliente.</div></div>
+  <div class="req"><span class="id">RNF-005</span><div><b>Latência de UI.</b> Atualização do contador de assinaturas e mudança de estado DEVEM refletir na UI em ≤ 2 s (push/streaming).</div></div>
+  <div class="req"><span class="id">RNF-006</span><div><b>Latência de verificação.</b> Verificação de ativo + preço + liquidez + rota DEVE concluir em ≤ 10 s em condições normais; acima disso a UI DEVE exibir progresso explícito.</div></div>
+  <div class="req"><span class="id">RNF-007</span><div><b>Disponibilidade.</b> Alvo inicial 99,5% para a API de Deals. Indisponibilidade de uma fonte de preço/liquidez NÃO DEVE derrubar o serviço, apenas degradar (com recusa de avanço se o mínimo de fontes não for atingido).</div></div>
+  <div class="req"><span class="id">RNF-008</span><div><b>Observabilidade.</b> Métricas, logs estruturados e traces por <code>dealId</code>; alertas para: anomalia de preço, falha de reembolso, Deal presa em <span class="state">SETTLING</span> além do tempo esperado, divergência entre estado interno e on-chain.</div></div>
+  <div class="req"><span class="id">RNF-009</span><div><b>Extensibilidade multichain.</b> Adicionar uma rede ou ativo NÃO DEVE exigir alteração da máquina de estados nem do formato de Termos; apenas novo adaptador de rede e nova entrada no registro canônico.</div></div>
+  <div class="req"><span class="id">RNF-010</span><div><b>Precisão numérica.</b> Quantidades DEVEM ser tratadas como inteiros em unidades base (satoshi, wei, lamport, unidades de token) em todo o backend; conversão para decimal apenas na camada de exibição.</div></div>
+  <div class="req"><span class="id">RNF-011</span><div><b>Auditabilidade.</b> Deve ser possível reconstruir e re-verificar offline o <code>dealHash</code> e todas as assinaturas de qualquer Deal a partir do registro de auditoria.</div></div>
+  <div class="req"><span class="id">RNF-012</span><div><b>Privacidade.</b> Endereços de participantes DEVEM ser visíveis apenas aos participantes da Deal e ao backoffice; links de Deal DEVEM ser não enumeráveis.</div></div>
+  <div class="req"><span class="id">RNF-013</span><div><b>Compatibilidade de cliente.</b> UI web responsiva, funcional em navegadores desktop e mobile modernos (incl. Brave mobile), sem dependência de CDN para layout.</div></div>
+  <div class="req"><span class="id">RNF-014</span><div><b>Retenção.</b> Trilha de auditoria retida por período a definir com compliance (mínimo sugerido: 5 anos).</div></div>
+</section>
+
+<!-- ===================================================== 5. RS -->
+<section id="s5">
+  <h2><span class="n">05</span>Requisitos de Segurança</h2>
+
+  <h3>5.1 Custódia e chaves</h3>
+  <div class="req"><span class="id">RS-001</span><div>A aplicação NÃO DEVE, em nenhuma tela, fluxo, log ou suporte, solicitar, receber ou armazenar seed phrase ou chave privada de usuário.</div></div>
+  <div class="req"><span class="id">RS-002</span><div>O backend NÃO DEVE possuir capacidade unilateral de movimentar fundos de usuário. Qualquer chave operada pelo backend (ex.: relayer que paga gás, chave de "facilitador" de reembolso) DEVE ser incapaz de alterar destino, valor ou condição de liberação.</div></div>
+  <div class="req"><span class="id">RS-003</span><div>A condição de liberação do escrow DEVE ser verificável on-chain (assinaturas N-de-N sobre o <code>dealHash</code> e <code>expiresAt</code>) ou por mecanismo de atomicidade (HTLC) — nunca por um simples "ok" do backend.</div></div>
+
+  <h3>5.2 Assinatura, nonce e replay</h3>
+  <div class="req"><span class="id">RS-010</span><div>Todo payload assinado DEVE incluir: identificador de domínio (nome da aplicação, versão, ambiente), <code>dealId</code>, <code>revision</code>, <code>dealHash</code>, <code>chainId</code>/rede do signatário, papel, nonce único e <code>expiresAt</code>.</div></div>
+  <div class="req"><span class="id">RS-011</span><div>Nonces DEVEM ser gerados pelo backend, únicos por (Deal, revisão, participante), de uso único e com validade curta; reutilização DEVE ser rejeitada.</div></div>
+  <div class="req"><span class="id">RS-012</span><div>Assinaturas NÃO DEVEM ser reutilizáveis entre Deals, revisões, redes, ambientes (testnet/mainnet) ou papéis (proteção contra replay em todas as dimensões).</div></div>
+  <div class="req"><span class="id">RS-013</span><div>A validação de assinatura DEVE ser feita no backend e, quando a rota usa escrow on-chain, também on-chain; a UI nunca é fonte de verdade.</div></div>
+  <div class="req"><span class="id">RS-014</span><div>Assinaturas de contratos inteligentes (ex.: carteiras smart-account) PODEM ser suportadas apenas se a rede tiver padrão de verificação on-chain estabelecido; caso contrário, o papel DEVE ser ocupado por carteira de chave externa.</div></div>
+
+  <h3>5.3 Ativos e verificação</h3>
+  <div class="req"><span class="id">RS-020</span><div>O sistema DEVE recusar qualquer ativo cujo contrato/mint não conste do registro canônico, mesmo que nome, símbolo e decimals coincidam.</div></div>
+  <div class="req"><span class="id">RS-021</span><div>Alterações no registro canônico DEVEM exigir aprovação de duas pessoas (four-eyes), assinatura do registro e trilha de auditoria; DEVEM entrar em vigor apenas para Deals novas.</div></div>
+  <div class="req"><span class="id">RS-022</span><div>O sistema DEVE verificar que o endereço de destino de cada leg é um endereço válido para a rede/ativo (formato, checksum, tipo de conta) e NÃO DEVE liquidar para endereço de contrato não esperado.</div></div>
+
+  <h3>5.4 Preço, liquidez e rota</h3>
+  <div class="req"><span class="id">RS-030</span><div>Fontes de preço e liquidez DEVEM ser configuradas com peso, limite de desvio e status de confiança; fontes com falhas repetidas DEVEM ser automaticamente rebaixadas.</div></div>
+  <div class="req"><span class="id">RS-031</span><div>Detecção de anomalia de preço DEVE considerar: desvio entre fontes, desvio vs. média móvel recente, salto abrupto entre leituras consecutivas e idade da leitura.</div></div>
+  <div class="req"><span class="id">RS-032</span><div>A rota assinada DEVE ser validada novamente imediatamente antes da execução; execução por rota diferente da assinada NÃO DEVE ser possível.</div></div>
+
+  <h3>5.5 Liquidação e dupla execução</h3>
+  <div class="req"><span class="id">RS-040</span><div>A liquidação DEVE adquirir um lock exclusivo por Deal antes de emitir qualquer transação; a existência de transação de liquidação já emitida DEVE ser verificada on-chain e no registro interno.</div></div>
+  <div class="req"><span class="id">RS-041</span><div>Contratos/programas de escrow DEVEM marcar a Deal como liquidada on-chain (por <code>dealHash</code>) de forma que uma segunda tentativa de liberação seja rejeitada pelo próprio contrato.</div></div>
+  <div class="req"><span class="id">RS-042</span><div>Transações DEVEM ser monitoradas até a finalidade; reorganizações ou reversões DEVEM ser detectadas e a Deal levada a <span class="state">BLOCKED</span> para tratamento.</div></div>
+
+  <h3>5.6 Controles de risco e operação</h3>
+  <div class="req"><span class="id">RS-050</span><div>O sistema DEVE aplicar limites configuráveis: valor máximo por Deal, por carteira por período, número de Deals abertas por carteira, e DEVE bloquear ou exigir revisão acima dos limites.</div></div>
+  <div class="req"><span class="id">RS-051</span><div>Monitoramento de transação DEVE alertar sobre: fundos de origem sancionada, mixers conhecidos, contratos maliciosos, carteiras recém-criadas com alto valor, padrões de teste-e-esvaziamento.</div></div>
+  <div class="req"><span class="id">RS-052</span><div>Ações de backoffice (bloquear, disparar reembolso, alterar registro) DEVEM exigir autenticação forte (MFA), autorização por papel e DEVEM ser auditadas.</div></div>
+  <div class="req"><span class="id">RS-053</span><div>Comunicação cliente–backend DEVE usar TLS; a API DEVE ter rate limiting por IP, por sessão e por Deal; links de Deal DEVEM ser tokens não adivinháveis.</div></div>
+  <div class="req"><span class="id">RS-054</span><div>Segredos operacionais (chaves de relayer, credenciais de fontes) DEVEM residir em KMS/HSM com rotação; nunca em código ou variáveis de ambiente em texto plano.</div></div>
+  <div class="req"><span class="id">RS-055</span><div>Contratos de escrow e o código de validação de assinatura DEVEM passar por auditoria externa antes de mainnet.</div></div>
+</section>
+
+<!-- ===================================================== 6. ATIVOS -->
+<section id="s6">
+  <h2><span class="n">06</span>Requisitos de Ativos</h2>
+
+  <h3>6.1 Identificação canônica</h3>
+  <div class="req"><span class="id">RA-001</span><div>Nenhum ativo DEVE ser identificado apenas por nome ou símbolo. O identificador canônico DEVE ser composto pelos campos abaixo.</div></div>
+  <div class="tbl"><table>
+    <tr><th>Campo</th><th>Descrição</th><th>Exemplos</th></tr>
+    <tr><td><code>network</code></td><td>Rede/blockchain</td><td><code>bitcoin</code>, <code>ethereum</code>, <code>solana</code>, <code>zcash</code>, <code>tron</code></td></tr>
+    <tr><td><code>chainId</code></td><td>Identificador de cadeia quando aplicável (EVM: numérico; Solana: cluster; BTC/ZEC: mainnet/testnet)</td><td><code>1</code>, <code>mainnet-beta</code>, <code>mainnet</code></td></tr>
+    <tr><td><code>contractOrMint</code></td><td>Endereço do contrato (EVM/Tron) ou mint (Solana); vazio para ativo nativo</td><td><code>0xdAC1…1ec7</code>, <code>Es9v…nwNYB</code></td></tr>
+    <tr><td><code>assetId</code></td><td>Identificador estável e legível derivado dos campos acima (formato a congelar, ex.: CAIP-19)</td><td><code>eip155:1/erc20:0xdac1…1ec7</code></td></tr>
+    <tr><td><code>decimals</code></td><td>Casas decimais em unidades base</td><td><code>8</code>, <code>18</code>, <code>6</code></td></tr>
+    <tr><td><code>issuer</code></td><td>Emissor/fonte canônica de verdade (site oficial, registro de token oficial, autoridade de mint)</td><td><code>Tether</code>, <code>Circle</code>, <code>native</code></td></tr>
+    <tr><td><code>tokenStandard</code></td><td>Padrão</td><td><code>native</code>, <code>ERC-20</code>, <code>SPL</code>, <code>Token-2022</code>, <code>TRC-20</code></td></tr>
+    <tr><td><code>verificationSources</code></td><td>Fontes usadas para validar o contrato/mint na inclusão no registro</td><td>Lista de fontes + hash da evidência</td></tr>
+  </table></div>
+
+  <h3>6.2 Registro Canônico de Ativos</h3>
+  <div class="req"><span class="id">RA-010</span><div>O sistema DEVE manter um registro com, no lançamento: BTC (nativo), ETH (nativo), SOL (nativo), ZEC (nativo, endereços transparentes — ver Seção 13), USDT e USDC em cada rede suportada, cada um com todos os campos de RA-001.</div></div>
+  <div class="req"><span class="id">RA-011</span><div>O mesmo símbolo em redes diferentes (USDT em Ethereum, Solana, Tron) DEVE ser tratado como ativos distintos e não fungíveis entre si dentro de uma leg.</div></div>
+  <div class="req"><span class="id">RA-012</span><div>Ativos "wrapped", "bridged" ou de emissor não oficial NÃO DEVEM ser confundidos com o canônico; se suportados, DEVEM ter entrada própria e rótulo explícito na UI.</div></div>
+  <div class="req"><span class="id">RA-013</span><div>Cada entrada DEVE ter status (<code>active</code>, <code>suspended</code>, <code>deprecated</code>) e Deals novas NÃO DEVEM usar ativos fora de <code>active</code>.</div></div>
+
+  <h3>6.3 Verificação em tempo de Deal</h3>
+  <div class="req"><span class="id">RA-020</span><div>Para tokens EVM: verificar que o bytecode/hash do contrato no endereço corresponde ao esperado, que <code>decimals</code>/<code>symbol</code> batem e que o contrato não é proxy com implementação alterada desde o registro (ou que a implementação é a esperada).</div></div>
+  <div class="req"><span class="id">RA-021</span><div>Para tokens Solana: verificar mint address, mint authority/freeze authority esperadas, decimals e programa (SPL vs Token-2022); rejeitar mints com extensões de transferência incompatíveis com a rota.</div></div>
+  <div class="req"><span class="id">RA-022</span><div>Para ativos nativos: verificar rede/cluster e formato de endereço; para BTC, o tipo de script suportado pela rota (P2WPKH, P2TR etc.).</div></div>
+  <div class="req"><span class="id">RA-023</span><div>Resultados de verificação DEVEM ser armazenados com timestamp e reutilizáveis por tempo curto; DEVEM ser refeitos na <span class="state">SETTLEMENT_VALIDATION</span>.</div></div>
+
+  <h3>6.4 Quantidades</h3>
+  <div class="req"><span class="id">RA-030</span><div>Quantidades DEVEM ser inteiros em unidades base, com <code>decimals</code> proveniente do registro (nunca do input do usuário nem do contrato em tempo de Deal — apenas confirmado).</div></div>
+  <div class="req"><span class="id">RA-031</span><div>A UI DEVE exibir quantidades com separadores e precisão adequados, mas o campo assinado é sempre o inteiro em unidades base.</div></div>
+</section>
+
+<!-- ===================================================== 7. LIQUIDAÇÃO -->
+<section id="s7">
+  <h2><span class="n">07</span>Requisitos de Liquidação</h2>
+
+  <h3>7.1 Princípios</h3>
+  <div class="req"><span class="id">RL-001</span><div>A liquidação DEVE ser <b>atômica ou reembolsável</b>: ou todas as legs são concluídas, ou nenhuma parte fica com perda unilateral (o que foi depositado retorna ao depositante).</div></div>
+  <div class="req"><span class="id">RL-002</span><div>A liquidação DEVE ser <b>condicionada</b> a: N/N assinaturas válidas sobre o <code>dealHash</code> corrente, <code>now &lt; expiresAt</code>, verificações da Seção 7.3 aprovadas e lock exclusivo adquirido.</div></div>
+  <div class="req"><span class="id">RL-003</span><div>A liquidação DEVE ser <b>programável por rota</b>: cada rota define o modo de liquidação, a ordem das legs, as condições de liberação e a rota de reembolso. Nenhuma lógica de liquidação ad hoc fora da rota assinada.</div></div>
+
+  <h3>7.2 Modos de liquidação suportados (por rota)</h3>
+  <div class="tbl"><table>
+    <tr><th>Modo</th><th>Quando se aplica</th><th>Mecanismo</th><th>Garantia</th></tr>
+    <tr><td><b>Escrow on-chain N-de-N</b></td><td>Legs em redes com contratos/programas (EVM, Solana, Tron)</td><td>Depositante envia ativo ao escrow vinculado ao <code>dealHash</code>; contrato libera ao destinatário mediante N assinaturas válidas antes de <code>expiresAt</code>; após <code>expiresAt</code>, qualquer um pode acionar reembolso ao depositante.</td><td>Sem exposição unilateral; reembolso permissionless.</td></tr>
+    <tr><td><b>Atomic swap (HTLC)</b></td><td>Legs envolvendo BTC/ZEC (transparente) contra outra rede</td><td>Contratos de tempo e hash em ambas as redes com timelocks escalonados; o segredo revelado na primeira reivindicação libera a segunda.</td><td>Atomicidade probabilística; requer participantes online dentro das janelas.</td></tr>
+    <tr><td><b>Escrow unilateral + monitoramento</b></td><td>Quando uma leg não suporta escrow (ex.: BTC) e a outra suporta</td><td>Leg com escrow é depositada primeiro; leg sem escrow é enviada diretamente; escrow só libera após confirmação (finalidade) da leg direta, verificada on-chain pelo mecanismo de liberação.</td><td>A parte sem escrow assume risco limitado ao tempo; exige decisão explícita — Seção 13.</td></tr>
+    <tr><td><b>Execução via agregador/DEX</b></td><td>Quando a Deal envolve conversão de ativo pela plataforma (ex.: Vendedor entrega BTC, Comprador recebe USDC)</td><td>Rota inclui a cotação/rota do agregador; execução ocorre a partir do escrow com slippage máximo assinado.</td><td>Depende de o produto exigir conversão — Seção 13.</td></tr>
+  </table></div>
+
+  <h3>7.3 Verificações obrigatórias em SETTLEMENT_VALIDATION</h3>
+  <ol>
+    <li>Estado corrente é <span class="state">FULLY_SIGNED</span> e nenhuma outra liquidação está em curso para a Deal (lock).</li>
+    <li><code>now &lt; expiresAt</code> com margem de segurança para o tempo esperado de execução (se a execução não cabe antes da expiração, NÃO liquidar → <span class="state">EXPIRED</span>).</li>
+    <li>Recalcular o <code>dealHash</code> a partir dos Termos persistidos e comparar com o assinado; divergência → <span class="state">BLOCKED</span>.</li>
+    <li>Revalidar cada assinatura contra o hash, endereço, papel e padrão da rede.</li>
+    <li>Reverificar ativos (RA-020/021/022) e saldos/allowances/depósitos em escrow.</li>
+    <li>Reverificar rota (RF-053) e liquidez dentro das tolerâncias assinadas.</li>
+    <li>Reverificar preço: se o preço de mercado se moveu além da banda tolerada assinada, NÃO liquidar → <span class="state">BLOCKED</span> (ou nova revisão, se o produto assim congelar — Seção 13).</li>
+    <li>Verificar on-chain que a Deal não foi liquidada (marcador por <code>dealHash</code>).</li>
+    <li>Verificar controles de risco (RS-050/051) e ausência de bloqueio de backoffice.</li>
+  </ol>
+
+  <h3>7.4 Execução (SETTLING)</h3>
+  <div class="req"><span class="id">RL-010</span><div>As legs DEVEM ser executadas na ordem definida pela rota; cada leg DEVE registrar txHash, bloco/slot, status e número de confirmações.</div></div>
+  <div class="req"><span class="id">RL-011</span><div>Uma leg só DEVE ser considerada concluída ao atingir a finalidade configurada por rede (ex.: BTC 3 conf., ETH finalizado, Solana <em>finalized</em>, ZEC 10 conf. — valores a congelar).</div></div>
+  <div class="req"><span class="id">RL-012</span><div>A Deal DEVE ir a <span class="state">SETTLED</span> somente quando todas as legs estiverem finais. Estados intermediários DEVEM ser visíveis na UI por leg.</div></div>
+  <div class="req"><span class="id">RL-013</span><div>Em falha de leg (rejeição, timeout, reorg), o sistema DEVE parar, registrar, transitar para <span class="state">BLOCKED</span> e acionar a rota de reembolso definida. NÃO DEVE tentar "consertar" enviando por rota alternativa não assinada.</div></div>
+
+  <h3>7.5 Reembolso</h3>
+  <div class="req"><span class="id">RL-020</span><div>Reembolso DEVE devolver ao depositante original, no mesmo ativo e quantidade depositada (menos custo de rede quando inevitável), nunca a outro endereço.</div></div>
+  <div class="req"><span class="id">RL-021</span><div>O acionamento do reembolso após expiração DEVE ser possível pelo próprio depositante diretamente no contrato, independentemente da disponibilidade do backend.</div></div>
+  <div class="req"><span class="id">RL-022</span><div><span class="state">REFUNDED</span> só DEVE ser marcado após finalidade da transação de reembolso.</div></div>
+
+  <h3>7.6 Custos</h3>
+  <div class="req"><span class="id">RL-030</span><div>O custo estimado de rede por leg DEVE constar nos Termos; quem paga cada custo (depositante, relayer da plataforma com reembolso via fee, etc.) DEVE ser explícito nos Termos e é decisão a congelar.</div></div>
+</section>
+
+<!-- ===================================================== 8. ASSINATURA -->
+<section id="s8">
+  <h2><span class="n">08</span>Requisitos de Assinatura</h2>
+
+  <h3>8.1 Termos canônicos e Deal Hash</h3>
+  <div class="req"><span class="id">RAS-001</span><div>Os Termos DEVEM ser serializados de forma determinística (campos em ordem fixa, sem espaços opcionais, inteiros como strings decimais ou big-int, endereços normalizados) e o <code>dealHash</code> DEVE ser um hash criptográfico (ex.: SHA-256 ou Keccak-256 — a congelar) dessa serialização.</div></div>
+  <div class="req"><span class="id">RAS-002</span><div>Campos mínimos dos Termos:</div></div>
+<pre><code>Terms {
+  schemaVersion          // versão do formato de Termos
+  domain { app, env, version }
+  dealId, revision
+  createdAt, expiresAt   // UTC, segundos
+  participants[] { role, network, chainId, address }
+  requiredSignatures     // == participants.length
+  legs[] { assetId, network, chainId, contractOrMint, tokenStandard,
+           decimals, amountBaseUnits, from, to }
+  pricing { referencePriceUsd[], quoteTimestamp, priceValidUntil,
+            usdValue[], discountPct, discountAbs, platformFee,
+            maxSlippageBps, networkCostEstimate[], netAmount[] }
+  route { routeId, routeHash, settlementMode, legOrder[], venues[] }
+  refundPolicy { mode, timelocks[] }
+  nonceRoot              // raiz/semente dos nonces por participante
+}
+dealHash = HASH( canonicalSerialize(Terms) )</code></pre>
+  <div class="req"><span class="id">RAS-003</span><div>Qualquer alteração em qualquer campo acima (incluindo <code>expiresAt</code>, rota e qualquer valor de pricing) DEVE alterar o <code>dealHash</code>. Não existem campos "não assinados" dentro dos Termos.</div></div>
+
+  <h3>8.2 Payload de assinatura por participante</h3>
+  <div class="req"><span class="id">RAS-010</span><div>Cada participante assina um envelope que contém <code>dealHash</code> + <code>dealId</code> + <code>revision</code> + <code>role</code> + <code>address</code> + <code>chainId</code> + <code>nonce</code> + <code>expiresAt</code> + domínio da aplicação, no formato estruturado nativo da rede.</div></div>
+  <div class="req"><span class="id">RAS-011</span><div>A UI DEVE apresentar o conteúdo humano-legível do envelope na carteira (ex.: campos tipados), nunca um hash opaco isolado, para que o usuário confirme o que assina.</div></div>
+
+  <h3>8.3 Padrões por rede</h3>
+  <div class="tbl"><table>
+    <tr><th>Rede</th><th>Padrão de assinatura da Deal</th><th>Verificação</th><th>Observações</th></tr>
+    <tr><td>EVM (Ethereum e compatíveis)</td><td>Dados tipados estruturados (EIP-712) com <em>domain separator</em> contendo <code>chainId</code> e endereço do contrato verificador</td><td>Backend (ecrecover) e on-chain no escrow</td><td>Smart accounts via EIP-1271 apenas se congelado como suportado.</td></tr>
+    <tr><td>Solana</td><td>Assinatura de mensagem off-chain estruturada (Ed25519) com prefixo de domínio; ou instrução de aprovação no programa de escrow</td><td>Backend (Ed25519) e on-chain via instrução de verificação</td><td>Preferir aprovação on-chain quando a leg usa escrow Solana.</td></tr>
+    <tr><td>Bitcoin</td><td>Assinatura de mensagem BIP-322 (com fallback legado apenas para tipos de endereço que não suportam BIP-322)</td><td>Backend</td><td>Não há verificação on-chain; a atomicidade vem do HTLC, não da assinatura da Deal.</td></tr>
+    <tr><td>Zcash (endereço transparente)</td><td>Assinatura de mensagem compatível com o formato Bitcoin legado</td><td>Backend</td><td>Endereços blindados (z-addr) não têm padrão de assinatura de mensagem amplamente suportado — Seção 13.</td></tr>
+    <tr><td>Tron (TRC-20)</td><td>Assinatura de mensagem tipada (equivalente Tron ao EIP-712)</td><td>Backend e on-chain</td><td>Só se Tron for congelado no escopo v1.</td></tr>
+  </table></div>
+
+  <h3>8.4 Regras de validade</h3>
+  <div class="req"><span class="id">RAS-020</span><div>Uma assinatura é válida se, e somente se: (a) recupera/verifica para o endereço do papel; (b) refere-se ao <code>dealHash</code> da revisão corrente; (c) o nonce é o emitido para (Deal, revisão, participante) e não foi usado; (d) recebida antes de <code>expiresAt</code>; (e) o estado da Deal é <span class="state">AWAITING_SIGNATURES</span>.</div></div>
+  <div class="req"><span class="id">RAS-021</span><div>Assinaturas válidas DEVEM ser armazenadas com: participante, revisão, hash assinado, formato, bytes da assinatura, timestamp de recebimento, resultado de verificação.</div></div>
+  <div class="req"><span class="id">RAS-022</span><div>Um participante PODE reassinar a mesma revisão; a assinatura anterior DEVE ser substituída, não acumulada. O contador é por participante único.</div></div>
+  <div class="req"><span class="id">RAS-023</span><div>Invalidação: ao criar nova revisão, todas as assinaturas da revisão anterior DEVEM ser marcadas como <code>superseded</code> e o contador DEVE voltar a 0/N. Nunca apagar fisicamente (auditoria).</div></div>
+  <div class="req"><span class="id">RAS-024</span><div>O sistema NÃO DEVE aceitar assinatura "em branco", pré-assinatura para revisões futuras ou assinatura delegada por outro participante.</div></div>
+</section>
+
+<!-- ===================================================== 9. STATE MACHINE -->
+<section id="s9">
+  <h2><span class="n">09</span>Máquina de Estados</h2>
+
+  <h3>9.1 Estados</h3>
+  <div class="tbl"><table>
+    <tr><th>Estado</th><th>Significado</th><th>Aceita assinatura?</th><th>Pode liquidar?</th><th>Terminal?</th></tr>
+    <tr><td><span class="state">DRAFT</span></td><td>Deal em edição pelo criador; termos incompletos.</td><td>Não</td><td>Não</td><td>Não</td></tr>
+    <tr><td><span class="state">CREATED</span></td><td>Termos preliminares completos; participantes definidos; aguardando conexões.</td><td>Não</td><td>Não</td><td>Não</td></tr>
+    <tr><td><span class="state">WALLETS_CONNECTED</span></td><td>Todas as carteiras obrigatórias conectadas e com prova de controle e verificação de risco aprovada.</td><td>Não</td><td>Não</td><td>Não</td></tr>
+    <tr><td><span class="state">ASSETS_VERIFIED</span></td><td>Todos os ativos das legs verificados contra o registro canônico e on-chain; saldos confirmados.</td><td>Não</td><td>Não</td><td>Não</td></tr>
+    <tr><td><span class="state">LIQUIDITY_VERIFIED</span></td><td>Preço agregado sem anomalia, liquidez suficiente, rota escolhida; Termos e <code>dealHash</code> congelados para a revisão.</td><td>Não</td><td>Não</td><td>Não</td></tr>
+    <tr><td><span class="state">AWAITING_SIGNATURES</span></td><td>Coletando assinaturas; contador 0..N-1 de N.</td><td><b>Sim</b></td><td>Não</td><td>Não</td></tr>
+    <tr><td><span class="state">FULLY_SIGNED</span></td><td>N/N assinaturas válidas sobre o hash corrente. Transição automática imediata.</td><td>Não</td><td>Não (ainda)</td><td>Não</td></tr>
+    <tr><td><span class="state">SETTLEMENT_VALIDATION</span></td><td>Reverificações da Seção 7.3 em curso, com lock adquirido.</td><td>Não</td><td>Não (ainda)</td><td>Não</td></tr>
+    <tr><td><span class="state">SETTLING</span></td><td>Transações da rota sendo emitidas e aguardando finalidade.</td><td>Não</td><td><b>Em curso</b></td><td>Não</td></tr>
+    <tr><td><span class="state">SETTLED</span></td><td>Todas as legs finais. Sucesso.</td><td>Não</td><td>—</td><td><b>Sim</b></td></tr>
+    <tr><td><span class="state">EXPIRED</span></td><td><code>expiresAt</code> atingido antes de <span class="state">SETTLING</span>.</td><td>Não</td><td>Não, nunca</td><td>Sim se sem escrow; senão → REFUNDING</td></tr>
+    <tr><td><span class="state">REFUNDING</span></td><td>Reembolso de escrow em curso.</td><td>Não</td><td>Não</td><td>Não</td></tr>
+    <tr><td><span class="state">REFUNDED</span></td><td>Reembolso final confirmado.</td><td>Não</td><td>Não</td><td><b>Sim</b></td></tr>
+    <tr><td><span class="state">CANCELLED</span></td><td>Cancelada por participante (antes de FULLY_SIGNED) ou encerrada pelo backoffice sem fundos a devolver.</td><td>Não</td><td>Não</td><td><b>Sim</b></td></tr>
+    <tr><td><span class="state">BLOCKED</span></td><td>Interrompida por falha de verificação, risco, divergência de hash, falha de liquidação ou ação de backoffice. Requer tratamento.</td><td>Não</td><td>Não, nunca</td><td>Não (sai só para REFUNDING ou CANCELLED)</td></tr>
+  </table></div>
+
+  <h3>9.2 Transições permitidas</h3>
+  <div class="tbl"><table>
+    <tr><th>De</th><th>Para</th><th>Gatilho</th><th>Guardas (todas obrigatórias)</th></tr>
+    <tr><td><span class="state">DRAFT</span></td><td><span class="state">CREATED</span></td><td>Criador submete</td><td>Participantes válidos (RF-001/002), legs válidas, <code>expiresAt</code> dentro dos limites</td></tr>
+    <tr><td><span class="state">DRAFT</span></td><td><span class="state">CANCELLED</span></td><td>Criador descarta</td><td>—</td></tr>
+    <tr><td><span class="state">CREATED</span></td><td><span class="state">WALLETS_CONNECTED</span></td><td>Última carteira conecta</td><td>Todas provas de controle válidas; risco de carteira ≠ alto</td></tr>
+    <tr><td><span class="state">CREATED</span></td><td><span class="state">BLOCKED</span></td><td>Risco de carteira alto</td><td>—</td></tr>
+    <tr><td><span class="state">WALLETS_CONNECTED</span></td><td><span class="state">ASSETS_VERIFIED</span></td><td>Verificação de ativos conclui</td><td>Todos os ativos canônicos e verificados on-chain; saldos suficientes</td></tr>
+    <tr><td><span class="state">WALLETS_CONNECTED</span></td><td><span class="state">BLOCKED</span></td><td>Ativo não canônico / verificação falha</td><td>—</td></tr>
+    <tr><td><span class="state">ASSETS_VERIFIED</span></td><td><span class="state">LIQUIDITY_VERIFIED</span></td><td>Preço + liquidez + rota concluem</td><td>≥ mínimo de fontes; sem anomalia; liquidez suficiente; rota viável; Termos + hash congelados</td></tr>
+    <tr><td><span class="state">ASSETS_VERIFIED</span></td><td><span class="state">BLOCKED</span></td><td>Anomalia de preço ou risco</td><td>—</td></tr>
+    <tr><td><span class="state">LIQUIDITY_VERIFIED</span></td><td><span class="state">AWAITING_SIGNATURES</span></td><td>Sistema abre coleta</td><td>Nonces emitidos por participante</td></tr>
+    <tr><td><span class="state">AWAITING_SIGNATURES</span></td><td><span class="state">AWAITING_SIGNATURES</span></td><td>Assinatura válida recebida</td><td>RAS-020; contador &lt; N após incremento</td></tr>
+    <tr><td><span class="state">AWAITING_SIGNATURES</span></td><td><span class="state">FULLY_SIGNED</span></td><td>N-ésima assinatura válida</td><td>RAS-020; contador == N; <code>now &lt; expiresAt</code></td></tr>
+    <tr><td><span class="state">AWAITING_SIGNATURES</span></td><td><span class="state">ASSETS_VERIFIED</span></td><td>Alteração de termos, rota inviável ou cotação vencida fora da banda</td><td>Nova revisão criada; assinaturas marcadas <code>superseded</code>; contador = 0; reverificação de preço/liquidez/rota obrigatória</td></tr>
+    <tr><td><span class="state">AWAITING_SIGNATURES</span></td><td><span class="state">BLOCKED</span></td><td>Risco/backoffice/assinatura fraudulenta</td><td>—</td></tr>
+    <tr><td><span class="state">FULLY_SIGNED</span></td><td><span class="state">SETTLEMENT_VALIDATION</span></td><td>Automático</td><td>Lock exclusivo adquirido</td></tr>
+    <tr><td><span class="state">SETTLEMENT_VALIDATION</span></td><td><span class="state">SETTLING</span></td><td>Todas as verificações 7.3 aprovadas</td><td>Hash confere; N/N válidas; não expirada com margem; ativos/rota/liquidez/preço OK; sem liquidação prévia; sem bloqueio</td></tr>
+    <tr><td><span class="state">SETTLEMENT_VALIDATION</span></td><td><span class="state">BLOCKED</span></td><td>Qualquer verificação falha (exceto expiração)</td><td>—</td></tr>
+    <tr><td><span class="state">SETTLEMENT_VALIDATION</span></td><td><span class="state">EXPIRED</span></td><td>Expiração atingida (ou não cabe antes dela)</td><td>—</td></tr>
+    <tr><td><span class="state">SETTLING</span></td><td><span class="state">SETTLED</span></td><td>Última leg atinge finalidade</td><td>Todas as legs finais e conferidas on-chain</td></tr>
+    <tr><td><span class="state">SETTLING</span></td><td><span class="state">BLOCKED</span></td><td>Falha de leg, reorg, timeout</td><td>—</td></tr>
+    <tr><td><span class="state">EXPIRED</span></td><td><span class="state">REFUNDING</span></td><td>Existe escrow financiado</td><td>—</td></tr>
+    <tr><td><span class="state">BLOCKED</span></td><td><span class="state">REFUNDING</span></td><td>Existe escrow financiado / compensação definida pela rota</td><td>Decisão auditada de backoffice ou automática conforme rota</td></tr>
+    <tr><td><span class="state">BLOCKED</span></td><td><span class="state">CANCELLED</span></td><td>Sem fundos a devolver</td><td>Decisão auditada de backoffice</td></tr>
+    <tr><td><span class="state">REFUNDING</span></td><td><span class="state">REFUNDED</span></td><td>Reembolso atinge finalidade</td><td>Todos os depósitos devolvidos aos depositantes</td></tr>
+    <tr><td><span class="state">CREATED</span> … <span class="state">AWAITING_SIGNATURES</span></td><td><span class="state">CANCELLED</span></td><td>Participante obrigatório cancela</td><td>Estado anterior a FULLY_SIGNED; se houver escrow → passa por REFUNDING antes</td></tr>
+    <tr><td><span class="state">CREATED</span> … <span class="state">AWAITING_SIGNATURES</span></td><td><span class="state">EXPIRED</span></td><td>Relógio do backend atinge <code>expiresAt</code></td><td>—</td></tr>
+  </table></div>
+
+  <h3>9.3 Transições proibidas (invariantes)</h3>
+  <div class="callout stop">
+    <ul style="margin:0">
+      <li>Nada entra em <span class="state">SETTLING</span> exceto vindo de <span class="state">SETTLEMENT_VALIDATION</span>.</li>
+      <li>Nada entra em <span class="state">SETTLED</span> exceto vindo de <span class="state">SETTLING</span>.</li>
+      <li><span class="state">EXPIRED</span>, <span class="state">BLOCKED</span>, <span class="state">CANCELLED</span>, <span class="state">REFUNDING</span>, <span class="state">REFUNDED</span> nunca transitam para <span class="state">SETTLING</span> ou <span class="state">SETTLED</span>.</li>
+      <li>Não existe transição de <span class="state">FULLY_SIGNED</span> ou posterior para <span class="state">CANCELLED</span> por ação de participante.</li>
+      <li>Não existe transição que desbloqueie <span class="state">BLOCKED</span> de volta ao fluxo de assinatura/liquidação.</li>
+      <li><span class="state">SETTLED</span> e <span class="state">REFUNDED</span> são mutuamente exclusivos para a mesma Deal.</li>
+      <li>Assinaturas só são aceitas em <span class="state">AWAITING_SIGNATURES</span>; contador nunca excede N; N nunca muda dentro de uma revisão.</li>
+    </ul>
+  </div>
+
+  <h3>9.4 Diagrama</h3>
+  <pre><code>DRAFT ──► CREATED ──► WALLETS_CONNECTED ──► ASSETS_VERIFIED ──► LIQUIDITY_VERIFIED
+  │           │               │                    │   ▲                 │
+  ▼           │               │                    │   │ (nova revisão)  ▼
+CANCELLED ◄───┴───────────────┴────────────────────┘   └──── AWAITING_SIGNATURES ──(k/N)──┐
+                                                                      │                    │
+                                       (qualquer estado pré-SETTLING) │ N/N                │
+                                                  ▼                   ▼                    │
+                                               EXPIRED          FULLY_SIGNED ◄─────────────┘
+                                                  │                   │ auto
+                                                  │                   ▼
+                                                  │         SETTLEMENT_VALIDATION ──► EXPIRED
+                                                  │                   │        └──► BLOCKED
+                                                  │                   ▼ ok
+                                                  │               SETTLING ──► BLOCKED
+                                                  │                   │
+                                                  │                   ▼
+                                                  │               SETTLED  (terminal)
+                                                  ▼
+                        (escrow?) ──► REFUNDING ──► REFUNDED (terminal)      BLOCKED ──► REFUNDING | CANCELLED</code></pre>
+</section>
+
+<!-- ===================================================== 10. FALHAS -->
+<section id="s10">
+  <h2><span class="n">10</span>Cenários de Falha</h2>
+  <div class="tbl"><table>
+    <tr><th>ID</th><th>Cenário</th><th>Comportamento esperado</th><th>Estado resultante</th></tr>
+    <tr><td>FS-01</td><td>Um participante nunca assina</td><td>Expiração atinge; assinaturas parciais descartadas; escrow devolvido</td><td>EXPIRED → (REFUNDING → REFUNDED)</td></tr>
+    <tr><td>FS-02</td><td>Termos alterados após 2/3 assinaturas</td><td>Nova revisão; 2 assinaturas marcadas superseded; 0/3; todos notificados; reverificação</td><td>AWAITING_SIGNATURES (revisão n+1)</td></tr>
+    <tr><td>FS-03</td><td>Rota deixa de ser viável após 3/3 (liquidez sumiu)</td><td>Validação falha; não liquida</td><td>SETTLEMENT_VALIDATION → BLOCKED → REFUNDING</td></tr>
+    <tr><td>FS-04</td><td>Preço dispara além da banda entre assinatura e liquidação</td><td>Validação de preço falha; não liquida no preço antigo</td><td>BLOCKED (ou nova revisão, conforme Seção 13)</td></tr>
+    <tr><td>FS-05</td><td>Fontes de preço divergem 8% entre si</td><td>Anomalia; Deal não avança para assinatura; alerta operacional</td><td>ASSETS_VERIFIED (não avança) ou BLOCKED</td></tr>
+    <tr><td>FS-06</td><td>Apenas 1 fonte de preço disponível</td><td>Mínimo de fontes não atingido; recusa avançar</td><td>ASSETS_VERIFIED (aguarda)</td></tr>
+    <tr><td>FS-07</td><td>Token com símbolo "USDT" mas contrato não canônico</td><td>Rejeitado na criação; se aparecer por manipulação, verificação falha</td><td>BLOCKED</td></tr>
+    <tr><td>FS-08</td><td>Contrato proxy do token atualizado após registro</td><td>Verificação de implementação falha</td><td>BLOCKED</td></tr>
+    <tr><td>FS-09</td><td>Assinatura de revisão anterior reenviada</td><td>Rejeitada (hash/nonce divergentes); registrada como tentativa</td><td>Sem mudança</td></tr>
+    <tr><td>FS-10</td><td>Assinatura válida mas de endereço diferente do papel</td><td>Rejeitada</td><td>Sem mudança</td></tr>
+    <tr><td>FS-11</td><td>Duas requisições de liquidação concorrentes</td><td>Lock; segunda falha; contrato rejeita segunda liberação</td><td>Uma única liquidação</td></tr>
+    <tr><td>FS-12</td><td>Backend cai durante SETTLING</td><td>Ao retornar, reconcilia com on-chain: legs enviadas são reconhecidas; não reenvia</td><td>SETTLING → SETTLED ou BLOCKED</td></tr>
+    <tr><td>FS-13</td><td>Backend cai após expiração com escrow financiado</td><td>Depositante reembolsa direto no contrato; backend reconcilia ao voltar</td><td>REFUNDED</td></tr>
+    <tr><td>FS-14</td><td>Reorg reverte uma leg já contada</td><td>Monitor detecta; Deal não marcada SETTLED; tratamento</td><td>SETTLING → BLOCKED</td></tr>
+    <tr><td>FS-15</td><td>Leg 1 confirma, leg 2 falha (modo escrow unilateral)</td><td>Escrow não libera; reembolso da leg em escrow; leg direta já enviada exige compensação</td><td>BLOCKED → REFUNDING (parcial) + tratamento manual</td></tr>
+    <tr><td>FS-16</td><td>Timelock HTLC expira sem reivindicação</td><td>Fundos retornam a cada depositante nas respectivas redes</td><td>EXPIRED → REFUNDING → REFUNDED</td></tr>
+    <tr><td>FS-17</td><td>Tempo do cliente adiantado/atrasado</td><td>Ignorado; apenas o relógio do backend conta</td><td>Sem mudança</td></tr>
+    <tr><td>FS-18</td><td>Relógio do backend com deriva acima do limite</td><td>Serviço recusa transições sensíveis a tempo; alerta</td><td>Deals congeladas até correção</td></tr>
+    <tr><td>FS-19</td><td>Fonte de liquidez fica indisponível na validação</td><td>Sem confirmação de liquidez → não liquida</td><td>BLOCKED ou reagendamento dentro da expiração</td></tr>
+    <tr><td>FS-20</td><td>Saldo do Vendedor insuficiente na validação</td><td>Não liquida</td><td>BLOCKED</td></tr>
+    <tr><td>FS-21</td><td>Custo de rede sobe muito acima do estimado</td><td>Fora da tolerância assinada → não liquida</td><td>BLOCKED / nova revisão</td></tr>
+    <tr><td>FS-22</td><td>Participante cancela após 3/3</td><td>Não permitido; UI não oferece; API rejeita</td><td>Sem mudança</td></tr>
+    <tr><td>FS-23</td><td>Backoffice tenta "forçar" liquidação</td><td>Não existe endpoint/permissão; tentativa auditada</td><td>Sem mudança</td></tr>
+    <tr><td>FS-24</td><td>Mesmo endereço em dois papéis</td><td>Rejeitado na criação</td><td>DRAFT</td></tr>
+    <tr><td>FS-25</td><td>Extensão Token-2022 com taxa de transferência na mint</td><td>Rota incompatível ou quantidade recebida diverge → não canônico/não suportado</td><td>BLOCKED</td></tr>
+  </table></div>
+</section>
+
+<!-- ===================================================== 11. THREAT MODEL -->
+<section id="s11">
+  <h2><span class="n">11</span>Threat Model Inicial</h2>
+  <p>Ativos protegidos: fundos das partes, integridade dos Termos, autenticidade das assinaturas, correção do preço/liquidez/rota, disponibilidade do reembolso, trilha de auditoria.</p>
+  <div class="tbl"><table>
+    <tr><th>ID</th><th>Ameaça</th><th>Ator</th><th>Vetor</th><th>Impacto</th><th>Mitigações (requisitos)</th></tr>
+    <tr><td>TM-01</td><td>Substituição de termos após assinatura</td><td>Participante malicioso / insider</td><td>Editar valor, destino ou rota mantendo assinaturas</td><td>Perda de fundos</td><td>RF-007, RAS-001/003/023, verificação 7.3 item 3, on-chain por dealHash (RS-041)</td></tr>
+    <tr><td>TM-02</td><td>Replay de assinatura</td><td>Atacante externo</td><td>Reutilizar assinatura em outra Deal/revisão/rede/ambiente</td><td>Liquidação não autorizada</td><td>RS-010/011/012, domínio + chainId + nonce</td></tr>
+    <tr><td>TM-03</td><td>Token falso</td><td>Vendedor/Comprador malicioso</td><td>Contrato com símbolo "USDT"</td><td>Receber ativo sem valor</td><td>RF-020/021, RA-*, RS-020/021</td></tr>
+    <tr><td>TM-04</td><td>Manipulação de preço</td><td>Atacante com capacidade de mercado / fonte comprometida</td><td>Distorcer uma fonte ou pool fino</td><td>Deal a preço injusto</td><td>RF-030/031/032, RS-030/031, bandas assinadas, revalidação 7.3</td></tr>
+    <tr><td>TM-05</td><td>Liquidez fantasma</td><td>Fonte de liquidez maliciosa/indisponível</td><td>Reportar profundidade inexistente</td><td>Falha de execução, slippage</td><td>RF-040/041/042, RS-030, revalidação 7.3</td></tr>
+    <tr><td>TM-06</td><td>Troca de rota na execução</td><td>Insider / bug</td><td>Executar por caminho diferente do assinado</td><td>Perda, slippage, desvio</td><td>RF-051/052/053, RS-032</td></tr>
+    <tr><td>TM-07</td><td>Dupla liquidação</td><td>Bug de concorrência / atacante repetindo chamada</td><td>Duas execuções da mesma Deal</td><td>Pagamento duplicado</td><td>RF-071, RS-040/041, RNF-002/003</td></tr>
+    <tr><td>TM-08</td><td>Liquidação após expiração</td><td>Bug / relógio manipulado</td><td>Executar depois de expiresAt</td><td>Execução contra vontade das partes</td><td>RF-080/081/083, RNF-004, expiresAt on-chain</td></tr>
+    <tr><td>TM-09</td><td>Backend comprometido</td><td>Atacante com acesso ao servidor</td><td>Tentar mover fundos / liberar escrow</td><td>Roubo em massa</td><td>RS-002/003 (backend sem poder unilateral), RS-054, auditoria</td></tr>
+    <tr><td>TM-10</td><td>Phishing de seed phrase</td><td>Site clone / suporte falso</td><td>Pedir seed "para verificação"</td><td>Roubo da carteira</td><td>RS-001, educação na UI ("nunca pedimos seed"), domínio no payload assinado</td></tr>
+    <tr><td>TM-11</td><td>Assinatura cega</td><td>Front-end comprometido</td><td>Fazer o usuário assinar hash de outra Deal</td><td>Autorização indevida</td><td>RAS-011 (dados tipados legíveis), verificação on-chain, integridade do front (SRI, sem CDN)</td></tr>
+    <tr><td>TM-12</td><td>Risco de contraparte na leg sem escrow</td><td>Contraparte</td><td>Não enviar após receber</td><td>Perda unilateral</td><td>RL-001, preferir HTLC/escrow; modo unilateral só com decisão explícita (Seção 13)</td></tr>
+    <tr><td>TM-13</td><td>Lavagem / fundos sancionados</td><td>Participante</td><td>Usar a plataforma para limpar fundos</td><td>Risco legal/regulatório</td><td>RF-013, RS-050/051, BLOCKED</td></tr>
+    <tr><td>TM-14</td><td>Adulteração da trilha de auditoria</td><td>Insider</td><td>Editar/apagar eventos</td><td>Perda de prova</td><td>RF-090 (append-only, hash chain), RNF-011, RS-052</td></tr>
+    <tr><td>TM-15</td><td>Enumeração de Deals / vazamento de endereços</td><td>Atacante externo</td><td>IDs sequenciais, API sem autorização</td><td>Privacidade, alvo para phishing</td><td>RNF-012, RS-053</td></tr>
+    <tr><td>TM-16</td><td>Negação de serviço nas fontes</td><td>Atacante externo</td><td>Derrubar oráculos/RPCs</td><td>Deals não avançam</td><td>RNF-007 (degradação segura), múltiplos RPCs; nunca liquidar sem verificação</td></tr>
+    <tr><td>TM-17</td><td>Registro canônico alterado maliciosamente</td><td>Insider</td><td>Inserir contrato falso como canônico</td><td>Fraude sistêmica</td><td>RS-021 (four-eyes, assinatura, auditoria)</td></tr>
+    <tr><td>TM-18</td><td>Reorg / finalidade fraca</td><td>Rede</td><td>Transação revertida após ser contada</td><td>Perda</td><td>RF-072, RL-011, RS-042</td></tr>
+  </table></div>
+</section>
+
+<!-- ===================================================== 12. CRITÉRIOS DE ACEITAÇÃO -->
+<section id="s12">
+  <h2><span class="n">12</span>Critérios de Aceitação</h2>
+  <p>Formato: <b>Dado</b> / <b>Quando</b> / <b>Então</b>. Todos os critérios abaixo são bloqueantes para release.</p>
+
+  <h3>12.1 Assinaturas N-de-N</h3>
+  <ul>
+    <li><b>CA-01</b> Dado uma Deal com 3 participantes e 2 assinaturas válidas, quando o tempo passa até a expiração, então a Deal vai para EXPIRED e nenhuma transação de liquidação é emitida.</li>
+    <li><b>CA-02</b> Dado uma Deal com 4 participantes, quando a 4ª assinatura válida é recebida antes da expiração, então a Deal vai para FULLY_SIGNED e imediatamente para SETTLEMENT_VALIDATION.</li>
+    <li><b>CA-03</b> Dado 3/3 assinaturas, quando uma delas é de um endereço diferente do papel, então o contador exibe 2/3 e a Deal não avança.</li>
+    <li><b>CA-04</b> Dado 2/3 assinaturas, quando qualquer campo dos Termos muda, então a revisão incrementa, o hash muda, o contador volta a 0/3 e as 2 assinaturas ficam marcadas como superseded.</li>
+    <li><b>CA-05</b> Dado uma assinatura válida da revisão 1, quando ela é reenviada na revisão 2, então é rejeitada e registrada.</li>
+  </ul>
+
+  <h3>12.2 Expiração e reembolso</h3>
+  <ul>
+    <li><b>CA-10</b> Dado uma Deal EXPIRED com escrow financiado, quando o depositante aciona o reembolso diretamente no contrato, então recebe de volta o ativo integral (menos custo de rede) e o backend registra REFUNDED ao reconciliar.</li>
+    <li><b>CA-11</b> Dado uma Deal em SETTLEMENT_VALIDATION, quando o tempo restante é menor que o tempo esperado de execução, então a Deal vai para EXPIRED e não SETTLING.</li>
+    <li><b>CA-12</b> Dado uma Deal EXPIRED, quando qualquer chamada tenta assinar ou liquidar, então é rejeitada com erro explícito.</li>
+  </ul>
+
+  <h3>12.3 Ativos</h3>
+  <ul>
+    <li><b>CA-20</b> Dado um contrato ERC-20 com nome/símbolo "USDT" fora do registro, quando alguém tenta usá-lo em uma leg, então a criação é rejeitada.</li>
+    <li><b>CA-21</b> Dado USDT em Ethereum e USDT em Tron, quando ambos aparecem, então são tratados como ativos distintos com assetIds diferentes.</li>
+    <li><b>CA-22</b> Dado um ativo com status suspended, quando uma Deal nova é criada, então o ativo não está disponível.</li>
+  </ul>
+
+  <h3>12.4 Preço, liquidez, rota</h3>
+  <ul>
+    <li><b>CA-30</b> Dado apenas 2 fontes de preço disponíveis (mínimo 3), quando a verificação roda, então a Deal não avança para assinatura e a UI explica o motivo.</li>
+    <li><b>CA-31</b> Dado 3 fontes com uma divergindo além do limiar, quando a verificação roda, então a anomalia é sinalizada e a Deal não avança.</li>
+    <li><b>CA-32</b> Dado liquidez insuficiente para a quantidade, quando a verificação roda, então a Deal não é apresentada como executável.</li>
+    <li><b>CA-33</b> Dado uma rota assinada, quando na validação de liquidação ela deixa de ser viável, então a Deal vai para BLOCKED e nenhuma execução por outra rota ocorre.</li>
+    <li><b>CA-34</b> Dado o resumo de assinatura, quando exibido, então contém preço de referência, valor USD, quantidade recebida, deságio, fee, slippage máximo, custo de rede e valor líquido, e todos constam do hash.</li>
+  </ul>
+
+  <h3>12.5 Segurança e custódia</h3>
+  <ul>
+    <li><b>CA-40</b> Em nenhuma tela ou fluxo existe campo para seed phrase ou chave privada (verificado por revisão de UI e por teste automatizado de DOM).</li>
+    <li><b>CA-41</b> Dado credenciais totais do backend, quando se tenta liberar um escrow sem N/N assinaturas válidas, então o contrato rejeita.</li>
+    <li><b>CA-42</b> Dado duas chamadas concorrentes de liquidação, quando executadas, então exatamente uma emite transações e o contrato rejeita uma segunda liberação.</li>
+    <li><b>CA-43</b> Dado um payload assinado em testnet, quando enviado em mainnet, então é rejeitado.</li>
+    <li><b>CA-44</b> Dado a trilha de auditoria de uma Deal SETTLED, quando reprocessada offline, então o dealHash e todas as assinaturas verificam.</li>
+  </ul>
+
+  <h3>12.6 Máquina de estados</h3>
+  <ul>
+    <li><b>CA-50</b> Para cada transição não listada na Seção 9.2, quando tentada, então é rejeitada e registrada.</li>
+    <li><b>CA-51</b> Dado BLOCKED, quando qualquer ação tenta levar a Deal a SETTLING/SETTLED, então é rejeitada.</li>
+    <li><b>CA-52</b> Dado FULLY_SIGNED, quando um participante tenta cancelar, então é rejeitado.</li>
+  </ul>
+
+  <h3>12.7 UX</h3>
+  <ul>
+    <li><b>CA-60</b> A jornada completa (criar → conectar → revisar → assinar → acompanhar) tem no máximo 5 telas principais.</li>
+    <li><b>CA-61</b> O contador N/N e o estado atualizam na UI em ≤ 2 s após o evento no backend.</li>
+    <li><b>CA-62</b> Verde aparece exclusivamente em ações primárias e confirmações; nenhum gráfico de mercado ou order book existe na interface.</li>
+  </ul>
+</section>
+
+<!-- ===================================================== 13. QUESTÕES -->
+<section id="s13">
+  <h2><span class="n">13</span>Questões que precisam ser congeladas antes da arquitetura</h2>
+  <p>Somente decisões que alteram a arquitetura. Cada uma está formulada como pergunta fechada com as opções reais.</p>
+
+  <h3>Papel e economia</h3>
+  <div class="tbl"><table>
+    <tr><th>#</th><th>Decisão</th><th>Por que bloqueia a arquitetura</th><th>Opções</th></tr>
+    <tr><td>Q1</td><td><b>O que o Pay Master faz, exatamente?</b></td><td>Define se ele apenas co-assina (multisig puro), se é quem financia/recebe uma leg (então precisa de leg própria, saldo e escrow), ou se é um provedor de liquidez/fiat (então a rampa fiat entra no escopo).</td><td>(a) só aprovador; (b) aprovador + provedor de fundos de uma leg; (c) aprovador + beneficiário de fee; (d) combinação</td></tr>
+    <tr><td>Q2</td><td><b>A Deal é sempre P2P direta (Vendedor entrega ativo A, Comprador entrega ativo B) ou a plataforma converte ativos via rota de mercado?</b></td><td>Determina se Liquidity/Router Engines apenas <em>verificam</em> ou também <em>executam</em> via agregador/DEX, e se existe risco de execução de mercado dentro do escrow.</td><td>(a) P2P puro, rota = mecanismo de escrow/HTLC; (b) conversão via agregador permitida; (c) ambos, por tipo de Deal</td></tr>
+    <tr><td>Q3</td><td><b>Quem recebe o fee da plataforma e o deságio, e em qual ativo?</b></td><td>Afeta o número de legs, o desenho do escrow (split on-chain) e a contabilidade.</td><td>(a) fee descontado na leg de pagamento para carteira Verum; (b) fee em leg separada; (c) deságio integral ao Comprador/Pay Master</td></tr>
+    <tr><td>Q4</td><td><b>Quem paga o custo de rede de cada leg?</b></td><td>Decide se existe relayer da plataforma (chave operacional restrita) ou se cada depositante paga o próprio gás.</td><td>(a) cada parte; (b) relayer Verum com reembolso via fee; (c) misto por rede</td></tr>
+  </table></div>
+
+  <h3>Redes e ativos</h3>
+  <div class="tbl"><table>
+    <tr><th>#</th><th>Decisão</th><th>Por que bloqueia a arquitetura</th><th>Opções</th></tr>
+    <tr><td>Q5</td><td><b>Quais redes entram na v1?</b></td><td>Cada rede exige adaptador, padrão de assinatura, contrato de escrow e regra de finalidade. USDT/USDC "em qual rede" muda tudo.</td><td>Ex.: Solana + Ethereum + Bitcoin na v1; Tron/Zcash na v1.1</td></tr>
+    <tr><td>Q6</td><td><b>Zcash: apenas endereços transparentes ou também blindados?</b></td><td>Blindado não tem assinatura de mensagem padronizada nem verificação simples de recebimento; muda o modo de liquidação e a auditabilidade.</td><td>(a) só t-addr; (b) blindado com prova de pagamento (viewing key); (c) fora da v1</td></tr>
+    <tr><td>Q7</td><td><b>Bitcoin: liquidação por HTLC nativo ou modo escrow unilateral + monitoramento?</b></td><td>HTLC exige participantes online e UX de reivindicação; escrow unilateral cria exposição temporária a uma parte (TM-12). Escolha estrutural.</td><td>(a) HTLC; (b) escrow unilateral com ordem fixa (BTC sempre depois); (c) BTC fora da v1</td></tr>
+    <tr><td>Q8</td><td><b>Formato do assetId canônico</b></td><td>Entra no hash assinado; não pode mudar depois.</td><td>(a) CAIP-19; (b) formato próprio Verum</td></tr>
+  </table></div>
+
+  <h3>Assinatura e liquidação</h3>
+  <div class="tbl"><table>
+    <tr><th>#</th><th>Decisão</th><th>Por que bloqueia a arquitetura</th><th>Opções</th></tr>
+    <tr><td>Q9</td><td><b>Onde vive a verificação N-de-N: on-chain no escrow de cada rede, ou off-chain no backend com escrow "burro"?</b></td><td>Define se RS-002/RS-003 são garantidos por código on-chain (backend sem poder) ou se o backend vira ponto de confiança. Decisão central de segurança.</td><td>(a) on-chain sempre que a rede permitir; (b) off-chain + escrow com chave operacional (não recomendado)</td></tr>
+    <tr><td>Q10</td><td><b>Função de hash e serialização canônica dos Termos</b></td><td>Precisa ser verificável on-chain em todas as redes escolhidas (Keccak em EVM, SHA-256 em Solana/BTC). Um único hash cross-chain ou um por rede com raiz comum?</td><td>(a) SHA-256 único; (b) Keccak-256 único; (c) hash por rede + raiz</td></tr>
+    <tr><td>Q11</td><td><b>Ordem das legs e quem deposita primeiro no escrow</b></td><td>Determina exposição e UX (quem espera quem).</td><td>(a) Vendedor primeiro; (b) Comprador primeiro; (c) simultâneo com liberação condicionada a ambos</td></tr>
+    <tr><td>Q12</td><td><b>Movimento de preço além da banda após N/N: BLOCKED ou nova revisão automática?</b></td><td>Muda a máquina de estados (transição FULLY_SIGNED/SETTLEMENT_VALIDATION → ASSETS_VERIFIED) e a UX.</td><td>(a) BLOCKED + reembolso; (b) nova revisão automática e reassinatura</td></tr>
+    <tr><td>Q13</td><td><b>Suporte a carteiras smart-account (EIP-1271 / multisig Solana) como participantes</b></td><td>Verificação de assinatura muda de recuperação de chave para chamada on-chain.</td><td>(a) só EOA/chave externa na v1; (b) suportar</td></tr>
+    <tr><td>Q14</td><td><b>Finalidade por rede (número de confirmações/slots)</b></td><td>Entra na estimativa de tempo, na margem de expiração e nos timelocks de HTLC.</td><td>Valores numéricos por rede</td></tr>
+    <tr><td>Q15</td><td><b>Expiração: padrão, mínimo e máximo permitidos</b></td><td>Deve ser maior que o tempo de execução + finalidade da rota mais lenta.</td><td>Ex.: padrão 60 min, mín 15 min, máx 24 h</td></tr>
+  </table></div>
+
+  <h3>Fontes e operação</h3>
+  <div class="tbl"><table>
+    <tr><th>#</th><th>Decisão</th><th>Por que bloqueia a arquitetura</th><th>Opções</th></tr>
+    <tr><td>Q16</td><td><b>Fontes de preço e liquidez da v1 e limiares de anomalia</b></td><td>Define integrações, pesos e o que "mínimo de 3 fontes" significa por ativo.</td><td>Lista nomeada de fontes + limiar (ex.: desvio máx. 1,5% entre fontes)</td></tr>
+    <tr><td>Q17</td><td><b>Requisito de identificação/compliance (KYC/KYB, sanções) por participante?</b></td><td>Adiciona onboarding, provedor externo e retenção de dados pessoais; muda RNF-012/014.</td><td>(a) só verificação de carteira on-chain; (b) KYC em provedor externo obrigatório; (c) KYC acima de limite</td></tr>
+    <tr><td>Q18</td><td><b>Cancelamento antes de FULLY_SIGNED: qualquer participante ou apenas o criador?</b></td><td>Afeta permissões e a máquina de estados.</td><td>(a) qualquer obrigatório; (b) só criador; (c) criador ou qualquer um que já assinou</td></tr>
+    <tr><td>Q19</td><td><b>Modelo de identidade da sessão web</b></td><td>Se o único login é a carteira (SIWE/SIWS), não há contas/e-mail; notificações por e-mail exigem cadastro.</td><td>(a) só carteira; (b) carteira + e-mail opcional; (c) conta institucional com múltiplas carteiras</td></tr>
+    <tr><td>Q20</td><td><b>Ambiente-alvo de lançamento</b></td><td>Testnets/devnet primeiro, com contratos auditados antes de mainnet (RS-055) — define cronograma e o que o piloto pode liquidar.</td><td>(a) testnet pública; (b) mainnet com limites baixos; (c) ambos em sequência</td></tr>
+  </table></div>
+
+  <div class="callout warn">
+    <p><b>Recomendação de sequência:</b> congelar Q1, Q2, Q9 e Q5 primeiro — são as quatro decisões que determinam se o produto é um multisig de escrow (simples e seguro) ou um sistema de execução de mercado (muito mais superfície). As demais derivam delas.</p>
+  </div>
+</section>
+
+<footer>VERUM OTC · PRD v0.1 · Documento de descoberta — não contém decisões de arquitetura nem código.</footer>
+</div>
+</body>
+</html>

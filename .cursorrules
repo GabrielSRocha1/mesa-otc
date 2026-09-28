@@ -1,0 +1,6 @@
+Projeto VERUM OTC (TypeScript/Fastify + HTML autocontido + Solidity/Foundry). Regras:
+- Comunicar em português do Brasil. Mudanças incrementais; nunca reescrever módulos funcionais.
+- Fundos só se movem por settle (N/N assinaturas) ou refund (ao depositante). Backend nunca é autoridade sobre fundos.
+- Nunca colocar chaves privadas, seeds ou segredos em código, .env versionado ou frontend.
+- Toda alteração precisa passar em `npm run verify` e, para contratos, `forge test`.
+- Quantias monetárias sempre em inteiros (BigInt/uint256); nada de ponto flutuante em valores críticos.

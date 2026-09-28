@@ -1,0 +1,790 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="verum-otc-api" content="">
+<title>VERUM OTC — Pay Master</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Sora:wght@500;600;700;800&family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+:root{
+  --bg:#080d1a; --bg-2:#0a1122;
+  --panel:#0f1a30; --panel-2:#111d36; --panel-3:#132241;
+  --line:#1c2b48; --line-2:#223350;
+  --ink:#e8eefc; --ink-2:#aebbd4; --ink-3:#7788a6; --ink-4:#5a6b8a;
+  --green:#22c55e; --green-2:#16a34a; --green-soft:rgba(34,197,94,.14);
+  --blue:#4f9bff; --blue-2:#3b82f6; --blue-soft:rgba(79,155,255,.14);
+  --amber:#eab308; --amber-soft:rgba(234,179,8,.14);
+  --purple:#a855f7; --red:#ef4444; --red-soft:rgba(239,68,68,.12);
+  --f-head:"Sora",system-ui,sans-serif;
+  --f-body:"Inter",system-ui,sans-serif;
+  --f-mono:"JetBrains Mono",ui-monospace,monospace;
+}
+*,*::before,*::after{box-sizing:border-box}
+html,body{margin:0;height:100%}
+body{
+  background:
+    radial-gradient(1200px 600px at 80% -10%, rgba(79,155,255,.07), transparent 60%),
+    radial-gradient(900px 500px at 0% 100%, rgba(34,197,94,.05), transparent 55%),
+    var(--bg);
+  color:var(--ink);font-family:var(--f-body);font-size:14px;line-height:1.5;-webkit-font-smoothing:antialiased;min-height:100vh;
+}
+h1,h2,h3,h4{font-family:var(--f-head);margin:0;letter-spacing:-.01em;line-height:1.2}
+svg{display:block}
+.mono{font-family:var(--f-mono)}
+.hidden{display:none!important}
+::-webkit-scrollbar{width:10px}::-webkit-scrollbar-thumb{background:#1a2740;border-radius:8px;border:2px solid var(--bg)}
+
+/* ---------- brand mark ---------- */
+.mark{width:44px;height:44px;flex:none;border-radius:12px;background:linear-gradient(135deg,#1e3a8a,#0b1120);border:1px solid #274373;display:grid;place-items:center;box-shadow:0 0 0 1px rgba(79,155,255,.15) inset,0 8px 20px rgba(0,0,0,.4)}
+.mark svg{width:25px;height:25px}
+.brand{display:flex;align-items:center;gap:12px}
+.brand .name{font-family:var(--f-head);font-weight:800;font-size:18px;letter-spacing:.06em;color:#fff}
+.brand .tag{font-size:10.5px;color:var(--ink-3);letter-spacing:.02em;margin-top:1px}
+
+/* ---------- buttons ---------- */
+.btn{display:inline-flex;align-items:center;justify-content:center;gap:9px;height:46px;padding:0 20px;border-radius:12px;border:1px solid var(--line-2);background:var(--panel-2);color:var(--ink);font:inherit;font-weight:600;font-size:14.5px;cursor:pointer;transition:.15s}
+.btn:hover{border-color:var(--blue);color:#fff}
+.btn:active{transform:translateY(1px)}
+.btn svg{width:18px;height:18px;stroke:currentColor;fill:none;stroke-width:2}
+.btn-primary{background:linear-gradient(135deg,#22c55e,#16a34a);border:none;color:#04240f;font-weight:700;box-shadow:0 12px 28px rgba(34,197,94,.28)}
+.btn-primary:hover{filter:brightness(1.06);color:#04240f}
+.btn-blue{background:linear-gradient(135deg,#4f9bff,#2f6fd6);border:none;color:#031328;font-weight:700;box-shadow:0 12px 28px rgba(79,155,255,.28)}
+.btn-blue:hover{filter:brightness(1.06);color:#031328}
+.btn-ghost{background:transparent;color:var(--ink-2)}
+.btn-ghost:hover{color:var(--red);border-color:var(--red)}
+.btn-block{width:100%;height:52px;font-size:15.5px}
+
+/* ===================================================================
+   SCREEN 1 · CADASTRO (split)
+   =================================================================== */
+.auth{min-height:100vh;display:grid;grid-template-columns:1.05fr .95fr}
+.auth-brand{position:relative;padding:56px 60px;display:flex;flex-direction:column;justify-content:space-between;background:linear-gradient(160deg,#0b1630,#080d1a);border-right:1px solid var(--line);overflow:hidden}
+.auth-brand::after{content:"";position:absolute;inset:0;background:radial-gradient(700px 400px at 90% 10%,rgba(79,155,255,.14),transparent 60%);pointer-events:none}
+.auth-brand .top{position:relative;z-index:1}
+.auth-hero{position:relative;z-index:1}
+.auth-hero .eyebrow{display:inline-flex;align-items:center;gap:8px;font-size:12px;font-weight:600;color:var(--blue);background:var(--blue-soft);border:1px solid rgba(79,155,255,.25);padding:6px 12px;border-radius:999px;margin-bottom:22px}
+.auth-hero h1{font-size:40px;font-weight:800;line-height:1.08;letter-spacing:-.02em;max-width:14ch}
+.auth-hero h1 span{color:var(--blue)}
+.auth-hero p{color:var(--ink-2);font-size:15px;margin-top:16px;max-width:46ch;line-height:1.6}
+.feats{position:relative;z-index:1;display:grid;gap:14px;margin-top:34px}
+.feat{display:flex;align-items:center;gap:13px}
+.feat .fi{width:38px;height:38px;flex:none;border-radius:10px;background:var(--green-soft);display:grid;place-items:center}
+.feat .fi svg{width:19px;height:19px;stroke:var(--green);fill:none;stroke-width:2}
+.feat .ft{font-weight:600;font-size:14px}
+.feat .fd{font-size:12.5px;color:var(--ink-3)}
+.auth-foot{position:relative;z-index:1;color:var(--ink-4);font-size:12px}
+
+.auth-form-wrap{display:grid;place-items:center;padding:40px}
+.auth-card{width:100%;max-width:440px}
+.step-badge{display:inline-flex;align-items:center;gap:8px;font-size:12px;font-weight:600;color:var(--ink-3);margin-bottom:18px}
+.step-badge .dot{width:22px;height:22px;border-radius:50%;background:var(--purple);color:#fff;display:grid;place-items:center;font-family:var(--f-head);font-weight:700;font-size:12px}
+.auth-card h2{font-size:26px;font-weight:700}
+.auth-card .sub{color:var(--ink-3);margin-top:6px;font-size:14px}
+form{margin-top:26px;display:grid;gap:15px}
+.field label{display:block;font-size:12.5px;font-weight:600;color:var(--ink-2);margin-bottom:7px}
+.field .req{color:var(--purple)}
+.control{position:relative}
+.control svg.lead{position:absolute;left:14px;top:50%;transform:translateY(-50%);width:17px;height:17px;stroke:var(--ink-3);fill:none;stroke-width:1.8}
+.control input{width:100%;height:48px;padding:0 14px 0 42px;border-radius:11px;background:var(--panel);border:1px solid var(--line);color:var(--ink);font:inherit;font-size:14.5px;transition:.15s}
+.control input::placeholder{color:var(--ink-4)}
+.control input:focus{outline:none;border-color:var(--blue);box-shadow:0 0 0 3px var(--blue-soft)}
+.control input.bad{border-color:var(--red);box-shadow:0 0 0 3px var(--red-soft)}
+.control input.pw{padding-right:44px}
+.control .peek{position:absolute;right:6px;top:50%;transform:translateY(-50%);width:34px;height:34px;display:flex;align-items:center;justify-content:center;padding:0;background:none;border:0;border-radius:8px;cursor:pointer;color:var(--ink-3);transition:.15s}
+.control .peek:hover{color:var(--ink)}
+.control .peek:focus-visible{outline:none;color:var(--blue);box-shadow:0 0 0 3px var(--blue-soft)}
+.control .peek svg{width:18px;height:18px;stroke:currentColor;fill:none;stroke-width:1.8}
+.row2{display:grid;grid-template-columns:1fr 1fr;gap:15px}
+.err{color:var(--red);font-size:12px;margin-top:6px;display:none;align-items:center;gap:5px}
+.err.show{display:flex}
+.err svg{width:13px;height:13px;stroke:currentColor;fill:none;stroke-width:2}
+.terms{display:flex;align-items:flex-start;gap:11px;font-size:13px;color:var(--ink-2);cursor:pointer;margin-top:2px}
+.terms input{width:19px;height:19px;margin-top:1px;accent-color:var(--green);flex:none}
+.terms a{color:var(--blue);text-decoration:none}
+.auth-alt{text-align:center;color:var(--ink-3);font-size:13px;margin-top:18px}
+.auth-alt a{color:var(--blue);text-decoration:none;font-weight:600}
+
+/* ===================================================================
+   SCREEN 2 · DASHBOARD
+   =================================================================== */
+.dash{min-height:100vh;display:flex;flex-direction:column}
+.topbar{display:flex;align-items:center;gap:18px;padding:16px 30px;border-bottom:1px solid var(--line);position:sticky;top:0;z-index:20;background:rgba(8,13,26,.82);backdrop-filter:blur(12px)}
+.topbar .top-sp{flex:1}
+.userchip{display:flex;align-items:center;gap:11px;padding:7px 8px 7px 14px;border-radius:12px;background:var(--panel);border:1px solid var(--line)}
+.userchip .ut{font-size:11px;color:var(--ink-3);line-height:1.2}
+.userchip .un{font-size:13px;font-weight:600}
+.userchip .uav{width:34px;height:34px;border-radius:9px;background:linear-gradient(135deg,#a855f7,#7e22ce);display:grid;place-items:center;color:#fff;font-family:var(--f-head);font-weight:700;font-size:14px}
+.logout{width:44px;height:44px;border-radius:11px;background:var(--panel);border:1px solid var(--line);display:grid;place-items:center;cursor:pointer;color:var(--ink-3)}
+.logout:hover{color:var(--red);border-color:var(--red)}
+.logout svg{width:19px;height:19px;stroke:currentColor;fill:none;stroke-width:1.9}
+
+.dash-main{max-width:1080px;width:100%;margin:0 auto;padding:34px 30px 60px}
+.welcome{display:flex;align-items:center;gap:16px;margin-bottom:26px}
+.welcome .wav{width:56px;height:56px;border-radius:15px;background:linear-gradient(135deg,#a855f7,#7e22ce);display:grid;place-items:center;color:#fff;font-family:var(--f-head);font-weight:800;font-size:22px;box-shadow:0 10px 24px rgba(168,85,247,.3)}
+.welcome h1{font-size:24px;font-weight:700}
+.welcome .role{display:inline-flex;align-items:center;gap:7px;margin-top:6px;font-size:12.5px;font-weight:600;color:var(--purple);background:rgba(168,85,247,.14);border:1px solid rgba(168,85,247,.3);padding:4px 11px;border-radius:999px}
+.welcome .role svg{width:13px;height:13px;stroke:currentColor;fill:none;stroke-width:2}
+
+.grid{display:grid;grid-template-columns:1fr 1fr;gap:20px;align-items:start}
+.card{background:linear-gradient(180deg,var(--panel),var(--bg-2));border:1px solid var(--line);border-radius:16px;padding:24px;box-shadow:0 12px 30px rgba(0,0,0,.25)}
+.card-h{display:flex;align-items:center;gap:11px;margin-bottom:6px}
+.card-h .ci{width:38px;height:38px;border-radius:11px;display:grid;place-items:center;flex:none}
+.card-h .ci svg{width:20px;height:20px;fill:none;stroke-width:1.9}
+.card-h h3{font-size:16px;font-weight:700}
+.card .desc{color:var(--ink-3);font-size:13px;margin:0 0 20px 49px}
+
+/* wallet card */
+.wallet-ci{background:var(--blue-soft)}.wallet-ci svg{stroke:var(--blue)}
+.connect-empty{display:flex;flex-direction:column;align-items:center;text-align:center;gap:16px;padding:14px 0 4px}
+.connect-empty .big{width:76px;height:76px;border-radius:20px;background:var(--blue-soft);display:grid;place-items:center;border:1px dashed rgba(79,155,255,.4)}
+.connect-empty .big svg{width:38px;height:38px;stroke:var(--blue);fill:none;stroke-width:1.6}
+.connect-empty p{color:var(--ink-3);font-size:13px;max-width:34ch}
+.wallet-live{display:grid;gap:16px}
+.wl-id{display:flex;align-items:center;gap:13px;padding:16px;border-radius:13px;background:var(--bg-2);border:1px solid var(--line)}
+.wl-id .badge-pm{width:46px;height:46px;border-radius:12px;background:linear-gradient(135deg,#a855f7,#7e22ce);display:grid;place-items:center;color:#fff;flex:none}
+.wl-id .badge-pm svg{width:23px;height:23px;stroke:currentColor;fill:none;stroke-width:1.8}
+.wl-id .pm-role{font-size:11px;color:var(--purple);font-weight:700;letter-spacing:.05em;text-transform:uppercase}
+.wl-id .pm-name{font-size:15px;font-weight:700;margin-top:2px}
+.wl-id .conn{margin-left:auto;display:inline-flex;align-items:center;gap:7px;font-size:12px;font-weight:600;color:var(--green);background:var(--green-soft);padding:5px 11px;border-radius:999px}
+.wl-id .conn .d{width:8px;height:8px;border-radius:50%;background:var(--green);box-shadow:0 0 8px var(--green)}
+.wl-meta{display:grid;gap:1px}
+.wl-meta .r{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:11px 2px;border-bottom:1px solid var(--line);font-size:13px}
+.wl-meta .r:last-child{border-bottom:none}
+.wl-meta .r .k{color:var(--ink-3)}
+.wl-meta .r .v{font-weight:600;display:flex;align-items:center;gap:8px}
+.wl-meta .r .v.mono{font-family:var(--f-mono);font-size:12.5px}
+.copy-ic{cursor:pointer}.copy-ic svg{width:15px;height:15px;stroke:var(--ink-3);fill:none;stroke-width:1.8}.copy-ic:hover svg{stroke:var(--blue)}
+.chain-tag{display:inline-flex;align-items:center;gap:6px}.chain-tag .cd{width:8px;height:8px;border-radius:50%}
+
+/* code card */
+.code-ci{background:var(--green-soft)}.code-ci svg{stroke:var(--green)}
+.code-locked{display:flex;align-items:center;gap:12px;padding:16px;border-radius:13px;background:var(--bg-2);border:1px dashed var(--line-2);color:var(--ink-3);font-size:13px}
+.code-locked svg{width:20px;height:20px;stroke:var(--ink-4);fill:none;stroke-width:1.8;flex:none}
+.code-box{display:grid;gap:16px}
+.code-display{position:relative;border-radius:15px;padding:22px;background:linear-gradient(135deg,rgba(34,197,94,.10),var(--bg-2));border:1px solid rgba(34,197,94,.3);overflow:hidden}
+.code-display::after{content:"";position:absolute;top:-40px;right:-40px;width:140px;height:140px;border-radius:50%;background:radial-gradient(circle,rgba(34,197,94,.18),transparent 70%)}
+.code-display .cl{font-size:11.5px;color:var(--ink-3);font-weight:600;letter-spacing:.06em;text-transform:uppercase;margin-bottom:10px}
+.code-value{font-family:var(--f-mono);font-weight:600;font-size:26px;letter-spacing:.06em;color:#fff;word-break:break-all;position:relative;z-index:1}
+.code-sub{display:flex;flex-wrap:wrap;gap:8px 16px;margin-top:14px;position:relative;z-index:1}
+.code-sub .item{font-size:12px;color:var(--ink-3)}
+.code-sub .item b{color:var(--ink-2);font-family:var(--f-mono);font-weight:500}
+.valid-row{display:flex;align-items:center;gap:12px;flex-wrap:wrap}
+.valid-chip{display:inline-flex;align-items:center;gap:7px;font-size:12.5px;font-weight:600;color:var(--green);background:var(--green-soft);border:1px solid rgba(34,197,94,.3);padding:7px 13px;border-radius:999px}
+.valid-chip.warn{color:var(--amber);background:var(--amber-soft);border-color:rgba(234,179,8,.3)}
+.valid-chip.dead{color:var(--red);background:var(--red-soft);border-color:rgba(239,68,68,.3)}
+.valid-chip svg{width:14px;height:14px;stroke:currentColor;fill:none;stroke-width:2}
+.countdown{font-family:var(--f-head);font-weight:700;font-variant-numeric:tabular-nums;font-size:15px}
+.code-actions{display:flex;gap:12px}
+.code-actions .btn{flex:1}
+.mesa-note{display:flex;align-items:flex-start;gap:9px;font-size:12px;color:var(--ink-3);line-height:1.5}
+.mesa-note svg{width:15px;height:15px;stroke:var(--blue);fill:none;stroke-width:1.8;flex:none;margin-top:1px}
+
+/* toast */
+.toasts{position:fixed;right:22px;bottom:22px;z-index:200;display:flex;flex-direction:column;gap:10px;width:min(92vw,360px)}
+.toast{display:flex;align-items:center;gap:11px;padding:13px 15px;border-radius:12px;background:var(--panel-3);border:1px solid var(--line-2);color:var(--ink);font-size:13px;box-shadow:0 14px 34px rgba(0,0,0,.5);animation:slidein .25s ease}
+@keyframes slidein{from{transform:translateX(20px);opacity:0}to{transform:none;opacity:1}}
+.toast .ti{width:24px;height:24px;border-radius:7px;display:grid;place-items:center;flex:none}
+.toast .ti svg{width:14px;height:14px;fill:none;stroke-width:2.4;stroke-linecap:round;stroke-linejoin:round}
+.toast.ok .ti{background:var(--green-soft)}.toast.ok .ti svg{stroke:var(--green)}
+.toast.info .ti{background:var(--blue-soft)}.toast.info .ti svg{stroke:var(--blue)}
+.toast.err .ti{background:var(--red-soft)}.toast.err .ti svg{stroke:var(--red)}
+
+@media (max-width:900px){
+  .auth{grid-template-columns:1fr}
+  .auth-brand{display:none}
+  .grid{grid-template-columns:1fr}
+}
+</style>
+</head>
+<body>
+
+<!-- ================= SCREEN 1 · CADASTRO ================= -->
+<section class="auth" id="screenAuth">
+  <div class="auth-brand">
+    <div class="top">
+      <div class="brand">
+        <div class="mark"><svg viewBox="0 0 24 24" fill="none"><path d="M3 4l6 16 3-8 3 8 6-16" stroke="#4f9bff" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></svg></div>
+        <div><div class="name">VERUM OTC</div><div class="tag">Secure. Transparent. Institutional.</div></div>
+      </div>
+    </div>
+    <div class="auth-hero">
+      <span class="eyebrow"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#4f9bff" stroke-width="2"><circle cx="9" cy="8" r="3"/><path d="M3.5 19a5.5 5.5 0 0111 0M17 7a2.5 2.5 0 010 5"/></svg>Portal Pay Master</span>
+      <h1>Opere como <span>Pay Master</span> na mesa institucional</h1>
+      <p>Cadastre-se, conecte sua carteira e gere um código único de mesa de operação para liquidar deals OTC com segurança N-de-N.</p>
+      <div class="feats">
+        <div class="feat"><span class="fi"><svg viewBox="0 0 24 24"><rect x="5" y="11" width="14" height="9" rx="2"/><path d="M8 11V8a4 4 0 018 0v3"/></svg></span><div><div class="ft">Carteira própria</div><div class="fd">Você mantém a custódia; nada sai sem sua assinatura.</div></div></div>
+        <div class="feat"><span class="fi"><svg viewBox="0 0 24 24"><path d="M4 7h16M4 12h16M4 17h10"/></svg></span><div><div class="ft">Código de mesa único</div><div class="fd">Número exclusivo com validade de 1 hora por sessão.</div></div></div>
+        <div class="feat"><span class="fi"><svg viewBox="0 0 24 24"><path d="M12 3l7 3v5c0 5-3 8-7 10-4-2-7-5-7-10V6z"/><path d="M9 12l2 2 4-4"/></svg></span><div><div class="ft">Liquidação auditável</div><div class="fd">Deal Hash, nonce e replay protection em cada passo.</div></div></div>
+      </div>
+    </div>
+    <div class="auth-foot">© 2026 VERUM OTC · Infraestrutura de negociação OTC institucional</div>
+  </div>
+
+  <div class="auth-form-wrap">
+    <div class="auth-card" id="viewRegister">
+      <div class="step-badge"><span class="dot">1</span> Cadastro · Pay Master 1</div>
+      <h2>Criar conta Pay Master</h2>
+      <p class="sub">Preencha seus dados para acessar a mesa de operação.</p>
+
+      <form id="regForm" novalidate>
+        <div class="field">
+          <label>Nome completo <span class="req">*</span></label>
+          <div class="control">
+            <svg class="lead" viewBox="0 0 24 24"><circle cx="12" cy="8" r="4"/><path d="M4 20a8 8 0 0116 0"/></svg>
+            <input id="fName" placeholder="Ex.: João da Silva" autocomplete="name">
+          </div>
+          <div class="err" id="eName"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 8v5M12 16h.01"/></svg>Informe seu nome.</div>
+        </div>
+
+        <div class="field">
+          <label>E-mail corporativo <span class="req">*</span></label>
+          <div class="control">
+            <svg class="lead" viewBox="0 0 24 24"><rect x="3" y="5" width="18" height="14" rx="2"/><path d="M3 7l9 6 9-6"/></svg>
+            <input id="fEmail" type="email" placeholder="voce@instituicao.com" autocomplete="email">
+          </div>
+          <div class="err" id="eEmail"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 8v5M12 16h.01"/></svg>E-mail inválido.</div>
+        </div>
+
+        <div class="row2">
+          <div class="field">
+            <label>Senha <span class="req">*</span></label>
+            <div class="control">
+              <svg class="lead" viewBox="0 0 24 24"><rect x="5" y="11" width="14" height="9" rx="2"/><path d="M8 11V8a4 4 0 018 0v3"/></svg>
+              <input id="fPass" type="password" class="pw" placeholder="Mín. 8 caracteres" autocomplete="new-password">
+              <button type="button" class="peek" data-peek="fPass" aria-label="Mostrar senha" title="Mostrar senha"></button>
+            </div>
+          </div>
+          <div class="field">
+            <label>Confirmar <span class="req">*</span></label>
+            <div class="control">
+              <svg class="lead" viewBox="0 0 24 24"><rect x="5" y="11" width="14" height="9" rx="2"/><path d="M8 11V8a4 4 0 018 0v3"/></svg>
+              <input id="fPass2" type="password" class="pw" placeholder="Repita a senha" autocomplete="new-password">
+              <button type="button" class="peek" data-peek="fPass2" aria-label="Mostrar senha" title="Mostrar senha"></button>
+            </div>
+          </div>
+        </div>
+        <div class="err" id="ePass"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 8v5M12 16h.01"/></svg>Senhas não conferem (mín. 8 caracteres).</div>
+
+        <label class="terms">
+          <input type="checkbox" id="fTerms">
+          <span>Li e aceito os <a href="#" onclick="return false">Termos de Uso</a> e a <a href="#" onclick="return false">Política de Privacidade</a> da mesa VERUM OTC.</span>
+        </label>
+        <div class="err" id="eTerms"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 8v5M12 16h.01"/></svg>É necessário aceitar os termos.</div>
+
+        <button type="submit" class="btn btn-primary btn-block" style="margin-top:6px">Criar conta e acessar mesa
+          <svg viewBox="0 0 24 24"><path d="M5 12h14M13 6l6 6-6 6"/></svg>
+        </button>
+      </form>
+      <div class="auth-alt">Já possui cadastro? <a href="#" id="linkLogin">Entrar</a></div>
+    </div>
+
+    <!-- ---- VERIFICAÇÃO DE E-MAIL ---- -->
+    <div class="auth-card hidden" id="viewVerify">
+      <div class="step-badge"><span class="dot">2</span> Verificação de e-mail</div>
+      <h2>Confirme seu e-mail</h2>
+      <p class="sub">Enviamos um código de 6 dígitos para <strong id="verifyEmail">—</strong>. Digite-o abaixo para concluir o cadastro.</p>
+
+      <div class="field">
+        <label>Código de verificação <span class="req">*</span></label>
+        <div class="control">
+          <svg class="lead" viewBox="0 0 24 24"><rect x="3" y="5" width="18" height="14" rx="2"/><path d="M3 7l9 6 9-6"/></svg>
+          <input id="fCode" inputmode="numeric" maxlength="6" placeholder="000000" autocomplete="one-time-code" style="letter-spacing:.4em">
+        </div>
+        <div class="err" id="eCode"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 8v5M12 16h.01"/></svg>Código incorreto.</div>
+      </div>
+
+      <button type="button" class="btn btn-primary btn-block" id="btnVerify" style="margin-top:6px">Confirmar e criar conta
+        <svg viewBox="0 0 24 24"><path d="M5 12h14M13 6l6 6-6 6"/></svg>
+      </button>
+      <div class="auth-alt"><a href="#" id="linkResend">Reenviar código</a> · <a href="#" id="linkBackReg">Voltar ao cadastro</a></div>
+    </div>
+
+    <!-- ---- LOGIN ---- -->
+    <div class="auth-card hidden" id="viewLogin">
+      <div class="step-badge"><span class="dot">→</span> Acesso · Pay Master</div>
+      <h2>Entrar na mesa</h2>
+      <p class="sub">Use o e-mail e a senha do seu cadastro.</p>
+
+      <form id="loginForm" novalidate>
+        <div class="field">
+          <label>E-mail <span class="req">*</span></label>
+          <div class="control">
+            <svg class="lead" viewBox="0 0 24 24"><rect x="3" y="5" width="18" height="14" rx="2"/><path d="M3 7l9 6 9-6"/></svg>
+            <input id="lEmail" type="email" placeholder="voce@instituicao.com" autocomplete="email">
+          </div>
+          <div class="err" id="eLEmail"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 8v5M12 16h.01"/></svg>E-mail inválido.</div>
+        </div>
+
+        <div class="field">
+          <label>Senha <span class="req">*</span></label>
+          <div class="control">
+            <svg class="lead" viewBox="0 0 24 24"><rect x="5" y="11" width="14" height="9" rx="2"/><path d="M8 11V8a4 4 0 018 0v3"/></svg>
+            <input id="lPass" type="password" class="pw" placeholder="Sua senha" autocomplete="current-password">
+            <button type="button" class="peek" data-peek="lPass" aria-label="Mostrar senha" title="Mostrar senha"></button>
+          </div>
+          <div class="err" id="eLPass"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 8v5M12 16h.01"/></svg>Informe a senha.</div>
+        </div>
+
+        <button type="submit" class="btn btn-primary btn-block" style="margin-top:6px">Entrar
+          <svg viewBox="0 0 24 24"><path d="M5 12h14M13 6l6 6-6 6"/></svg>
+        </button>
+      </form>
+      <div class="auth-alt">Ainda não tem conta? <a href="#" id="linkRegister">Criar conta</a></div>
+    </div>
+  </div>
+</section>
+
+<!-- ================= SCREEN 2 · DASHBOARD ================= -->
+<section class="dash hidden" id="screenDash">
+  <header class="topbar">
+    <div class="brand">
+      <div class="mark"><svg viewBox="0 0 24 24" fill="none"><path d="M3 4l6 16 3-8 3 8 6-16" stroke="#4f9bff" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></svg></div>
+      <div><div class="name">VERUM OTC</div><div class="tag">Mesa de Operação · Pay Master</div></div>
+    </div>
+    <div class="top-sp"></div>
+    <div class="userchip">
+      <div><div class="ut">Conectado como</div><div class="un" id="chipName">—</div></div>
+      <div class="uav" id="chipAv">P</div>
+    </div>
+    <button class="logout" id="btnLogout" title="Sair"><svg viewBox="0 0 24 24"><path d="M15 12H3M9 6l-6 6 6 6M13 4h6a1 1 0 011 1v14a1 1 0 01-1 1h-6"/></svg></button>
+  </header>
+
+  <main class="dash-main">
+    <div class="welcome">
+      <div class="wav" id="wAv">P</div>
+      <div>
+        <h1>Bem-vindo, <span id="wName">Pay Master</span></h1>
+        <span class="role"><svg viewBox="0 0 24 24"><circle cx="9" cy="8" r="3"/><path d="M3.5 19a5.5 5.5 0 0111 0M17 7a2.5 2.5 0 010 5"/></svg>Pay Master 1 · <span id="wOrg">Instituição</span></span>
+      </div>
+    </div>
+
+    <div class="grid">
+      <!-- ---- WALLET CARD ---- -->
+      <section class="card">
+        <div class="card-h"><span class="ci wallet-ci"><svg viewBox="0 0 24 24" stroke="currentColor"><rect x="3" y="6" width="18" height="13" rx="2"/><path d="M16 12h2M3 10h18"/></svg></span><h3>Carteira</h3></div>
+        <p class="desc">Conecte a carteira que assinará as operações como Pay Master 1.</p>
+
+        <!-- not connected -->
+        <div id="walletEmpty" class="connect-empty">
+          <div class="big"><svg viewBox="0 0 24 24"><rect x="3" y="6" width="18" height="13" rx="2"/><path d="M16 12h2"/></svg></div>
+          <p>Nenhuma carteira conectada. Conecte para se identificar como Pay Master 1.</p>
+          <button class="btn btn-blue btn-block" id="btnConnect">
+            <svg viewBox="0 0 24 24"><rect x="3" y="6" width="18" height="13" rx="2"/><path d="M16 12h2M3 10h18"/></svg>
+            Conectar Carteira
+          </button>
+        </div>
+
+        <!-- connected -->
+        <div id="walletLive" class="wallet-live hidden">
+          <div class="wl-id">
+            <div class="badge-pm"><svg viewBox="0 0 24 24"><circle cx="12" cy="8" r="4"/><path d="M4 20a8 8 0 0116 0"/></svg></div>
+            <div>
+              <div class="pm-role">Pay Master 1</div>
+              <div class="pm-name" id="wlName">—</div>
+            </div>
+            <span class="conn"><span class="d"></span>Conectada</span>
+          </div>
+          <div class="wl-meta">
+            <div class="r"><span class="k">Endereço</span><span class="v mono"><span id="wlAddr">—</span><span class="copy-ic" id="copyAddr" title="Copiar"><svg viewBox="0 0 24 24"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V5a2 2 0 012-2h8"/></svg></span></span></div>
+            <div class="r"><span class="k">Rede</span><span class="v"><span class="chain-tag"><span class="cd" style="background:#9945ff"></span><span id="wlNet">Solana</span></span></span></div>
+            <div class="r"><span class="k">Papel</span><span class="v" style="color:var(--purple)">Pay Master 1</span></div>
+            <div class="r"><span class="k">Status</span><span class="v" style="color:var(--green)">Verificada</span></div>
+          </div>
+          <button class="btn btn-ghost btn-block" id="btnDisconnect">Desconectar carteira</button>
+        </div>
+      </section>
+
+      <!-- ---- CODE CARD ---- -->
+      <section class="card">
+        <div class="card-h"><span class="ci code-ci"><svg viewBox="0 0 24 24" stroke="currentColor"><path d="M8 3H5a2 2 0 00-2 2v3M16 3h3a2 2 0 012 2v3M8 21H5a2 2 0 01-2-2v-3M16 21h3a2 2 0 002-2v-3"/><path d="M7 12h10"/></svg></span><h3>Código Mesa de Operação</h3></div>
+        <p class="desc">Gere um código único para abrir sua sessão de mesa. Validade de 1 hora.</p>
+
+        <!-- locked (wallet needed) -->
+        <div id="codeLocked" class="code-locked">
+          <svg viewBox="0 0 24 24"><rect x="5" y="11" width="14" height="9" rx="2"/><path d="M8 11V8a4 4 0 018 0v3"/></svg>
+          Conecte a carteira para liberar a geração do código.
+        </div>
+
+        <!-- generate button -->
+        <button class="btn btn-primary btn-block hidden" id="btnGenerate">
+          <svg viewBox="0 0 24 24"><path d="M12 3v4M12 17v4M3 12h4M17 12h4M6 6l2.5 2.5M15.5 15.5L18 18M18 6l-2.5 2.5M8.5 15.5L6 18"/></svg>
+          Gerar Código Mesa de Operação
+        </button>
+
+        <!-- generated code -->
+        <div id="codeBox" class="code-box hidden">
+          <div class="code-display">
+            <div class="cl">Código da mesa</div>
+            <div class="code-value" id="codeValue">—</div>
+            <div class="code-sub">
+              <span class="item">Nº único: <b id="codeUid">—</b></span>
+              <span class="item">Gerado: <b id="codeGen">—</b></span>
+              <span class="item">Expira: <b id="codeExp">—</b></span>
+            </div>
+          </div>
+          <div class="valid-row">
+            <span class="valid-chip" id="validChip"><svg viewBox="0 0 24 24"><path d="M12 3l7 3v5c0 5-3 8-7 10-4-2-7-5-7-10V6z"/></svg>Válido por 1 hora</span>
+            <span class="countdown" id="countdown">60:00</span>
+          </div>
+          <div class="code-actions">
+            <button class="btn btn-blue" id="btnCopy" style="flex:2">
+              <svg viewBox="0 0 24 24"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V5a2 2 0 012-2h8"/></svg>
+              Copiar código
+            </button>
+            <button class="btn" id="btnRegen"><svg viewBox="0 0 24 24"><path d="M3 12a9 9 0 019-9 9 9 0 016.7 3M21 12a9 9 0 01-9 9 9 9 0 01-6.7-3"/><path d="M18 3v4h-4M6 21v-4h4"/></svg>Novo</button>
+          </div>
+          <div class="mesa-note"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 11v5M12 8h.01"/></svg>Compartilhe este código com a contraparte para vincular a operação à sua mesa. Após 1 hora ele expira automaticamente por segurança.</div>
+          <button class="btn btn-blue btn-block" id="btnOpenMesa">
+            <svg viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M3 9h18M8 14h8"/></svg>
+            Abrir Mesa de Operação
+            <svg viewBox="0 0 24 24"><path d="M5 12h14M13 6l6 6-6 6"/></svg>
+          </button>
+        </div>
+      </section>
+    </div>
+  </main>
+</section>
+
+<div class="toasts" id="toasts"></div>
+
+<script>
+(function(){
+  "use strict";
+  const $ = s => document.querySelector(s);
+  const HOUR=3600*1000;
+  const TOK='verum_portal_token';
+
+  /* ---------- mostrar/ocultar senha (ícone de olho) ---------- */
+  (function(){
+    const EYE='<svg viewBox="0 0 24 24"><path d="M1 12s4-7 11-7 11 7 11 7-4 7-11 7-11-7-11-7z"/><circle cx="12" cy="12" r="3"/></svg>';
+    const EYEOFF='<svg viewBox="0 0 24 24"><path d="M17.94 17.94A10.07 10.07 0 0 1 12 20C5 20 1 12 1 12a18.45 18.45 0 0 1 5.06-5.94M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19m-6.72-1.07a3 3 0 1 1-4.24-4.24"/><path d="M1 1l22 22"/></svg>';
+    document.querySelectorAll('.peek').forEach(function(btn){
+      const inp=document.getElementById(btn.dataset.peek); if(!inp) return;
+      btn.innerHTML=EYE;
+      btn.addEventListener('click',function(){
+        const show=inp.type==='password';
+        inp.type=show?'text':'password';
+        btn.innerHTML=show?EYEOFF:EYE;
+        const lbl=show?'Ocultar senha':'Mostrar senha';
+        btn.setAttribute('aria-label',lbl); btn.title=lbl;
+        inp.focus();
+      });
+    });
+  })();
+
+  /* ---------- API real ---------- */
+  const META = document.querySelector('meta[name="verum-otc-api"]');
+  const API = ((META && META.content) || '/').replace(/\/$/,'');
+  const getTok = () => { try{ return localStorage.getItem(TOK)||''; }catch(e){ return ''; } };
+  const setTok = t => { try{ t?localStorage.setItem(TOK,t):localStorage.removeItem(TOK); }catch(e){} };
+  async function api(path, opts){
+    opts = opts||{};
+    const headers = { 'accept':'application/json' };
+    if(opts.body!==undefined) headers['content-type']='application/json';
+    const t=getTok(); if(t) headers['authorization']='Bearer '+t;
+    const res = await fetch(API+path, { method:opts.method||'GET', headers, body:opts.body!==undefined?JSON.stringify(opts.body):undefined });
+    let data=null; try{ data=await res.json(); }catch(e){}
+    if(!res.ok){ const msg=(data&&(data.message||data.error))||('Erro '+res.status); const err=new Error(msg); err.status=res.status; err.code=data&&data.error; throw err; }
+    return data;
+  }
+
+  /* ---------- estado local (apenas espelho da API) ---------- */
+  let me = null;          // { payMaster, wallet, code }
+  let codeExpLocal = 0;   // âncora local de expiração (Date.now()+ttlMs)
+  let tick = null;
+
+  /* ---------- toast ---------- */
+  const ICONS={ok:'<path d="M5 13l4 4L19 7"/>',info:'<circle cx="12" cy="12" r="9"/><path d="M12 8h.01M11 12h1v4h1"/>',err:'<circle cx="12" cy="12" r="9"/><path d="M12 8v5M12 16h.01"/>'};
+  function toast(msg,type){
+    type=type||'info';
+    const el=document.createElement('div');
+    el.className='toast '+type;
+    el.innerHTML='<span class="ti"><svg viewBox="0 0 24 24">'+ICONS[type]+'</svg></span><span>'+msg+'</span>';
+    $('#toasts').appendChild(el);
+    setTimeout(()=>{el.style.transition='opacity .3s,transform .3s';el.style.opacity='0';el.style.transform='translateX(20px)';setTimeout(()=>el.remove(),300);},2600);
+  }
+
+  /* ---------- helpers ---------- */
+  const initials = n => (n||'P').trim().split(/\s+/).map(w=>w[0]).slice(0,2).join('').toUpperCase();
+  const pad = n => String(n).padStart(2,'0');
+  function copy(txt,msg){
+    const done=()=>toast(msg||('Copiado: '+txt),'ok');
+    if(navigator.clipboard&&navigator.clipboard.writeText){ navigator.clipboard.writeText(txt).then(done).catch(done); } else done();
+  }
+  function hexAddr(){
+    let h='0x'; const c='0123456789abcdef';
+    for(let i=0;i<40;i++) h+=c[Math.floor(Math.random()*16)];
+    return h;
+  }
+  const shortAddr = a => a && a.length>12 ? a.slice(0,6)+'…'+a.slice(-4) : a;
+
+  /* ---------- Verum Wallet (conexão multichain) ---------- */
+  // A OTC conecta só à Verum Wallet, por UM botão. A prova de posse é Solana
+  // (window.verum) e o getAddresses() expõe os endereços das demais redes.
+  const VERUM_WALLET_URL='https://www.verumcrypto.com/wallet';
+  const walletErr = (msg,code) => { const e=new Error(msg); e.code=code; return e; };
+  function solProvider(){
+    const w=window;
+    if(w.verum) return w.verum;
+    if(w.solflare && (w.solflare.isSolflare || typeof w.solflare.connect==='function')) return w.solflare;
+    if(w.solana && (w.solana.isVerum || w.solana.isSolflare)) return w.solana;
+    return null;
+  }
+  async function connectVerum(){
+    const p=solProvider(); if(!p) throw walletErr('Verum Wallet não encontrada. Instale/desbloqueie a extensão.','NO_WALLET');
+    const r=await p.connect();
+    const pk=(r&&r.publicKey)?r.publicKey:p.publicKey;
+    if(!pk) throw walletErr('Não foi possível ler o endereço da carteira','NO_WALLET');
+    return {address:pk.toString(),network:'solana'};
+  }
+  // Endereços multichain que a Verum expõe (getAddresses). Roda contra um timeout
+  // p/ NUNCA travar a conexão se a extensão não tiver relay p/ getAddresses.
+  async function collectVerumAddresses(){
+    try{
+      const p=window.verum;
+      if(p&&typeof p.getAddresses==='function'){
+        const to=new Promise(res=>setTimeout(()=>res(null),2500));
+        const r=await Promise.race([Promise.resolve(p.getAddresses()).catch(()=>null),to]);
+        if(r&&Array.isArray(r.addresses)) return r.addresses.filter(a=>a&&a.network&&a.address).map(a=>({network:String(a.network),address:String(a.address)}));
+      }
+    }catch(e){}
+    return [];
+  }
+
+  /* ================= SCREEN CONTROL ================= */
+  function applyMe(payload){
+    me = payload;
+    const p = me.payMaster || {};
+    $('#chipName').textContent=p.name||'Pay Master';
+    $('#chipAv').textContent=initials(p.name);
+    $('#wAv').textContent=initials(p.name);
+    $('#wName').textContent=(p.name||'Pay Master').split(' ')[0];
+    $('#wOrg').textContent=p.org||'Instituição';
+    if(me.code && me.code.ttlMs>0) codeExpLocal = Date.now()+me.code.ttlMs; else codeExpLocal=0;
+    renderWallet(); renderCode();
+  }
+  function showDash(payload){
+    $('#screenAuth').classList.add('hidden');
+    $('#screenDash').classList.remove('hidden');
+    applyMe(payload);
+  }
+  function showAuth(){
+    $('#screenDash').classList.add('hidden');
+    $('#screenAuth').classList.remove('hidden');
+    showView('viewRegister');
+    if(tick){clearInterval(tick);tick=null;}
+  }
+  // alterna entre os cards de autenticação (cadastro / verificação / login)
+  function showView(id){ ['viewRegister','viewVerify','viewLogin'].forEach(v=>$('#'+v).classList.toggle('hidden', v!==id)); }
+
+  /* ================= CADASTRO ================= */
+  function mark(id,ok){ const el=$('#'+id); if(el) el.classList.toggle('bad',!ok); }
+  function err(id,show){ $('#'+id).classList.toggle('show',show); }
+
+  const EMAIL_RE=/^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+  let pendingReg=null;   // dados do cadastro aguardando verificação de e-mail
+  let verifyCode='';     // código enviado (demo)
+
+  function sendVerifyCode(email){
+    verifyCode=String(Math.floor(100000+Math.random()*900000));
+    $('#verifyEmail').textContent=email;
+    // Sem backend de e-mail nesta demonstração: o código é exibido para o usuário.
+    toast('Código de verificação enviado para '+email+': '+verifyCode,'info');
+  }
+
+  $('#regForm').addEventListener('submit',async e=>{
+    e.preventDefault();
+    const name=$('#fName').value.trim();
+    const email=$('#fEmail').value.trim();
+    const pass=$('#fPass').value;
+    const pass2=$('#fPass2').value;
+    const terms=$('#fTerms').checked;
+
+    const okName=name.length>=2; mark('fName',okName); err('eName',!okName);
+    const okEmail=EMAIL_RE.test(email); mark('fEmail',okEmail); err('eEmail',!okEmail);
+    const okPass=pass.length>=8 && pass===pass2; mark('fPass',okPass); mark('fPass2',okPass); err('ePass',!okPass);
+    err('eTerms',!terms);
+    if(!(okName&&okEmail&&okPass&&terms)){ toast('Revise os campos destacados','err'); return; }
+
+    // guarda o cadastro e exige verificação de e-mail antes de criar a conta
+    pendingReg={name,email,password:pass};
+    $('#fCode').value=''; mark('fCode',true); err('eCode',false);
+    sendVerifyCode(email);
+    showView('viewVerify');
+    $('#fCode').focus();
+  });
+
+  // Verifica o código e só então cria a conta de fato
+  $('#btnVerify').addEventListener('click',async ()=>{
+    if(!pendingReg){ showView('viewRegister'); return; }
+    const code=$('#fCode').value.trim();
+    const ok=code.length===6 && code===verifyCode; mark('fCode',ok); err('eCode',!ok);
+    if(!ok){ toast('Código incorreto','err'); return; }
+    const btn=$('#btnVerify'); btn.disabled=true;
+    try{
+      const r=await api('/v1/portal/register',{method:'POST',body:pendingReg});
+      setTok(r.token);
+      toast('E-mail verificado · conta criada','ok');
+      pendingReg=null; verifyCode='';
+      const data=await api('/v1/portal/me');
+      showDash(data);
+    }catch(ex){ toast(ex.message,'err'); }
+    finally{ btn.disabled=false; }
+  });
+  $('#linkResend').addEventListener('click',e=>{ e.preventDefault(); if(pendingReg) sendVerifyCode(pendingReg.email); });
+  $('#linkBackReg').addEventListener('click',e=>{ e.preventDefault(); showView('viewRegister'); });
+
+  // "Entrar" → abre a tela de login
+  $('#linkLogin').addEventListener('click',e=>{ e.preventDefault(); $('#lEmail').value=$('#fEmail').value.trim(); showView('viewLogin'); $('#lEmail').focus(); });
+  $('#linkRegister').addEventListener('click',e=>{ e.preventDefault(); showView('viewRegister'); });
+
+  // Login com e-mail + senha
+  $('#loginForm').addEventListener('submit',async e=>{
+    e.preventDefault();
+    const email=$('#lEmail').value.trim(), pass=$('#lPass').value;
+    const okEmail=EMAIL_RE.test(email); mark('lEmail',okEmail); err('eLEmail',!okEmail);
+    const okPass=pass.length>=1; mark('lPass',okPass); err('eLPass',!okPass);
+    if(!(okEmail&&okPass)){ toast('Informe e-mail e senha','err'); return; }
+    const btn=e.submitter||$('#loginForm button[type=submit]'); if(btn) btn.disabled=true;
+    try{
+      const r=await api('/v1/portal/login',{method:'POST',body:{email,password:pass}});
+      setTok(r.token);
+      const data=await api('/v1/portal/me');
+      toast('Bem-vindo de volta','ok'); showDash(data);
+    }catch(ex){ toast(ex.message,'err'); }
+    finally{ if(btn) btn.disabled=false; }
+  });
+
+  /* ================= WALLET ================= */
+  function renderWallet(){
+    const w = me && me.wallet;
+    if(w){
+      $('#walletEmpty').classList.add('hidden');
+      $('#walletLive').classList.remove('hidden');
+      $('#wlName').textContent=(me.payMaster&&me.payMaster.name)||'Pay Master 1';
+      $('#wlAddr').textContent=shortAddr(w.address);
+      const nEl=$('#wlNet'); if(nEl){ const cap=s=>s?s.charAt(0).toUpperCase()+s.slice(1):s; nEl.textContent=w.multichain?('Multichain · '+((w.addresses&&w.addresses.length)||0)+' redes'):cap(w.network||'solana'); }
+      $('#codeLocked').classList.add('hidden');
+      if(!(me.code)) $('#btnGenerate').classList.remove('hidden');
+    }else{
+      $('#walletEmpty').classList.remove('hidden');
+      $('#walletLive').classList.add('hidden');
+      $('#codeLocked').classList.remove('hidden');
+      $('#btnGenerate').classList.add('hidden');
+      $('#codeBox').classList.add('hidden');
+    }
+  }
+
+  $('#btnConnect').addEventListener('click',async ()=>{
+    const b=$('#btnConnect'); b.disabled=true; const prev=b.innerHTML; b.textContent='Conectando…';
+    try{
+      // Prova de posse via Solana (window.verum) e captura das demais redes.
+      let w;
+      try{ w=await connectVerum(); }
+      catch(ex){
+        if(ex.code==='NO_WALLET'){
+          try{ window.open(VERUM_WALLET_URL,'_blank','noopener'); }catch(e){}
+          toast('Abrindo a Verum Wallet… conecte sua carteira por lá.','info');
+          b.innerHTML=prev; return;
+        }
+        throw ex;
+      }
+      const addresses=await collectVerumAddresses();
+      const wallet=await api('/v1/portal/wallet/connect',{method:'POST',body:{address:w.address,network:'solana',addresses}});
+      me.wallet=wallet; renderWallet(); renderCode();
+      toast(wallet.multichain?('Verum Wallet conectada · multichain ('+(wallet.addresses?wallet.addresses.length:addresses.length)+' redes)'):'Verum Wallet conectada como Pay Master 1','ok');
+    }catch(ex){ toast(ex.message||'Falha ao conectar carteira','err'); b.innerHTML=prev; }
+    finally{ b.disabled=false; }
+  });
+
+  $('#btnDisconnect').addEventListener('click',async ()=>{
+    try{
+      await api('/v1/portal/wallet/disconnect',{method:'POST',body:{}});
+      me.wallet=null; me.code=null; codeExpLocal=0;
+      if(tick){clearInterval(tick);tick=null;}
+      renderWallet(); renderCode();
+      toast('Carteira desconectada','info');
+    }catch(ex){ toast(ex.message,'err'); }
+  });
+
+  $('#copyAddr').addEventListener('click',()=>{ if(me&&me.wallet) copy(me.wallet.address,'Endereço copiado'); });
+
+  /* ================= CÓDIGO MESA ================= */
+  function fmtTime(ms){ const d=new Date(ms); return pad(d.getHours())+':'+pad(d.getMinutes())+':'+pad(d.getSeconds()); }
+
+  function renderCode(){
+    const c=me&&me.code;
+    if(!c){ $('#codeBox').classList.add('hidden'); if(me&&me.wallet) $('#btnGenerate').classList.remove('hidden'); return; }
+    $('#btnGenerate').classList.add('hidden');
+    $('#codeBox').classList.remove('hidden');
+    $('#codeValue').textContent=c.code;
+    $('#codeUid').textContent=c.uid;
+    $('#codeGen').textContent=fmtTime(c.createdAt);
+    $('#codeExp').textContent=fmtTime(c.expiresAt);
+    startTick();
+  }
+
+  function startTick(){
+    if(tick) clearInterval(tick);
+    updateCountdown();
+    tick=setInterval(updateCountdown,1000);
+  }
+  function updateCountdown(){
+    const c=me&&me.code; if(!c) return;
+    const left=codeExpLocal-Date.now();
+    const chip=$('#validChip'), cd=$('#countdown');
+    if(left<=0){
+      cd.textContent='00:00';
+      chip.className='valid-chip dead';
+      chip.innerHTML='<svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 8v5M12 16h.01"/></svg>Código expirado';
+      $('#btnCopy').disabled=true;
+      if(tick){clearInterval(tick);tick=null;}
+      return;
+    }
+    const totS=Math.floor(left/1000);
+    const h=Math.floor(totS/3600), m=Math.floor(totS%3600/60), s=totS%60;
+    cd.textContent=(h>0?pad(h)+':':'')+pad(m)+':'+pad(s);
+    if(left<5*60*1000){ chip.className='valid-chip warn'; chip.innerHTML='<svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 8v4l2 2"/></svg>Expira em breve'; }
+    else{ chip.className='valid-chip'; chip.innerHTML='<svg viewBox="0 0 24 24"><path d="M12 3l7 3v5c0 5-3 8-7 10-4-2-7-5-7-10V6z"/></svg>Válido por 1 hora'; }
+    $('#btnCopy').disabled=false;
+  }
+
+  async function newCode(msg){
+    try{
+      const code=await api('/v1/portal/mesa/code',{method:'POST',body:{}});
+      me.code=code; codeExpLocal=Date.now()+(code.ttlMs||HOUR);
+      $('#btnCopy').disabled=false;
+      renderCode();
+      toast(msg||'Código de mesa gerado · válido por 1h','ok');
+    }catch(ex){ toast(ex.message,'err'); }
+  }
+
+  $('#btnGenerate').addEventListener('click',()=>newCode());
+  $('#btnRegen').addEventListener('click',()=>newCode('Novo código gerado'));
+  $('#btnCopy').addEventListener('click',()=>{ if(me&&me.code) copy(me.code.code,'Código copiado para a área de transferência'); });
+  $('#btnOpenMesa').addEventListener('click',()=>{ toast('Abrindo Mesa de Operação…','info'); setTimeout(()=>{ window.location.href='/mesa'; },350); });
+
+  /* ================= LOGOUT ================= */
+  $('#btnLogout').addEventListener('click',async ()=>{
+    if(!confirm('Sair da mesa? Sua conta continua salva no servidor.')) return;
+    try{ await api('/v1/portal/logout',{method:'POST',body:{}}); }catch(ex){}
+    setTok(''); me=null;
+    // limpa o formulário
+    ['fName','fEmail','fPass','fPass2','fCode','lEmail','lPass'].forEach(id=>{ const el=$('#'+id); if(el) el.value=''; });
+    $('#fTerms').checked=false; pendingReg=null; verifyCode='';
+    showAuth(); toast('Sessão encerrada','info');
+  });
+
+  /* ================= INIT ================= */
+  (async function init(){
+    if(!getTok()){ showAuth(); return; }
+    try{ const data=await api('/v1/portal/me'); showDash(data); }
+    catch(ex){ setTok(''); showAuth(); }
+  })();
+})();
+</script>
+</body>
+</html>

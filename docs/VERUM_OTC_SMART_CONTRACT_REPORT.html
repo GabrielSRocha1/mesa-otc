@@ -1,0 +1,207 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>VERUM OTC · Smart Contract Core — Relatório Técnico</title>
+<link rel="preconnect" href="https://fonts.googleapis.com"><link href="https://fonts.googleapis.com/css2?family=Sora:wght@500;600;700&family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+:root{--bg:#0A0E1A;--bg2:#111729;--bg3:#182035;--line:#25304a;--fg:#E8ECF5;--mute:#9AA5BF;--blue:#3B82F6;--green:#22C55E;--amber:#F59E0B;--red:#EF4444;--sora:'Sora',system-ui,sans-serif;--inter:'Inter',system-ui,sans-serif;--mono:'JetBrains Mono',ui-monospace,monospace;box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}
+*{box-sizing:border-box}html{scroll-padding-top:env(safe-area-inset-top,0px)}body{margin:0;background:var(--bg);color:var(--fg);font:15px/1.6 var(--inter)}
+header{padding:40px 24px 24px;border-bottom:1px solid var(--line);background:linear-gradient(180deg,#0d1327,#0A0E1A)}.wrap{max-width:1180px;margin:0 auto;padding:0 24px 80px}
+h1,h2,h3{font-family:var(--sora);letter-spacing:-.01em;margin:0 0 .4em}h1{font-size:28px}h2{font-size:21px}h3{font-size:16px;color:#c7d0e6}
+.k{font-family:var(--mono);font-size:12.5px;color:#c7d0e6;background:var(--bg3);padding:1px 6px;border-radius:5px;white-space:nowrap}
+section{margin-top:44px;padding-top:28px;border-top:1px solid var(--line)}.sub{color:var(--mute);font-size:13.5px}
+.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(230px,1fr));gap:12px;margin:16px 0}.card{background:var(--bg2);border:1px solid var(--line);border-radius:12px;padding:14px 16px}.card b{font-family:var(--sora);font-size:22px;display:block}.card span{color:var(--mute);font-size:12.5px}
+table{width:100%;border-collapse:collapse;margin:14px 0;font-size:13.5px}th,td{padding:9px 10px;border-bottom:1px solid var(--line);vertical-align:top;text-align:left}th{color:var(--mute);font-weight:600;font-size:12px;text-transform:uppercase;letter-spacing:.04em}
+.tbl{overflow-x:auto;border:1px solid var(--line);border-radius:12px}.tbl table{margin:0}.tbl th{background:var(--bg2)}
+.sev{display:inline-block;font-family:var(--mono);font-size:11px;padding:2px 8px;border-radius:999px;font-weight:600}.CRITICAL{background:#3b0b0b;color:#fca5a5;border:1px solid #b91c1c}.HIGH{background:#3a1a06;color:#fdba74;border:1px solid #c2410c}.MEDIUM{background:#3a2a06;color:#fde68a;border:1px solid #a16207}.LOW{background:#0f2a3a;color:#93c5fd;border:1px solid #1d4ed8}.INFO{background:#1a2030;color:#c7d0e6;border:1px solid var(--line)}
+.st{font-family:var(--mono);font-size:11.5px}.ok{color:var(--green)}.open{color:var(--amber)}.acc{color:var(--mute)}
+pre{background:var(--bg2);border:1px solid var(--line);border-radius:10px;padding:12px 14px;overflow-x:auto;font:12.5px/1.5 var(--mono);color:#dbe3f4}
+.note{border-left:3px solid var(--blue);background:var(--bg2);padding:10px 14px;border-radius:0 10px 10px 0;margin:14px 0;font-size:14px}.warn{border-left-color:var(--amber)}.bad{border-left-color:var(--red)}
+ul{padding-left:20px}li{margin:4px 0}.check li{list-style:none;margin:6px 0}.check li::before{content:'☐ ';color:var(--mute)}.check li.done::before{content:'☑ ';color:var(--green)}.check li.no::before{content:'☒ ';color:var(--red)}
+.toc{display:flex;flex-wrap:wrap;gap:8px;margin-top:18px}.toc a{color:#bfdbfe;text-decoration:none;font-size:12.5px;background:var(--bg2);border:1px solid var(--line);padding:5px 10px;border-radius:999px}
+@media (prefers-color-scheme:light){:root:not([data-theme="dark"]){--bg:#f6f8fc;--bg2:#fff;--bg3:#eef2f9;--line:#d9e0ee;--fg:#111827;--mute:#5b6478}:root:not([data-theme="dark"]) .k{color:#1e293b}:root:not([data-theme="dark"]) h3{color:#1f2937}:root:not([data-theme="dark"]) pre{color:#1e293b}:root:not([data-theme="dark"]) .toc a{color:#1d4ed8}:root:not([data-theme="dark"]) header{background:#fff}}
+</style></head>
+<body>
+<header><div class="wrap" style="padding-bottom:0">
+<div class="sub" style="font-family:var(--mono)">VERUM OTC · Smart Contract Core (EVM Settlement Adapter) · v2 · 24 de setembro de 2026 · <span class="k">contracts/VerumOtcEscrow.sol</span> · commit "deploy script"</div>
+<h1>Relatório Técnico do Smart Contract Core</h1>
+<p class="sub">Princípio: <b>FAIL CLOSED</b>. Uma operação só liquida com N/N aprovações válidas sobre o mesmo Deal Hash, ativos em custódia, antes da expiração, com ativos registrados e guarda de preço aprovada. Este relatório não afirma que o contrato é "100% seguro"; lista o que foi verificado, como, e o que ainda exige revisão humana e auditoria independente antes de mainnet.</p>
+<div class="grid">
+<div class="card"><b>23 + 3 + 4</b><span>testes unitários · fuzz (2.000 execuções cada) · invariantes (128 execuções × 64 chamadas) — Foundry, todos passando</span></div>
+<div class="card"><b>19 + 85 + 28</b><span>testes do contrato em EVM real (ethereumjs, assinaturas viem) · backend · UI — <span class="k">npm run verify</span> verde</span></div>
+<div class="card"><b>Slither 0.11.6</b><span>76 detectores · 11 resultados, todos analisados (0 CRITICAL/HIGH abertos)</span></div>
+<div class="card"><b>0</b><span>funções capazes de retirar, varrer ou redirecionar fundos de Deals; sem proxy/upgrade</span></div>
+</div>
+<div class="toc"><a href="#d1">1 Source</a><a href="#d2">2 Arquitetura</a><a href="#d3">3 Segurança</a><a href="#d4">4 Threat Model</a><a href="#d5">5 State Machine</a><a href="#d6">6 Deal Hash</a><a href="#d7">7 Assinaturas</a><a href="#d8">8 Asset Registry</a><a href="#d9">9 Fees</a><a href="#d10">10 Refund</a><a href="#d11">11 Emergência</a><a href="#d12">12 Testes</a><a href="#d13">13 Fuzzing</a><a href="#d14">14 Invariantes</a><a href="#d15">15 Análise estática</a><a href="#d16">16 Deploy</a><a href="#d17">17 Upgrade</a><a href="#d18">18 Audit Checklist</a><a href="#d19">19 Limitações</a><a href="#d20">20 Prontidão</a></div>
+</div></header>
+<div class="wrap">
+
+<section id="d0"><h2>Inspeção do repositório e plano (§39)</h2>
+<p>Blockchain alvo: EVM (Ethereum L1 / L2 compatíveis) para escrow N-de-N; Bitcoin via HTLC encadeado (leg fora do contrato); Solana previsto por programa Anchor (não implementado). Framework: Foundry (forge 1.6 nightly, solc 0.8.30 nativo) sobre o repositório TypeScript existente; solc-js continua gerando <span class="k">contracts/out/*.json</span> para o backend. Dependências: OpenZeppelin 5 (EIP712, ECDSA, AccessControl, Pausable, ReentrancyGuard, SafeERC20). Contrato existente v1 preservado em <span class="k">contracts/VerumOtcEscrow.v1.sol.bak</span>; a v2 evoluiu o mesmo arquivo mantendo o struct EIP-712 <span class="k">DealApproval</span> usado pelo backend (<span class="k">src/engines/signature.ts</span>) com um campo adicional, <span class="k">termsHash</span>, que vincula todos os termos críticos. Riscos identificados na inspeção e tratados: keeper escolhendo destinos/valores (v1), tesouraria por Deal, sobrescrita de revisão com fundos em custódia, hash off-chain opaco para o contrato.</p></section>
+
+<section id="d1"><h2>1 · Smart Contract Source</h2>
+<ul><li><span class="k">contracts/VerumOtcEscrow.sol</span> — 360 linhas, Solidity ^0.8.24, BUSL-1.1; compilação limpa (solc 0.8.30, optimizer 200, via-IR, Cancun); 18.080 bytes de bytecode implantado; 113 entradas de ABI.</li>
+<li><span class="k">contracts/mocks/TestMocks.sol</span> — ERC-20 de teste, token fee-on-transfer, token que devolve false, recebedor reentrante, guarda de preço simulada (ok / rejeita / indisponível).</li>
+<li><span class="k">test/foundry/{Base,VerumOtcEscrow,Invariants}.t.sol</span>, <span class="k">test/contract.test.ts</span> + <span class="k">test/evm-harness.ts</span> (EVM real via ethereumjs com assinaturas do viem — mesma pilha do backend), <span class="k">script/DeployVerumOtcEscrow.s.sol</span>, <span class="k">foundry.toml</span>.</li>
+<li>Entrega: <span class="k">verum-otc-contracts.tar.gz</span> (código completo) e <span class="k">VerumOtcEscrow.sol</span> avulso.</li></ul></section>
+
+<section id="d2"><h2>2 · Contract Architecture</h2>
+<p>Um único contrato imutável por cadeia EVM, organizado em módulos internos com fronteiras claras (menor superfície de deploy que múltiplos contratos com chamadas cruzadas):</p>
+<div class="tbl"><table><tr><th>Módulo</th><th>Responsabilidade</th><th>Funções</th></tr>
+<tr><td>DealManager</td><td>Registro dos termos imutáveis, revisões, cancelamento antes da 1ª assinatura</td><td><span class="k">register</span> (REGISTRAR), <span class="k">supersede</span> (REGISTRAR, só sem assinaturas), <span class="k">cancel</span> (participante, só sem assinaturas)</td></tr>
+<tr><td>Escrow</td><td>Custódia programática por leg; depósito exato pelo dono da leg</td><td><span class="k">deposit</span></td></tr>
+<tr><td>SignatureValidator</td><td>EIP-712 (domínio = chainId + contrato); recupera o papel a partir do storage, nunca do chamador</td><td><span class="k">approve</span>, <span class="k">approvalDigest</span>, <span class="k">domainSeparator</span></td></tr>
+<tr><td>SettlementEngine</td><td>Revalidação FAIL CLOSED e liquidação atômica (legs + fee + comissões na mesma tx)</td><td><span class="k">settle</span>, <span class="k">approveAndSettle</span>, <span class="k">settlementCheck</span> (view)</td></tr>
+<tr><td>FeeRouter</td><td>Fee de protocolo → tesouraria imutável; comissão → Pay Masters registrados</td><td>interno a <span class="k">_settle</span></td></tr>
+<tr><td>AssetRegistry</td><td>Allowlist on-chain com decimals + id canônico, timelock 24 h</td><td><span class="k">scheduleAsset</span>, <span class="k">executeAsset</span>, <span class="k">tokenAllowed</span></td></tr>
+<tr><td>NonceManager</td><td><span class="k">dealNonce</span> global de uso único; nonce por assinatura por Deal</td><td>mapeamentos <span class="k">dealNonceUsed</span>, <span class="k">nonceUsed</span></td></tr>
+<tr><td>EmergencyControls</td><td>Pausa de entradas/liquidação (GUARDIAN); nunca de refund/expire</td><td><span class="k">pause</span>, <span class="k">unpause</span>, <span class="k">expire</span>, <span class="k">refund</span></td></tr></table></div>
+<p><b>Independência de cadeia</b>: o núcleo do Deal (termos, hash, N/N, expiração) é agnóstico; o contrato EVM é o <em>Settlement Adapter</em> da rede local e só custodia as legs locais (<span class="k">assetInNetwork</span>/<span class="k">assetOutNetwork</span> fora da rede ficam referenciadas por id canônico + htlcHash). Bitcoin usa HTLC com a preimage revelada no <span class="k">settle</span>; Solana terá programa próprio com a mesma máquina de estados. Interface <span class="k">IPriceGuard</span> permite oráculo on-chain opcional (fail closed).</p></section>
+
+<section id="d3"><h2>3 · Security Model</h2>
+<div class="tbl"><table><tr><th>Ator</th><th>Pode</th><th>Não pode</th></tr>
+<tr><td>Vendedor / Comprador (EOA)</td><td>depositar a própria leg; assinar; cancelar antes da 1ª assinatura; chamar settle/refund/expire</td><td>alterar termos; sacar; liquidar sem N/N; mudar destinatários</td></tr>
+<tr><td>Pay Master (EOA)</td><td>assinar; chamar settle/refund/expire</td><td>alterar qualquer termo; agir sozinho sobre fundos</td></tr>
+<tr><td>Keeper / backend (REGISTRAR, chave KMS)</td><td><span class="k">register</span>, <span class="k">supersede</span> antes de assinaturas, relayar <span class="k">approveAndSettle</span></td><td>escolher destinos ou valores (legs derivam dos papéis e dos termos); tesouraria; liquidar sem N/N; invalidar Deal assinado</td></tr>
+<tr><td>Guardian (multisig)</td><td>pausar/despausar entradas e liquidação</td><td>pausar refund/expire; mover fundos</td></tr>
+<tr><td>Admin (multisig)</td><td>agendar/executar registro de ativos (timelock 24 h); gerir papéis</td><td>withdraw/sweep/rescue/upgrade/setTreasury (não existem)</td></tr>
+<tr><td>Terceiro</td><td>relayar settle/refund/expire (o contrato decide)</td><td>tudo o mais</td></tr></table></div>
+<p>Controles: CEI + <span class="k">nonReentrant</span>; SafeERC20 e saldo antes/depois no depósito (fee-on-transfer rejeitado); ETH pago com <span class="k">call</span> verificado; aritmética checada 0.8; apenas EOAs como participantes (<span class="k">ParticipantMustBeEOA</span>); expiração absoluta com margem de execução de 60 s; ativos revalidados no settle; guarda de preço opcional; tesouraria e guarda imutáveis; sem função de valor arbitrário.</p></section>
+
+<section id="d4"><h2>4 · Threat Model</h2>
+<div class="tbl"><table><tr><th>Ameaça</th><th>Vetor</th><th>Controle</th><th>Evidência</th></tr>
+<tr><td>Liquidação sem N/N</td><td>2/3, 3/4, assinatura faltando</td><td><span class="k">_settle</span> exige <span class="k">FULLY_SIGNED</span> e <span class="k">approvals == requiredSignatures</span></td><td>test_2of3_and_3of4_neverSettle; invariante</td></tr>
+<tr><td>Assinatura inválida / de terceiro / duplicada / papel errado</td><td>bytes aleatórios, outsider, mesma assinatura 2×</td><td>Recuperação EIP-712 por papel a partir do storage; <span class="k">approved[role]</span>; nonce por assinatura</td><td>test_invalidDuplicateWrongAndOutsiderSignatures; fuzz wrongKeyNeverApproves</td></tr>
+<tr><td>Replay entre Deals / revisões / cadeias / contratos</td><td>reusar assinatura ou nonce</td><td>Domínio EIP-712 (chainId, contrato); <span class="k">dealHash</span>+<span class="k">termsHash</span>+<span class="k">revision</span> no struct; nonces de uso único</td><td>test_nonceAndDealNonceReuseRejected; test_alteredDealRequiresNewRevision</td></tr>
+<tr><td>Manipulação de parâmetros</td><td>valor/preço/rota/fee/participante alterados após assinar</td><td>Termos imutáveis; <span class="k">termsHash</span> cobre todos; mudança ⇒ nova revisão + novas assinaturas</td><td>test_wrongAmountPriceRoute_changeTermsHash_signaturesInvalid</td></tr>
+<tr><td>Dupla liquidação</td><td>settle 2×, reorg lógico</td><td>Status SETTLED antes das interações; refund impossível após SETTLED</td><td>test_doubleSettlementImpossible; invariante settleAtMostOnce</td></tr>
+<tr><td>Liquidação após expiração</td><td>tx atrasada no mempool</td><td><span class="k">now + 60 s ≥ expiresAt ⇒ revert</span>; sem assinaturas após expirar</td><td>fuzz neverSettlesAfterExpiration; invariante</td></tr>
+<tr><td>Token falso / contrato / mint / rede / decimals errados</td><td>USDT falso, decimals divergentes, rede errada</td><td>Registro on-chain por endereço com decimals + id canônico; legs devem casar com <span class="k">assetInHash/assetOutHash</span></td><td>test_fakeToken_wrongContract_wrongDecimals_wrongNetwork_rejected</td></tr>
+<tr><td>Ativo desativado após assinaturas</td><td>delist emergencial</td><td>Revalidação no settle ⇒ revert; refund continua</td><td>test_assetDelistedAfterSigning_failsClosed</td></tr>
+<tr><td>Oráculo obsoleto / indisponível</td><td>guarda reverte ou devolve false</td><td>Fail closed: settle reverte; refund após expiração</td><td>test_oracleGuardStaleOrUnavailable_blocksSettlement</td></tr>
+<tr><td>Slippage</td><td>amountOut &lt; minAmountOut</td><td>Rejeitado no register e revalidado no settle</td><td>test_slippageAndAmountsRejectedAtRegister</td></tr>
+<tr><td>Reentrância</td><td>recebedor malicioso em settle/refund</td><td><span class="k">nonReentrant</span> + CEI; participantes só EOA</td><td>test_reentrancyOnSettleAndRefund</td></tr>
+<tr><td>Fee-on-transfer / token que devolve false</td><td>depósito parcial</td><td>saldo antes/depois; SafeERC20</td><td>test_depositOnlyByPartyExactValue_feeOnTransferRejected</td></tr>
+<tr><td>Abuso administrativo</td><td>admin/guardian/keeper tentam mover fundos</td><td>Sem funções de saque; tesouraria imutável; pausa não bloqueia refund; supersede só sem assinaturas</td><td>test_pauseBlocksEntriesNotRefunds_andAdminCannotSteal</td></tr>
+<tr><td>Griefing por pausa</td><td>guardian pausa até expirar</td><td>Aceito: atraso, nunca perda (refund livre)</td><td>documentado (§19)</td></tr>
+<tr><td>Front-running / MEV</td><td>observar settle no mempool</td><td>Valores fixos e assinados: nada a extrair; quem relaya não altera destinos; ver §19 para riscos residuais</td><td>análise</td></tr></table></div></section>
+
+<section id="d5"><h2>5 · State Machine</h2>
+<pre>NONE ─register─▶ CREATED ─deposit(todas as legs)─▶ ASSETS_LOCKED ─approve(1ª)─▶ AWAITING_SIGNATURES ─approve(N/N)─▶ FULLY_SIGNED
+FULLY_SIGNED ─settle─▶ VALIDATING ─▶ SETTLING ─▶ SETTLED            (os três na MESMA transação; qualquer falha reverte para FULLY_SIGNED)
+CREATED | ASSETS_LOCKED | AWAITING_SIGNATURES | FULLY_SIGNED ─expiração─▶ EXPIRED ─refund─▶ REFUNDING ─▶ REFUNDED
+CREATED | ASSETS_LOCKED ─cancel(participante, sem assinaturas)─▶ CANCELLED ─refund─▶ (fundos devolvidos; status permanece CANCELLED)
+CREATED | ASSETS_LOCKED ─supersede(keeper, sem assinaturas)─▶ SUPERSEDED ─refund─▶ … ─register(revisão+1, sem fundos em custódia)─▶ CREATED</pre>
+<p>Proibições verificadas: SETTLED→qualquer; EXPIRED/CANCELLED/SUPERSEDED→SETTLING; depósito fora de CREATED; assinatura fora de ASSETS_LOCKED/AWAITING_SIGNATURES; cancel/supersede após a 1ª assinatura (<span class="k">SignedAlready</span>); registro de nova revisão com fundos em custódia (<span class="k">FundsStillEscrowed</span>). Todas as transições emitem <span class="k">StateChanged(from,to)</span>.</p></section>
+
+<section id="d6"><h2>6 · Deal Hash Specification</h2>
+<p>Dois hashes, ambos vinculados à assinatura:</p>
+<ul><li><b>dealHash</b> (off-chain, SHA-256 dos termos canônicos completos — PRD/Arquitetura §11.2; inclui rota e pricing na íntegra) — armazenado e emitido em <span class="k">DealCreated</span>.</li>
+<li><b>termsHash</b> (on-chain, recomputado do storage no register):<br><span class="k">keccak256(keccak256(abi.encode(dealIdHash, revision, block.chainid, address(this), seller, buyer, payMaster1, payMaster2, assetInHash, assetOutHash, amountIn)) ‖ keccak256(abi.encode(amountOut, minAmountOut, referencePrice, discountBps, feeBps, commissionBps, split0, split1, commissionAmount, routeHash, dealNonce, expiresAtMs, requiredSignatures)))</span></li></ul>
+<p>Cobre todos os campos exigidos em §5: dealId, version, chainId, contrato, participantes, ativos, valores, preço de referência, deságio, fees/comissão, rota, expiração, nonce, requiredSignatures. Uma mudança em qualquer campo produz outro <span class="k">termsHash</span> ⇒ assinaturas anteriores não recuperam o papel ⇒ <span class="k">BadSigner</span>.</p></section>
+
+<section id="d7"><h2>7 · Signature Specification</h2>
+<pre>EIP-712 domain: { name: "VerumOTC", version: "1", chainId, verifyingContract }
+DealApproval(bytes32 dealHash, bytes32 termsHash, string dealId, uint32 revision, uint8 role, address signer,
+             string nonce, uint64 expiresAt, string assetIn, uint256 amountIn, string assetOut, uint256 amountOut, string counterparty)</pre>
+<p>Verificações no contrato (§6): recuperação ECDSA (OpenZeppelin, rejeita <span class="k">s</span> alto/<span class="k">v</span> inválido) sobre o digest reconstruído do storage para cada papel ainda não aprovado; signatário == participante do papel; nonce (por Deal) não consumido; Deal em ASSETS_LOCKED/AWAITING_SIGNATURES; não expirado; papel ainda não aprovado. Uma assinatura só serve para um Deal, uma revisão, um papel, uma cadeia e um contrato. Solana (Ed25519) e Bitcoin (BIP-137) seguem o mesmo envelope canônico no backend e serão verificados pelos adaptadores dessas redes.</p></section>
+
+<section id="d8"><h2>8 · Asset Registry Specification</h2>
+<p><span class="k">assets[token] = { allowed, decimals, canonicalId }</span>. Mudanças só por ADMIN com timelock de 24 h (<span class="k">scheduleAsset</span> → <span class="k">executeAsset</span>); ao executar, o contrato exige código no endereço e <span class="k">decimals()</span> igual ao registrado. No <span class="k">register</span>, cada leg deve casar token permitido + decimals + canonicalId + <span class="k">assetInHash/assetOutHash</span> dos termos; no <span class="k">settle</span> a allowlist é reverificada. Símbolo/nome/logo nunca são consultados. Rejeições testadas: token não registrado, contrato errado, decimals divergentes, rede errada (id canônico de outra rede), ativo desativado após assinar.</p></section>
+
+<section id="d9"><h2>9 · Fee Model</h2>
+<ul><li><b>Fee de protocolo</b> (<span class="k">feeBps</span> ≤ 500) sobre a leg de pagamento, para a <span class="k">treasury</span> imutável (fixada no deploy). Não existe função para alterá-la.</li>
+<li><b>Comissão dos Pay Masters</b> (<span class="k">commissionBps</span> ≤ 5.000, <span class="k">commissionAmount</span> absoluto em unidades do ativo de saída, dividido por <span class="k">commissionSplitBps[2]</span> cuja soma deve ser exatamente <span class="k">commissionBps</span>): o Comprador deposita <span class="k">amountOut + commissionAmount</span>; no settle, Vendedor recebe <span class="k">amountOut − fee</span>, Pay Master 1 recebe <span class="k">commissionAmount − share2</span>, Pay Master 2 recebe <span class="k">commissionAmount × split1 / commissionBps</span>. Arredondamento: piso para tesouraria e PM2; resíduo para o Vendedor e o PM1 (conservação exata, provada por invariante).</li>
+<li>Todas as percentagens estão no <span class="k">termsHash</span>: nenhum administrador altera fees de um Deal ativo. Destinos: apenas participantes registrados + tesouraria.</li></ul></section>
+
+<section id="d10"><h2>10 · Refund Model</h2>
+<p><span class="k">refund(dealId, legPos)</span> é permissionless, <b>nunca pausável</b> e devolve a leg exatamente ao seu depositante determinado pelos termos (<span class="k">_legFrom</span>: Vendedor na leg de entrega, Comprador na de pagamento + comissão). Condições: Deal expirado (<span class="k">now ≥ expiresAt</span>), CANCELLED ou SUPERSEDED; nunca após SETTLED/VALIDATING/SETTLING. Transições EXPIRED → REFUNDING → REFUNDED emitidas. Ninguém escolhe destino de refund.</p></section>
+
+<section id="d11"><h2>11 · Emergency Model</h2>
+<div class="tbl"><table><tr><th>Sob pausa</th><th>Bloqueado</th><th>Continua funcionando</th></tr><tr><td>GUARDIAN <span class="k">pause()</span></td><td>register, deposit, approve, settle, approveAndSettle</td><td>refund, expire, cancel, supersede, views, registro de ativos (com timelock)</td></tr></table></div>
+<p>Recovery: investigar → corrigir off-chain ou desativar ativo (timelock) → <span class="k">unpause</span>; Deals que expirarem durante a pausa são reembolsáveis por qualquer pessoa. A pausa nunca permite apropriação: não há caminho de saída de fundos além de settle (N/N) e refund (ao depositante).</p></section>
+
+<section id="d12"><h2>12 · Test Suite</h2>
+<div class="tbl"><table><tr><th>Cenário obrigatório (§32)</th><th>Teste</th><th>Resultado</th></tr>
+<tr><td>3/3 e 4/4 liquidam com valores exatos e comissão dividida</td><td>test_settle_3of3_paysExactly · test_settle_4of4_splitsCommission</td><td class="st ok">PASS</td></tr>
+<tr><td>2/3 e 3/4 nunca liquidam</td><td>test_2of3_and_3of4_neverSettle</td><td class="st ok">PASS</td></tr>
+<tr><td>assinatura inválida, duplicada, errada, de participante externo</td><td>test_invalidDuplicateWrongAndOutsiderSignatures · testFuzz_wrongKeyNeverApproves</td><td class="st ok">PASS</td></tr>
+<tr><td>assinar antes dos depósitos</td><td>test_cannotSignBeforeDeposits</td><td class="st ok">PASS</td></tr>
+<tr><td>Deal expirado (sem assinaturas, sem settle, só refund) e expiração entre N/N e execução</td><td>test_expiredDeal_… · test_fullySignedButExpiresBeforeExecution · testFuzz_neverSettlesAfterExpiration</td><td class="st ok">PASS</td></tr>
+<tr><td>Deal alterado ⇒ nova revisão; assinaturas não migram; nonce e dealNonce reutilizados</td><td>test_alteredDealRequiresNewRevision_… · test_nonceAndDealNonceReuseRejected</td><td class="st ok">PASS</td></tr>
+<tr><td>double settlement</td><td>test_doubleSettlementImpossible</td><td class="st ok">PASS</td></tr>
+<tr><td>token falso, contrato/mint errado, rede errada, decimals errados</td><td>test_fakeToken_wrongContract_wrongDecimals_wrongNetwork_rejected</td><td class="st ok">PASS</td></tr>
+<tr><td>valor/preço/rota errados, slippage excessivo</td><td>test_wrongAmountPriceRoute_… · test_slippageAndAmountsRejectedAtRegister</td><td class="st ok">PASS</td></tr>
+<tr><td>oráculo obsoleto / indisponível; ativo desativado após assinar</td><td>test_oracleGuardStaleOrUnavailable_… · test_assetDelistedAfterSigning_failsClosed</td><td class="st ok">PASS</td></tr>
+<tr><td>refund; depósito só pela parte, valor exato, fee-on-transfer rejeitado</td><td>test_cancelBeforeSignatureRefundsBoth · test_depositOnlyByPartyExactValue_…</td><td class="st ok">PASS</td></tr>
+<tr><td>reentrância em settle e refund</td><td>test_reentrancyOnSettleAndRefund</td><td class="st ok">PASS</td></tr>
+<tr><td>overflow/underflow; fees e comissão nunca excedem depósitos</td><td>testFuzz_feesAndCommissionNeverExceedDeposits (aritmética checada 0.8)</td><td class="st ok">PASS</td></tr>
+<tr><td>admin abuse, pause, unpause</td><td>test_pauseBlocksEntriesNotRefunds_andAdminCannotSteal</td><td class="st ok">PASS</td></tr>
+<tr><td>HTLC preimage</td><td>test_htlcPreimage</td><td class="st ok">PASS</td></tr>
+<tr><td>RPC failure, network congestion, partial failure, liquidity failure</td><td>São condições off-chain: cobertas pelos testes do backend (<span class="k">engine.test.ts</span>: RPC caído, reorg, leg revertida, recovery, liquidez insuficiente/indisponível); on-chain o efeito é sempre revert/expiração + refund</td><td class="st ok">PASS (backend)</td></tr></table></div>
+<p>Execução: <span class="k">forge test</span> → 27 testes Foundry passando; <span class="k">npm run verify</span> → 85 vitest (inclui 19 do contrato em EVM real com assinaturas viem) + 28 UI passando.</p></section>
+
+<section id="d13"><h2>13 · Fuzzing Results</h2>
+<pre>[PASS] testFuzz_feesAndCommissionNeverExceedDeposits(uint256,uint16,uint16,uint16) (runs: 2000, μ: 1064484, ~: 1182623)
+[PASS] testFuzz_neverSettlesAfterExpiration(uint64)                                (runs: 2000, μ: 977289,  ~: 977365)
+[PASS] testFuzz_wrongKeyNeverApproves(uint256)                                     (runs: 2000, μ: 831574,  ~: 831567)</pre>
+<p>Configuração padrão 512 execuções (<span class="k">foundry.toml</span>); rodada intensiva com 2.000. Nenhuma contra-exemplo encontrado. Não substitui auditoria: o espaço de estados de assinaturas/expiração é coberto por classes, não exaustivamente.</p></section>
+
+<section id="d14"><h2>14 · Invariant Results</h2>
+<pre>[PASS] invariant_custodyConservation()                          (runs: 128, calls: 8192, reverts: 529)
+[PASS] invariant_noFundsToStrangers()                           (runs: 128, calls: 8192, reverts: 500)
+[PASS] invariant_settleAtMostOnce()                             (runs: 128, calls: 8192, reverts: 492)
+[PASS] invariant_settledOnlyWithAllSignaturesAndBeforeExpiry()  (runs: 128, calls: 8192, reverts: 514)</pre>
+<p>Handler com ações aleatórias (register, deposit, approve com chaves certas/erradas, settle, refund, expire, pause, avanço de tempo). Invariantes formais (§33) cobertas: liquidação só com N/N e antes da expiração; no máximo uma liquidação por Deal; saldo do contrato = soma dos depósitos ativos (conservação); nenhuma transferência para endereço fora {participantes, tesouraria}; imutabilidade de participantes/valores/ativos/rota/fee após assinatura decorre da ausência de setters (verificada por inspeção da ABI no teste de admin) e do <span class="k">termsHash</span>.</p></section>
+
+<section id="d15"><h2>15 · Static Analysis Results</h2>
+<div class="tbl"><table><tr><th>Ferramenta</th><th>Achado</th><th>Análise</th><th>Sev.</th></tr>
+<tr><td>Slither 0.11.6 (76 detectores, dependências excluídas)</td><td>unused-return em <span class="k">ECDSA.tryRecover</span> (linha 215)</td><td>Falso positivo: <span class="k">err</span> é verificado (<span class="k">NoError</span>) e o endereço comparado.</td><td><span class="sev INFO">INFO</span></td></tr>
+<tr><td>Slither</td><td>calls-inside-a-loop em <span class="k">_pay</span> (ETH via call)</td><td>Intencional e limitado: ≤ 2 legs × ≤ 4 destinatários, todos EOAs (<span class="k">ParticipantMustBeEOA</span>); falha reverte a liquidação inteira (atomicidade).</td><td><span class="sev LOW">LOW</span></td></tr>
+<tr><td>Slither</td><td>block-timestamp em register/deposit/approve/settle/refund/expire/executeAsset</td><td>Uso pretendido para expiração e timelock; janela de manipulação de validador (~12 s) coberta pela margem de execução de 60 s.</td><td><span class="sev INFO">INFO</span></td></tr>
+<tr><td>forge lint</td><td>asm-keccak256 (otimização de gás)</td><td>Sugestão de gás; não afeta segurança. Não aplicada para manter legibilidade auditável.</td><td><span class="sev INFO">INFO</span></td></tr>
+<tr><td>solc 0.8.30</td><td>0 warnings no contrato (warnings restantes vêm do OpenZeppelin: identificador <span class="k">error</span>)</td><td>—</td><td>—</td></tr>
+<tr><td>npm audit</td><td>0 vulnerabilidades nas dependências (OpenZeppelin 5.x)</td><td>—</td><td>—</td></tr></table></div>
+<p>Não executado: verificação formal (Certora/Halmos) e auditoria humana — requisitos para mainnet (§20).</p></section>
+
+<section id="d16"><h2>16 · Deployment Procedure</h2>
+<ol><li><b>Local</b>: <span class="k">forge test</span> + <span class="k">npm run verify</span> (feito).</li>
+<li><b>Testnet (Sepolia)</b>: <span class="k">forge script script/DeployVerumOtcEscrow.s.sol --rpc-url $RPC --account deployer --broadcast --verify</span> com <span class="k">OTC_ADMIN</span> e <span class="k">OTC_GUARDIAN</span> = Safe multisig 2-de-3, <span class="k">OTC_REGISTRAR</span> = chave KMS do keeper, <span class="k">OTC_TREASURY</span>, <span class="k">OTC_PRICE_GUARD</span> (0x0 até existir guarda auditada), <span class="k">OTC_NATIVE_ID</span>. Chaves nunca em código/.env/git: <span class="k">--account</span>/<span class="k">--ledger</span>.</li>
+<li>Registrar USDT/USDC de teste via <span class="k">scheduleAsset</span> → 24 h → <span class="k">executeAsset</span>; verificar <span class="k">domainSeparator</span> contra o backend.</li>
+<li>Fluxos completos com valores mínimos: 3/3, 4/4, expiração+refund, cancelamento, pausa, delist; ≥ 4 semanas sem incidente.</li>
+<li><b>Staging</b>: mesma configuração de produção, limites reduzidos.</li>
+<li><b>Mainnet</b>: somente após auditoria independente + revisão humana do change ticket (four-eyes); deploy por multisig; allowlist por timelock; <span class="k">MAX_DEAL_USD</span> baixo na primeira semana. <b>Este relatório não autoriza deploy em mainnet.</b></li></ol></section>
+
+<section id="d17"><h2>17 · Upgrade Procedure</h2>
+<p>O contrato é <b>imutável</b> (sem proxy, sem <span class="k">delegatecall</span>, sem função de upgrade) — escolha deliberada (§37): menor superfície e garantia de que ninguém altera regras de custódia de Deals ativos. "Upgrade" = novo endereço: (1) auditoria da nova versão; (2) deploy por multisig; (3) backend passa a registrar novos Deals no novo contrato; (4) contrato antigo: <span class="k">pause()</span> para novas entradas, Deals ativos concluem por settle ou expiram e são reembolsados; nunca migração de fundos. Papéis: ADMIN/GUARDIAN em Safe 2-de-3 com política de timelock operacional (24 h) fora da cadeia para despausas não emergenciais.</p></section>
+
+<section id="d18"><h2>18 · Audit Checklist (§40)</h2>
+<ul class="check">
+<li class="done">compilação limpa (solc 0.8.30, via-IR)</li><li class="done">testes passando (27 Foundry + 19 EVM real + backend/UI)</li><li class="done">fuzzing executado (3 propriedades × 2.000)</li><li class="done">invariants passando (4 × 128 × 64)</li><li class="done">static analysis executada (Slither, forge lint) — resultados analisados</li><li class="done">dependencies auditadas (npm audit 0; OpenZeppelin 5 pinado)</li>
+<li class="done">reentrancy analisada (CEI + guard + teste com recebedor malicioso)</li><li class="done">access control analisado (3 papéis mínimos, sem função de saque)</li><li class="done">replay protection validada (domínio, termsHash, revisão, nonces)</li><li class="done">expiration validada (absoluta + margem; fuzz)</li><li class="done">refund validado (determinístico, não pausável)</li><li class="done">double settlement bloqueado (invariante)</li><li class="done">fake assets bloqueados (registro + decimals + id canônico)</li><li class="done">signatures validadas (EIP-712/ECDSA OZ)</li><li class="done">route integrity validada (routeHash no termsHash)</li><li class="done">fee integrity validada (fees no termsHash; tesouraria imutável)</li><li class="done">emergency controls testados (pausa/despausa/refund sob pausa)</li>
+<li class="no">auditoria independente (obrigatória antes de mainnet)</li><li class="no">verificação formal / bug bounty</li><li class="no">testnet ≥ 4 semanas</li></ul></section>
+
+<section id="d19"><h2>19 · Known Limitations</h2>
+<div class="tbl"><table><tr><th>Sev.</th><th>Limitação</th><th>Impacto / mitigação</th></tr>
+<tr><td><span class="sev HIGH">HIGH</span></td><td>Sem auditoria externa; fuzz/invariantes cobrem classes, não o espaço completo</td><td>Bloqueia mainnet. Auditoria + bug bounty em testnet.</td></tr>
+<tr><td><span class="sev HIGH">HIGH</span></td><td>Programa Solana (Anchor) e script HTLC Bitcoin não implementados</td><td>Rotas com leg fora da EVM só existem nos simuladores do backend. Implementar com a mesma máquina de estados e envelopes.</td></tr>
+<tr><td><span class="sev MEDIUM">MEDIUM</span></td><td><span class="k">dealHash</span> (SHA-256 canônico) é opaco para o contrato; a prova on-chain é o <span class="k">termsHash</span></td><td>Campos fora do termsHash (rota/pricing detalhados) são cobertos por assinatura e pelo backend §7.3. Aceito por desenho; documentado no freeze.</td></tr>
+<tr><td><span class="sev MEDIUM">MEDIUM</span></td><td>Guarda de preço on-chain é opcional e ainda não há implementação auditada (Chainlink/Pyth)</td><td>Até lá, proteção de preço = amountOut/minAmountOut/referencePrice assinados + Price Engine off-chain com disjuntor.</td></tr>
+<tr><td><span class="sev MEDIUM">MEDIUM</span></td><td>Griefing por pausa (guardian) e por contraparte que não deposita/assina</td><td>Atraso até a expiração; nunca perda (refund). Multisig 2-de-3 + runbook.</td></tr>
+<tr><td><span class="sev LOW">LOW</span></td><td>MEV/front-running: quem relaya o settle não pode alterar nada, mas pode atrasá-lo até a margem de expiração; ordem de blocos e censura são riscos inerentes à cadeia</td><td>Deadline (expiração) + refund garantem que atraso não vira perda. Em L2 com sequenciador único, avaliar relay privado.</td></tr>
+<tr><td><span class="sev LOW">LOW</span></td><td>Cross-chain: legs em cadeias diferentes não são atômicas entre si</td><td>Ordem de execução (leg de contrato primeiro, HTLC depois) + reembolso da leg em custódia se a outra falhar; tratado no backend e documentado na arquitetura (ADR-003).</td></tr>
+<tr><td><span class="sev INFO">INFO</span></td><td>Apenas EOAs como participantes (v1); contas inteligentes/ERC-1271 não suportadas</td><td>Evita refunds presos e reentrância; roadmap v3.</td></tr></table></div></section>
+
+<section id="d20"><h2>20 · Production Readiness Report</h2>
+<div class="tbl"><table><tr><th>Sev.</th><th>Item</th><th>Status</th></tr>
+<tr><td><span class="sev CRITICAL">CRITICAL</span></td><td>Nenhum achado CRITICAL aberto no contrato (v1: sobrescrita com fundos, destinos pelo keeper — corrigidos e testados)</td><td class="st ok">FECHADO</td></tr>
+<tr><td><span class="sev HIGH">HIGH</span></td><td>Auditoria independente + revisão humana</td><td class="st open">ABERTO — bloqueia mainnet</td></tr>
+<tr><td><span class="sev HIGH">HIGH</span></td><td>Adaptador EVM real no backend (viem contra a ABI v2) + indexer; testnet ≥ 4 semanas</td><td class="st open">ABERTO</td></tr>
+<tr><td><span class="sev HIGH">HIGH</span></td><td>Solana/Bitcoin on-chain</td><td class="st open">ABERTO</td></tr>
+<tr><td><span class="sev MEDIUM">MEDIUM</span></td><td>Guarda de preço on-chain auditada; multisigs e KMS provisionados; runbooks</td><td class="st open">ABERTO</td></tr>
+<tr><td><span class="sev LOW">LOW</span></td><td>Otimizações de gás sugeridas pelo lint; suporte a ERC-1271</td><td class="st acc">ROADMAP</td></tr></table></div>
+<div class="note bad"><b>Veredito</b>: contrato <b>pronto para testnet</b>; <b>NÃO pronto para mainnet</b>. Nenhum deploy foi feito. Nenhum CRITICAL/HIGH permanece sem análise explícita: os HIGH abertos são processos (auditoria, testnet, redes adicionais), não defeitos conhecidos no código.</div>
+<p class="sub">Reprodução: <span class="k">npm ci && npm run verify && npm run contracts:forge</span>; fuzz intensivo: <span class="k">FOUNDRY_FUZZ_RUNS=2000 FOUNDRY_INVARIANT_RUNS=128 FOUNDRY_INVARIANT_DEPTH=64 forge test</span>; análise estática: <span class="k">slither contracts/VerumOtcEscrow.sol --solc bin/solc --solc-remaps "@openzeppelin/=node_modules/@openzeppelin/" --exclude-dependencies</span>.</p></section>
+
+</div></body></html>

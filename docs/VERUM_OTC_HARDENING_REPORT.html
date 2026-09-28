@@ -1,0 +1,286 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>VERUM OTC · Production Hardening Report</title>
+<link rel="preconnect" href="https://fonts.googleapis.com"><link href="https://fonts.googleapis.com/css2?family=Sora:wght@500;600;700&family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+:root{--bg:#0A0E1A;--bg2:#111729;--bg3:#182035;--line:#25304a;--fg:#E8ECF5;--mute:#9AA5BF;--blue:#3B82F6;--green:#22C55E;--amber:#F59E0B;--red:#EF4444;--crit:#B91C1C;--gold:#D9A94B;--sora:'Sora',system-ui,sans-serif;--inter:'Inter',system-ui,sans-serif;--mono:'JetBrains Mono',ui-monospace,monospace;box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}
+*{box-sizing:border-box}html{scroll-padding-top:env(safe-area-inset-top,0px)}
+body{margin:0;background:var(--bg);color:var(--fg);font:15px/1.6 var(--inter)}
+header{padding:40px 24px 24px;border-bottom:1px solid var(--line);background:linear-gradient(180deg,#0d1327,#0A0E1A)}
+h1,h2,h3{font-family:var(--sora);letter-spacing:-.01em;margin:0 0 .4em}h1{font-size:28px}h2{font-size:21px;margin-top:0}h3{font-size:16px;color:#c7d0e6}
+.wrap{max-width:1180px;margin:0 auto;padding:0 24px 80px}
+.k{font-family:var(--mono);font-size:12.5px;color:#c7d0e6;background:var(--bg3);padding:1px 6px;border-radius:5px;white-space:nowrap}
+section{margin-top:44px;padding-top:28px;border-top:1px solid var(--line)}
+.sub{color:var(--mute);font-size:13.5px}
+.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(230px,1fr));gap:12px;margin:16px 0}
+.card{background:var(--bg2);border:1px solid var(--line);border-radius:12px;padding:14px 16px}
+.card b{font-family:var(--sora);font-size:24px;display:block}.card span{color:var(--mute);font-size:12.5px}
+table{width:100%;border-collapse:collapse;margin:14px 0;font-size:13.5px}th,td{padding:9px 10px;border-bottom:1px solid var(--line);vertical-align:top;text-align:left}th{color:var(--mute);font-weight:600;font-size:12px;text-transform:uppercase;letter-spacing:.04em}
+.tbl{overflow-x:auto;border:1px solid var(--line);border-radius:12px}.tbl table{margin:0}.tbl th{background:var(--bg2)}
+.sev{display:inline-block;font-family:var(--mono);font-size:11px;padding:2px 8px;border-radius:999px;font-weight:600;letter-spacing:.04em}
+.CRITICAL{background:#3b0b0b;color:#fca5a5;border:1px solid var(--crit)}.HIGH{background:#3a1a06;color:#fdba74;border:1px solid #c2410c}.MEDIUM{background:#3a2a06;color:#fde68a;border:1px solid #a16207}.LOW{background:#0f2a3a;color:#93c5fd;border:1px solid #1d4ed8}
+.st{font-family:var(--mono);font-size:11.5px}.ok{color:var(--green)}.open{color:var(--amber)}.acc{color:var(--mute)}
+ul{padding-left:20px}li{margin:4px 0}
+.note{border-left:3px solid var(--blue);background:var(--bg2);padding:10px 14px;border-radius:0 10px 10px 0;margin:14px 0;font-size:14px}
+.warn{border-left-color:var(--amber)}.bad{border-left-color:var(--red)}
+.mono{font-family:var(--mono);font-size:12.5px}
+.check li{list-style:none;margin:6px 0}.check li::before{content:'☐ ';color:var(--mute)}.check li.done::before{content:'☑ ';color:var(--green)}.check li.no::before{content:'☒ ';color:var(--red)}
+.toc{display:flex;flex-wrap:wrap;gap:8px;margin-top:18px}.toc a{color:#bfdbfe;text-decoration:none;font-size:13px;background:var(--bg2);border:1px solid var(--line);padding:5px 10px;border-radius:999px}
+.gold{color:var(--gold)}
+@media (prefers-color-scheme:light){:root:not([data-theme="dark"]){--bg:#f6f8fc;--bg2:#fff;--bg3:#eef2f9;--line:#d9e0ee;--fg:#111827;--mute:#5b6478}:root:not([data-theme="dark"]) .k{color:#1e293b}:root:not([data-theme="dark"]) h3{color:#1f2937}:root:not([data-theme="dark"]) .toc a{color:#1d4ed8}:root:not([data-theme="dark"]) header{background:#fff}}
+</style>
+</head>
+<body>
+<header><div class="wrap" style="padding-bottom:0">
+<div class="sub mono">VERUM OTC · Principal Engineer Review · 24 de setembro de 2026 · ambiente avaliado: <span class="k">verum-otc@0.1.0</span> (commit "hardening")</div>
+<h1>Production Hardening Report</h1>
+<p class="sub">Auditoria de código, segurança, contrato, ativos, preço, liquidez, desempenho, concorrência, banco, observabilidade, recuperação, expiração e assinaturas — com correções aplicadas e riscos remanescentes classificados. <b>Este documento não afirma que o sistema é "100% seguro"</b>: ele lista o que foi verificado, como, e o que ainda bloqueia produção.</p>
+<div class="grid">
+<div class="card"><b>69 + 19 + 5</b><span>testes backend (vitest) · UI (node:test/jsdom) · contrato em EVM real — todos passando</span></div>
+<div class="card"><b>26</b><span>achados registrados · 2 CRITICAL · 11 HIGH · 9 MEDIUM · 4 LOW</span></div>
+<div class="card"><b>18 corrigidos</b><span>todos os CRITICAL e 8 dos HIGH corrigidos nesta rodada; 3 HIGH abertos são de arquitetura/infra</span></div>
+<div class="card"><b>0</b><span>liquidações duplas em 300 tentativas concorrentes (100 Deals) e 0 liquidações após expiração (1.000 Deals)</span></div>
+</div>
+<div class="toc"><a href="#s1">1 Security Audit</a><a href="#s2">2 Performance</a><a href="#s3">3 Load Test</a><a href="#s4">4 Smart Contract</a><a href="#s5">5 Database</a><a href="#s6">6 Infrastructure</a><a href="#s7">7 Remaining Risks</a><a href="#s8">8 Production Readiness</a><a href="#s9">9 Deployment</a><a href="#s10">10 Rollback</a></div>
+</div></header>
+
+<div class="wrap">
+
+<section id="s0"><h2>Escopo e método</h2>
+<p>Revisão linha a linha de <span class="k">src/</span> (2.400 linhas TS), <span class="k">contracts/VerumOtcEscrow.sol</span>, <span class="k">db/migrations</span>, <span class="k">web/verum-otc.html</span> e testes; cada hipótese de falha virou um teste reproduzível antes da correção. Componentes fora do escopo por não existirem ainda: <b>adaptadores reais</b> EVM/Solana/Bitcoin (há apenas simuladores locais com a mesma semântica do contrato), <b>workers/filas</b> (NATS/outbox da arquitetura não implementados — eventos são in-process) e <b>cache</b> (não há; recomendado apenas onde não afeta consistência, ver §2). Pipeline de verificação executado ao final: <span class="k">npm run verify</span> = lint → typecheck → build → vitest (69) → UI (19) → solc.</p>
+</section>
+
+<section id="s1"><h2>1 · Security Audit Report</h2>
+<p class="sub">Status: <span class="st ok">CORRIGIDO</span> = código alterado + teste; <span class="st acc">MITIGADO</span> = risco reduzido, aceito com justificativa; <span class="st open">ABERTO</span> = bloqueia produção ou exige decisão.</p>
+<div class="tbl"><table>
+<tr><th>ID</th><th>Sev.</th><th>Componente</th><th>Achado</th><th>Correção / evidência</th><th>Status</th></tr>
+<tr><td>SC-01</td><td><span class="sev CRITICAL">CRITICAL</span></td><td>Contrato · register</td><td>Nova revisão podia sobrescrever uma revisão com depósitos ainda em custódia (<span class="k">delete d.legs</span>) — fundos ficariam irrecuperáveis.</td><td><span class="k">revert FundsStillEscrowed()</span> se <span class="k">depositedCount != 0</span>. Teste: <em>register após supersede sem refund ⇒ FundsStillEscrowed</em>.</td><td class="st ok">CORRIGIDO</td></tr>
+<tr><td>SC-02</td><td><span class="sev CRITICAL">CRITICAL</span></td><td>Contrato · register</td><td>Keeper (REGISTRAR) podia registrar legs com <span class="k">to</span> apontando para um terceiro ou com valor diferente do assinado; os signatários assinam contraparte/valores, mas o contrato não cruzava com as legs.</td><td>Legs obrigatoriamente Vendedor↔Comprador (papéis 0/1), <span class="k">amount == amountIn/amountOut</span> assinados, uma leg por tipo. Teste: <em>leg para terceiro ⇒ BadLegParties; valor ≠ assinado ⇒ BadLegParties</em>.</td><td class="st ok">CORRIGIDO</td></tr>
+<tr><td>SC-03</td><td><span class="sev HIGH">HIGH</span></td><td>Contrato · fee</td><td>Tesouraria era parâmetro do register: keeper comprometido desviaria 100% das fees.</td><td><span class="k">address public immutable treasury</span> fixado no deploy; removido do <span class="k">RegisterInput</span>.</td><td class="st ok">CORRIGIDO</td></tr>
+<tr><td>BE-01</td><td><span class="sev CRITICAL">CRITICAL</span></td><td>Deal Engine · locking</td><td>Deadlock: <span class="k">block()</span> (que toma o lock por Deal) era chamado dentro de <span class="k">withDeal</span> quando o screening ou o limite de risco bloqueava — a Deal ficava travada para sempre e a requisição pendurada.</td><td><span class="k">blockInternal()</span> para contextos já travados; teste <em>carteira em lista de bloqueio ⇒ BLOCKED</em> e <em>limite de risco</em> (encontrado e corrigido na implementação, revalidado aqui).</td><td class="st ok">CORRIGIDO</td></tr>
+<tr><td>BE-02</td><td><span class="sev HIGH">HIGH</span></td><td>HTLC · consistência</td><td><span class="k">htlcHash</span> off-chain era SHA-256 da <em>string hexadecimal</em> da preimage; o contrato (e um script Bitcoin) fazem SHA-256 dos <em>32 bytes</em>. A leg BTC nunca seria resgatável em produção.</td><td><span class="k">htlcHashOf()</span> = sha256(bytes); simulador exige preimage de 32 bytes hex. Teste em <span class="k">hardening.test.ts</span>.</td><td class="st ok">CORRIGIDO</td></tr>
+<tr><td>BE-03</td><td><span class="sev HIGH">HIGH</span></td><td>Deal Engine · fund</td><td><span class="k">fund()</span> aguarda a finalidade on-chain (<span class="k">waitFinal</span>) dentro da requisição HTTP. Com Bitcoin (3 confirmações ≈ 30 min) ou Ethereum a conexão expira, o lock por Deal fica preso e a API sofre esgotamento de conexões.</td><td>Requer o Chain Indexer da arquitetura (§4.4): a API só registra a intenção; a finalidade chega por evento. Não é ajuste pontual — é trabalho de adaptação para os adaptadores reais.</td><td class="st open">ABERTO</td></tr>
+<tr><td>BE-04</td><td><span class="sev HIGH">HIGH</span></td><td>Audit Log · escala</td><td><span class="k">seq</span> global é PK e o encadeamento é serializado <em>no processo</em>; duas réplicas da API colidem (<span class="k">audit_events_pkey</span>) e a cadeia de hash quebra.</td><td>Aceitável com <b>1 réplica escritora</b>; para escalar horizontalmente: sequência do Postgres + hash calculado em transação com <span class="k">pg_advisory_xact_lock</span>. Mesmo ponto vale para o lock por Deal (in-process) — ver DB §5.</td><td class="st open">ABERTO</td></tr>
+<tr><td>BE-05</td><td><span class="sev HIGH">HIGH</span></td><td>app.ts · memória</td><td>Mapa <span class="k">verifierDealRef</span> (simuladores) nunca evictava Deals → vazamento em runs longos.</td><td>Evicção em estados terminais + teto de 10.000. Só existe em <span class="k">dev</span> (simuladores).</td><td class="st ok">CORRIGIDO</td></tr>
+<tr><td>DB-01</td><td><span class="sev HIGH">HIGH</span></td><td>SqlStore · listDeals</td><td><span class="k">SELECT doc FROM deals</span> sem WHERE e filtro em memória: usado em GET /v1/deals, no Risk Engine (a cada verificação) e na varredura de expiração — full scan por requisição (N+1 em escala).</td><td>Filtros empurrados ao SQL (<span class="k">state = ANY</span>, <span class="k">doc->'participants' @> jsonb</span>), <span class="k">LIMIT 5000</span>, índice GIN <span class="k">jsonb_path_ops</span> (migração 002).</td><td class="st ok">CORRIGIDO</td></tr>
+<tr><td>DB-02</td><td><span class="sev HIGH">HIGH</span></td><td>Deal Engine · persist</td><td>Cada escrita lia a linha do tempo inteira (<span class="k">listDealEvents</span>) para obter o próximo <span class="k">seq</span> — O(n²) por Deal e amplificação de leitura.</td><td><span class="k">Store.lastDealEvent()</span> via PK (<span class="k">ORDER BY seq DESC LIMIT 1</span>).</td><td class="st ok">CORRIGIDO</td></tr>
+<tr><td>DB-03</td><td><span class="sev HIGH">HIGH</span></td><td>PGlite client</td><td>Queries sem parâmetros usavam <span class="k">exec</span> e devolviam 0 linhas: <span class="k">lastAudit()</span> vinha vazio ⇒ <span class="k">seq</span> sempre 1 ⇒ violação de PK na segunda escrita.</td><td><span class="k">exec()</span> só para migrações; <span class="k">query()</span> sempre via <span class="k">db.query</span>. Teste <span class="k">sql.test.ts</span>.</td><td class="st ok">CORRIGIDO</td></tr>
+<tr><td>SEC-01</td><td><span class="sev HIGH">HIGH</span></td><td>Wallet auth</td><td>Nonce do desafio não era vinculado à carteira: um nonce emitido para A podia ser consumido por B (confusão/negação de serviço; não permitia login como A).</td><td>Coluna <span class="k">nonces.subject</span> (rede:endereço); <span class="k">verify()</span> exige correspondência. Teste <em>desafio emitido para A não pode ser consumido por B</em>.</td><td class="st ok">CORRIGIDO</td></tr>
+<tr><td>SEC-02</td><td><span class="sev HIGH">HIGH</span></td><td>API · cabeçalhos</td><td>Sem CSP, HSTS, X-Frame-Options, nosniff, Referrer-Policy, Cache-Control: a UI servida pela API ficava exposta a clickjacking e a cache de respostas autenticadas.</td><td>Hook <span class="k">onRequest</span> com todos os cabeçalhos; CSP restritiva (só <span class="k">'self'</span> + Google Fonts). Teste em <span class="k">hardening.test.ts</span>.</td><td class="st ok">CORRIGIDO</td></tr>
+<tr><td>PR-01</td><td><span class="sev HIGH">HIGH</span></td><td>Price Engine</td><td>Sem disjuntor: anomalias repetidas (ataque a uma fonte, oracle quebrado) só rejeitavam Deal a Deal; sem verificação de <em>cotação obsoleta</em> (fonte devolvendo preço antigo passava).</td><td>Circuit breaker (3 anomalias/2 min ⇒ aberto 5 min; reset só por operador, auditado) + <span class="k">maxQuoteAgeMs</span> quando a fonte informa carimbo; métrica <span class="k">otc_price_breaker_open</span> + alerta. 3 testes.</td><td class="st ok">CORRIGIDO</td></tr>
+<tr><td>API-01</td><td><span class="sev MEDIUM">MEDIUM</span></td><td>API · envelope</td><td>Cada GET <span class="k">/approval-envelope</span> emitia um nonce novo: tabela <span class="k">nonces</span> crescia sem limite sob polling ou abuso.</td><td>Reutiliza o nonce aberto de (deal, revisão, papel) — índice parcial <span class="k">nonces_open_lookup</span>. Teste.</td><td class="st ok">CORRIGIDO</td></tr>
+<tr><td>API-02</td><td><span class="sev MEDIUM">MEDIUM</span></td><td>API · abuso</td><td>Rate limiter em memória sem evicção (vazamento por chave/IP); SSE sem limite por sessão (esgotamento de descritores).</td><td>Poda por janela; máximo 8 streams por sessão; métrica <span class="k">otc_sse_connections</span>.</td><td class="st ok">CORRIGIDO</td></tr>
+<tr><td>API-03</td><td><span class="sev MEDIUM">MEDIUM</span></td><td>WebSocket</td><td>Token de sessão na query string (<span class="k">/v1/ws?token=</span>) vaza em logs de proxy/CDN.</td><td>Mitigado por TTL de 10 min e por o token não conceder mais que a sessão. Recomendado: enviar via <span class="k">Sec-WebSocket-Protocol</span> ou ticket de uso único antes de produção.</td><td class="st acc">MITIGADO</td></tr>
+<tr><td>DB-04</td><td><span class="sev MEDIUM">MEDIUM</span></td><td>Retenção</td><td>Sem retenção para <span class="k">nonces</span> e <span class="k">idempotency_keys</span>.</td><td><span class="k">Store.purge()</span> horário: nonces vencidos e chaves de idempotência &gt; 24 h. Deals/eventos/auditoria/risco <b>nunca</b> são apagados (retenção regulatória, ver §5).</td><td class="st ok">CORRIGIDO</td></tr>
+<tr><td>SEC-03</td><td><span class="sev MEDIUM">MEDIUM</span></td><td>Rate limit</td><td>Limite por processo; com N réplicas o limite efetivo é N×.</td><td>Produção: limite no edge (WAF) + bucket em Redis. Fica como item de infra.</td><td class="st open">ABERTO</td></tr>
+<tr><td>SEC-04</td><td><span class="sev MEDIUM">MEDIUM</span></td><td>Sessão</td><td>Sessão HMAC stateless sem revogação.</td><td>TTL curto (10 min) + rotação do <span class="k">SESSION_SECRET</span> invalida tudo. Se for necessária revogação individual: denylist de <span class="k">sub</span> em Redis.</td><td class="st acc">MITIGADO</td></tr>
+<tr><td>SC-04</td><td><span class="sev MEDIUM">MEDIUM</span></td><td>Contrato · refund nativo</td><td>Refund de ETH usa <span class="k">call</span> para <span class="k">leg.from</span>; se for um contrato que reverte, o reembolso trava (o settle do outro lado já aconteceu ou não — nunca há perda cruzada, apenas fundos presos do próprio depositante).</td><td>v1 aceita apenas EOA (ADR-010); adaptador deve rejeitar endereços com código. Documentado.</td><td class="st acc">MITIGADO</td></tr>
+<tr><td>SC-05</td><td><span class="sev MEDIUM">MEDIUM</span></td><td>Contrato · pausa</td><td>Guardian pode pausar <span class="k">settle</span>/<span class="k">deposit</span> até a expiração ("grief" de liquidação).</td><td>Por desenho: refund nunca é pausável (testado com o contrato pausado); guardian em multisig 2-de-3 com timelock de despausa não obrigatório.</td><td class="st acc">MITIGADO</td></tr>
+<tr><td>UI-01</td><td><span class="sev MEDIUM">MEDIUM</span></td><td>Frontend · XSS</td><td>Um sink <span class="k">innerHTML</span> interpolava o endereço de contrato do registro sem escape (demais sinks já usavam <span class="k">escapeHtml</span> ou <span class="k">textContent</span>).</td><td><span class="k">escapeHtml(sel.contract)</span>; CSP passa a bloquear scripts externos.</td><td class="st ok">CORRIGIDO</td></tr>
+<tr><td>OBS-01</td><td><span class="sev MEDIUM">MEDIUM</span></td><td>Observabilidade</td><td>Sem métricas HTTP (latência/status), sem conexões SSE, sem <span class="k">x-request-id</span>, sem regras de alerta.</td><td>Métricas <span class="k">otc_http_*</span>, <span class="k">otc_sse_connections</span>; <span class="k">x-request-id</span> validado/propagado e logado em 5xx; <span class="k">ops/alerts.yml</span> (14 regras). Tracing distribuído (OpenTelemetry) continua aberto.</td><td class="st ok">CORRIGIDO (tracing ABERTO)</td></tr>
+<tr><td>SIG-01</td><td><span class="sev LOW">LOW</span></td><td>Malleabilidade</td><td>Recuperação off-chain (viem/noble) aceita <span class="k">s</span> alto para EVM/BTC.</td><td>Irrelevante para replay: nonce único consumido, assinatura revalidada on-chain (OZ ECDSA rejeita <span class="k">s</span> alto). Ed25519 (nacl) não é maleável na prática.</td><td class="st acc">ACEITO</td></tr>
+<tr><td>API-04</td><td><span class="sev LOW">LOW</span></td><td>CSRF / CORS</td><td>Bearer token (não cookie) ⇒ CSRF não se aplica; CORS <span class="k">origin:false</span>.</td><td>OK. Se a UI passar a ser servida de outra origem, liberar apenas ela.</td><td class="st acc">OK</td></tr>
+<tr><td>API-05</td><td><span class="sev LOW">LOW</span></td><td>ops/refund</td><td>Endpoint devolvia objeto sem sentido e não auditava a ação.</td><td>Devolve a Deal e registra <span class="k">ops.refund.retry</span> na auditoria.</td><td class="st ok">CORRIGIDO</td></tr>
+<tr><td>INJ-01</td><td><span class="sev LOW">LOW</span></td><td>Injeção</td><td>SQL: todas as queries são parametrizadas; entrada validada por zod; sem <span class="k">eval</span>/templating no servidor.</td><td>Sem achados. Único risco de log injection: valores de usuário em logs pino (JSON escapado).</td><td class="st acc">OK</td></tr>
+</table></div>
+<h3>Categorias auditadas sem achado adicional</h3>
+<ul>
+<li><b>Replay / substituição de assinatura / nonce reuse</b>: envelope sempre reconstruído pelos termos persistidos; nonce emitido para (deal, revisão, papel), consumido atomicamente (<span class="k">UPDATE … WHERE consumed_at IS NULL</span>); assinatura de outra Deal, de outro papel, de outro signatário, com parâmetros alterados e expirada — todos rejeitados (7 testes + matriz).</li>
+<li><b>Double settlement / unauthorized settlement</b>: registro único por Deal (PK <span class="k">settlements.deal_id</span>), estado só sai de <span class="k">SETTLEMENT_VALIDATION</span>, reconciliação lê on-chain antes de enviar; contrato rejeita segundo settle (<span class="k">BadStatus</span>). 300 tentativas concorrentes ⇒ 100 liquidações.</li>
+<li><b>Parameter manipulation</b>: dealHash recalculado a partir dos termos persistidos na validação §7.3; hash sensível a 15 campos (teste de domínio); contrato cruza legs com valores assinados (SC-02).</li>
+<li><b>Access control / privilege escalation</b>: operador só por endereço em <span class="k">OPERATOR_ADDRESSES</span> (login por carteira, sem senha); criador-only para abrir/emendar; participante-only para cancelar/ver; depósito só pela carteira da leg. Testes de 403 na API.</li>
+<li><b>Secret exposure</b>: nenhum segredo no código (lint proíbe literais de 32 bytes); <span class="k">SESSION_SECRET</span> obrigatório em prod; logs redigem <span class="k">signature</span>/<span class="k">authorization</span>; UI não recebe credenciais; chave do keeper fora do repositório (KMS).</li>
+<li><b>RPC / oracle / liquidity manipulation</b>: RPC caído ⇒ erro transitório (Deal não avança nem bloqueia); ≥3 fontes de preço com mediana ponderada, dispersão &gt;150 bps ou desvio &gt;300 bps ⇒ anomalia ⇒ disjuntor; venue única fora tolerada, todas fora ⇒ <span class="k">LIQUIDITY_UNAVAILABLE</span>; tamanho &gt; 20% da profundidade ou slippage &gt; limite ⇒ não avança. Preço fora da banda assinada na liquidação ⇒ BLOCKED + reembolso (teste).</li>
+</ul>
+</section>
+
+<section id="s2"><h2>2 · Performance Report</h2>
+<p class="sub">Medido com <span class="k">scripts/bench.mts</span> (Node 22, 1 processo, sem rede, cadeias simuladas). Números de RPC real não existem ainda — são o gargalo dominante em produção (finalidade: Solana ≈ 1 s, Ethereum ≈ 13 min, Bitcoin ≈ 30 min).</p>
+<div class="tbl"><table>
+<tr><th>Métrica</th><th>n</th><th>p50</th><th>p95</th><th>p99</th><th>Leitura</th></tr>
+<tr><td>Verificação EIP-712 secp256k1 (viem)</td><td>200</td><td>2,96 ms</td><td>6,54 ms</td><td>11,07 ms</td><td>Custo por assinatura; N/N reverificado na liquidação</td></tr>
+<tr><td>Verificação Ed25519 (tweetnacl)</td><td>200</td><td>5,56 ms</td><td>13,97 ms</td><td>20,48 ms</td><td>nacl em JS puro; <span class="k">@noble/ed25519</span> ou nativo (libsodium) reduz ~3×</td></tr>
+<tr><td>Verificação BIP-137 secp256k1 (noble)</td><td>200</td><td>1,57 ms</td><td>4,51 ms</td><td>7,18 ms</td><td>OK</td></tr>
+<tr><td>Deal create (memória)</td><td>60</td><td>0,36 ms</td><td>3,58 ms</td><td>18,4 ms</td><td>p99 = GC; sem I/O</td></tr>
+<tr><td>Deal create (PGlite/Postgres)</td><td>30</td><td>7,8 ms</td><td>13,4 ms</td><td>14,7 ms</td><td>≈ 4 escritas (deal, evento, auditoria×2)</td></tr>
+<tr><td>Preparo até LIQUIDITY_VERIFIED (memória)</td><td>60</td><td>1,8 ms</td><td>10,7 ms</td><td>14,9 ms</td><td></td></tr>
+<tr><td>Preparo até LIQUIDITY_VERIFIED (PGlite)</td><td>30</td><td>48 ms</td><td>85 ms</td><td>90 ms</td><td><b>Gargalo DB</b>: ~15 escritas JSONB por Deal (event sourcing + projeção completa em <span class="k">doc</span>)</td></tr>
+<tr><td>getDeal (PGlite)</td><td>30</td><td>0,43 ms</td><td>0,60 ms</td><td>0,70 ms</td><td>PK lookup — OK</td></tr>
+<tr><td>Settle: validação §7.3 + 1 tx simulada (memória)</td><td>60</td><td>40,5 ms</td><td>55,5 ms</td><td>67,3 ms</td><td><b>Gargalo CPU</b>: 3 verificações de assinatura + recotação (4 fontes × 2 ativos) + rota + 2 verificações de ativo</td></tr>
+<tr><td>Settle (PGlite)</td><td>30</td><td>54 ms</td><td>82 ms</td><td>122 ms</td><td></td></tr>
+<tr><td>API GET /health (fastify inject)</td><td>200</td><td>0,13 ms</td><td>0,42 ms</td><td>1,3 ms</td><td>Overhead de framework desprezível; latência real = rede + DB</td></tr>
+<tr><td>Evento Deal → assinante SSE/WS (in-process)</td><td>100</td><td>0,07 ms</td><td>0,11 ms</td><td>0,73 ms</td><td>Latência de entrega = rede do cliente</td></tr>
+</table></div>
+<h3>Gargalos identificados e recomendações</h3>
+<ul>
+<li><b>Amplificação de escrita do event sourcing</b> (HIGH para throughput, não para segurança): cada transição grava a projeção inteira (<span class="k">doc</span> JSONB de ~8 KB). A 100 Deals/min é irrelevante (&lt;1% de um Postgres pequeno); a 10.000 Deals/dia ainda folgado. Se necessário: gravar só campos indexados + doc, e mover <span class="k">audit_events</span> para escrita assíncrona via outbox.</li>
+<li><b>Liquidação CPU-bound</b> (~40 ms): aceitável; escala horizontal exige resolver BE-04/lock distribuído. Ed25519 via libsodium nativo reduz 60% do custo de verificação.</li>
+<li><b>Varredura de expiração serial</b>: 10.000 Deals em 3,0 s (0,3 ms/Deal) — 5 s de intervalo dá folga até ~15.000 Deals expirando no mesmo tick; acima disso, paralelizar com concorrência 16 e paginar por <span class="k">expires_at</span> (índice <span class="k">deals_state_expires</span> já existe).</li>
+<li><b>Cache — onde é seguro</b>: (a) registro canônico de ativos (imutável por versão), (b) snapshot de preço dentro do TTL de 30 s <em>apenas para exibição</em> (a liquidação sempre recota), (c) <span class="k">GET /v1/assets</span>. <b>Onde é proibido</b>: estado de Deal, assinaturas, nonces, resultado de validação §7.3, saldo/estado on-chain. Nenhum cache foi adicionado nesta rodada.</li>
+</ul>
+</section>
+
+<section id="s3"><h2>3 · Load Test Report</h2>
+<div class="grid">
+<div class="card"><b>100 Deals</b><span>fluxo completo concorrente (preparo+3 assinaturas): 4,1 s · 300 settles concorrentes (3/Deal): 3,7 s · <b>0 duplas</b> · 1 tx por cadeia por Deal · saldos exatos</span></div>
+<div class="card"><b>1.000 Deals</b><span>criação concorrente: 446 ms (0,4 ms/Deal) · ids únicos · 0 conflitos de versão · listagem por participante correta</span></div>
+<div class="card"><b>1.000 expirando</b><span>preparo 15,5 s · varredura de expiração 564 ms · 100% EXPIRED/REFUNDED · 0 liquidações depois · reembolsos exatos</span></div>
+<div class="card"><b>10.000 Deals</b><span>criação 4,6 s (2.157 Deals/s) · listDeals(participante) 231 ms · expireDue 10.000 em 3,0 s · heap 248 MB</span></div>
+</div>
+<p><b>Como foi feito</b>: <span class="k">test/hardening.test.ts</span> (100/1.000) e <span class="k">scripts/bench.mts</span> (10.000), store em memória, simuladores locais com semântica do contrato. <b>Limitações honestas</b>: sem latência de rede, sem Postgres real (PGlite é o mesmo motor em WASM, ~2–3× mais lento que nativo), sem RPC. O teste de 10.000 com fluxo completo não foi executado (custo ≈ 8 min de CPU) — a garantia de dupla liquidação não depende do volume: é estrutural (PK única + máquina de estados + contrato).</p>
+<div class="note warn">Antes de produção, repetir o cenário de 100 Deals contra Postgres 16 real e testnets (Sepolia/devnet/regtest) com os adaptadores reais, medindo p95 de <span class="k">settle</span> ponta a ponta incluindo finalidade.</div>
+</section>
+
+<section id="s4"><h2>4 · Smart Contract Findings + Threat Model</h2>
+<p><span class="k">contracts/VerumOtcEscrow.sol</span> · Solidity 0.8.30 · OpenZeppelin 5 (EIP712, ECDSA, AccessControl, Pausable, ReentrancyGuard, SafeERC20) · 14.282 bytes · testado em EVM real (ethereumjs, Cancun) com assinaturas produzidas por viem — 5 arquivos de teste, 14 cenários on-chain.</p>
+<h3>Ativos protegidos</h3><ul><li>Fundos em custódia (nativo + ERC-20 da allowlist) até settle ou refund.</li><li>Integridade dos termos assinados (dealHash + valores/ativos/contraparte).</li><li>Fee (0,25%) para a tesouraria fixa.</li></ul>
+<h3>Atores e capacidades</h3>
+<div class="tbl"><table><tr><th>Ator</th><th>Pode</th><th>Não pode</th></tr>
+<tr><td>Participante (EOA)</td><td>depositar a própria leg; chamar <span class="k">settle</span>/<span class="k">refund</span> (permissionless)</td><td>alterar termos, sacar do escrow, liquidar sem N/N</td></tr>
+<tr><td>Keeper (REGISTRAR, chave KMS)</td><td><span class="k">register</span>, <span class="k">supersede</span></td><td>escolher destinatários/valores fora do assinado (SC-02), tesouraria (SC-03), sobrescrever revisão com fundos (SC-01), pausar, mexer na allowlist</td></tr>
+<tr><td>Guardian (multisig)</td><td>pausar/despausar <span class="k">register</span>/<span class="k">deposit</span>/<span class="k">settle</span></td><td>pausar <span class="k">refund</span>; mover fundos</td></tr>
+<tr><td>Admin (multisig)</td><td>agendar/executar allowlist de tokens (timelock 24 h); gerir papéis</td><td>sacar, alterar fee/tesouraria, fazer upgrade (contrato imutável)</td></tr>
+<tr><td>Terceiro</td><td>chamar <span class="k">settle</span>/<span class="k">refund</span> (contrato decide)</td><td>tudo o mais</td></tr></table></div>
+<h3>Vetores e controles (todos com teste, salvo indicado)</h3>
+<div class="tbl"><table><tr><th>Vetor</th><th>Controle</th><th>Evidência</th></tr>
+<tr><td>Reentrância em settle/refund/deposit</td><td><span class="k">nonReentrant</span> + efeitos antes das interações (status/settled/deposited atualizados antes de transferir)</td><td>Revisão; padrão CEI</td></tr>
+<tr><td>Liquidação sem N/N, assinatura de terceiro, hash/valor alterado, ordem trocada</td><td>Uma assinatura por papel, na ordem dos participantes, struct reconstruído do storage</td><td>5 rejeições testadas</td></tr>
+<tr><td>Replay de assinatura</td><td><span class="k">nonceUsed[keccak(dealIdHash‖nonce)]</span>; revisão no struct; <span class="k">expiresAt</span> no struct</td><td>nonces consumidos verificados</td></tr>
+<tr><td>Dupla execução</td><td>status FUNDED → SETTLED; segundo settle ⇒ <span class="k">BadStatus</span></td><td>testado</td></tr>
+<tr><td>Expiração</td><td>settle exige <span class="k">now+60s &lt; expiresAt</span>; refund exige expirado ou SUPERSEDED</td><td>testado (margem)</td></tr>
+<tr><td>Fee</td><td>fixa no register, ≤ 5%, só na leg de pagamento, tesouraria imutável</td><td>valores exatos testados</td></tr>
+<tr><td>Token fee-on-transfer / rebasing</td><td>saldo antes/depois no deposit ⇒ <span class="k">TransferAmountMismatch</span>; allowlist com timelock</td><td>revisão (sem token ERC-20 mock no teste — <b>pendente</b>)</td></tr>
+<tr><td>Overflow/underflow</td><td>Solidity 0.8 checked; <span class="k">amount*feeBps/10000</span> com uint256</td><td>revisão</td></tr>
+<tr><td>Chamadas externas não verificadas</td><td>SafeERC20; <span class="k">call</span> nativo verificado (<span class="k">ok</span>)</td><td>revisão</td></tr>
+<tr><td>Upgradeability / privilégios de admin</td><td>Sem proxy, sem <span class="k">withdraw/sweep/rescue/setTreasury</span></td><td>teste inspeciona a ABI</td></tr>
+<tr><td>Front-running de <span class="k">register</span> (DoS por dealId)</td><td>register restrito ao REGISTRAR</td><td>testado (outsider rejeitado)</td></tr>
+<tr><td>Refund com contrato pausado</td><td>refund sem <span class="k">whenNotPaused</span></td><td>testado com pausa ativa</td></tr>
+</table></div>
+<h3>Pendências do contrato (bloqueiam mainnet)</h3>
+<ul>
+<li><span class="sev HIGH">HIGH</span> <b>Auditoria externa</b> não realizada; sem fuzzing/invariantes (Foundry) — a suíte atual é determinística.</li>
+<li><span class="sev HIGH">HIGH</span> <b>Recomputação canônica do dealHash on-chain</b> não implementada: o contrato vincula <span class="k">dealHash</span> (opaco) + campos estruturados assinados. Manipulação de campos <em>fora</em> desses (ex.: rota) é detectada off-chain (§7.3) e pelas assinaturas (que cobrem o dealHash), mas o contrato não a prova sozinho. Decisão de freeze pendente.</li>
+<li><span class="sev MEDIUM">MEDIUM</span> Teste com ERC-20 real (incl. fee-on-transfer e token com <span class="k">decimals</span> divergente) e com HTLC (<span class="k">htlcHash ≠ 0</span>) no EVM real.</li>
+<li><span class="sev MEDIUM">MEDIUM</span> Programa Solana (Anchor) e script HTLC Bitcoin não existem — a matriz multichain hoje é provada apenas nos simuladores.</li>
+</ul>
+</section>
+
+<section id="s5"><h2>5 · Database Findings</h2>
+<div class="tbl"><table><tr><th>Área</th><th>Estado</th><th>Ação</th></tr>
+<tr><td>Índices</td><td>001: <span class="k">deals(state,expires_at)</span>, <span class="k">deals(created_by)</span>, parcial <span class="k">signatures(deal_id,revision,role) WHERE valid</span>. 002 (novo): GIN <span class="k">doc->'participants'</span>, <span class="k">deals(updated_at)</span>, <span class="k">nonces(deal_id,revision,role) WHERE open</span>, <span class="k">nonces(expires_at)</span>, <span class="k">idempotency(created_at)</span>, <span class="k">risk_events(deal_id)</span>, <span class="k">audit_events(deal_id)</span></td><td class="st ok">feito</td></tr>
+<tr><td>Constraints</td><td>PK <span class="k">settlements.deal_id</span> (uma liquidação por Deal), unicidade parcial de assinatura válida por papel/revisão, <span class="k">share_token UNIQUE</span>, FKs, <span class="k">version ≥ 1</span></td><td class="st ok">verificado (teste SQL)</td></tr>
+<tr><td>Transações / locking</td><td>Lock otimista por <span class="k">version</span> (testado) + lock in-process por Deal. <span class="k">persist()</span> faz 3 escritas (deal, evento, auditoria) <b>sem transação</b>: uma queda entre elas deixa evento sem auditoria (detectável, não corruptivo — a cadeia de hash acusa).</td><td class="st open">envolver em transação SQL + <span class="k">pg_advisory_xact_lock(hash(deal_id))</span> para multi-réplica</td></tr>
+<tr><td>Connection pool</td><td>Não há cliente node-postgres no repositório (só PGlite/memória).</td><td class="st open">implementar <span class="k">SqlClient</span> sobre <span class="k">pg.Pool</span> (max 20, <span class="k">statement_timeout=5s</span>, <span class="k">idle_in_transaction_session_timeout=10s</span>)</td></tr>
+<tr><td>Query performance</td><td>Full scans removidos (DB-01, DB-02). Todas as consultas restantes são por PK/índice.</td><td class="st ok">feito</td></tr>
+<tr><td>Retenção</td><td>nonces e idempotência com purga; <b>deals, deal_events, signatures, settlements, risk_events, audit_events: retenção mínima de 5 anos</b> (LGPD/AML) — nunca purgar; arquivar a frio após 24 meses.</td><td class="st ok">política definida; job de arquivamento aberto</td></tr>
+<tr><td>Audit logs</td><td>Append-only por trigger (testado), encadeados por hash, verificação offline via <span class="k">/ops/audit/verify</span>.</td><td class="st ok">OK (escala: BE-04)</td></tr>
+<tr><td>Backups</td><td>Não configurados (fora do repositório).</td><td class="st open">PITR com WAL, RPO ≤ 5 min, teste de restauração mensal</td></tr>
+</table></div>
+</section>
+
+<section id="s6"><h2>6 · Infrastructure Findings</h2>
+<ul>
+<li><span class="sev HIGH">HIGH</span> <b>Premissas de processo único</b>: lock por Deal, rate limit, cadeia de auditoria, mapa de streams e emissão de eventos são in-process. Produção inicial: <b>1 réplica</b> da API/keeper atrás de load balancer com health check e reinício automático; escalar horizontalmente só após introduzir Redis (locks/rate limit) e outbox (eventos).</li>
+<li><span class="sev HIGH">HIGH</span> <b>Eventos voláteis</b>: <span class="k">EventEmitter</span> in-process — se o processo cai entre N/N e settle, o disparo automático se perde. Mitigação existente e testada: <span class="k">settlement.recover()</span> na inicialização reprocessa <span class="k">SETTLEMENT_VALIDATION</span>/<span class="k">SETTLING</span> (reconhece transações já enviadas). O outbox/NATS da arquitetura continua não implementado.</li>
+<li><span class="sev HIGH">HIGH</span> <b>Adaptadores reais e keeper KMS</b> não existem: nada pode ir para testnet ainda. Chave do keeper deve viver em KMS/HSM com política restrita a <span class="k">register/supersede/settle/refund</span>.</li>
+<li><span class="sev MEDIUM">MEDIUM</span> <b>Segredos</b>: <span class="k">SESSION_SECRET</span> via secret manager, rotação trimestral; <span class="k">.env.example</span> incluído sem valores.</li>
+<li><span class="sev MEDIUM">MEDIUM</span> <b>Rede</b>: egress apenas para RPCs/oráculos/venues aprovados; RPCs redundantes por cadeia (≥2 provedores) com quorum de leitura para saldo/estado.</li>
+<li><span class="sev MEDIUM">MEDIUM</span> <b>Observabilidade</b>: métricas + alertas prontos (<span class="k">ops/alerts.yml</span>); logs pino JSON com <span class="k">x-request-id</span>; tracing OpenTelemetry ausente.</li>
+<li><span class="sev LOW">LOW</span> <b>Container</b>: Node 22, usuário não-root, read-only FS, <span class="k">NODE_OPTIONS=--max-old-space-size</span> ≥ 1 GB (10.000 Deals em memória usaram 248 MB — em Postgres a projeção não fica no heap).</li>
+</ul>
+<h3>Comportamento definido para falhas (§11 Recovery — testado onde indicado)</h3>
+<div class="tbl"><table><tr><th>Falha</th><th>Comportamento seguro</th><th>Teste</th></tr>
+<tr><td>RPC offline</td><td>Erro transitório <span class="k">ADAPTER_UNAVAILABLE</span>: Deal não avança nem bloqueia; reembolsos ficam PENDING e são reprocessados</td><td>3 testes</td></tr>
+<tr><td>Oracle indisponível / discordante / obsoleto</td><td>1 fonte fora tolerada; &lt; mínimo ⇒ <span class="k">PRICE_UNAVAILABLE</span>; anomalia ⇒ disjuntor</td><td>5 testes</td></tr>
+<tr><td>Venue de liquidez fora</td><td>1 fora tolerada; todas ⇒ <span class="k">LIQUIDITY_UNAVAILABLE</span></td><td>teste</td></tr>
+<tr><td>Falha de banco</td><td>Requisição falha (5xx); nenhuma escrita parcial passa do lock otimista; auditoria detecta lacunas. Transação por <span class="k">persist</span> ainda aberta (§5)</td><td>lock otimista testado</td></tr>
+<tr><td>Reinício do backend/worker</td><td><span class="k">recover()</span>: reconcilia com on-chain, retoma legs, nunca reenvia leg já FINAL</td><td>teste de recovery</td></tr>
+<tr><td>Congestionamento / timeout de transação</td><td>Leg fica INCLUDED → <span class="k">confirm()</span> promove; revertida/reorg ⇒ BLOCKED + reembolso das legs em escrow</td><td>2 testes</td></tr>
+<tr><td>Falha parcial (1 leg FINAL, outra falha)</td><td>BLOCKED; legs FINAL permanecem; leg em escrow reembolsada; nunca rota alternativa; incidente de risco</td><td>teste</td></tr>
+</table></div>
+</section>
+
+<section id="s7"><h2>7 · Remaining Risks</h2>
+<div class="tbl"><table><tr><th>Sev.</th><th>Risco</th><th>Impacto</th><th>Mitigação exigida antes de prod</th></tr>
+<tr><td><span class="sev HIGH">HIGH</span></td><td>Sem auditoria externa do contrato; sem fuzz/invariantes</td><td>Perda de fundos por bug não coberto</td><td>Auditoria independente + Foundry invariants + bug bounty em testnet</td></tr>
+<tr><td><span class="sev HIGH">HIGH</span></td><td>Adaptadores reais inexistentes (EVM/Solana/BTC) e funding síncrono (BE-03)</td><td>Impossível operar; se operado, esgotamento de conexões</td><td>Implementar adaptadores + Chain Indexer; testnet por ≥ 4 semanas</td></tr>
+<tr><td><span class="sev HIGH">HIGH</span></td><td>Processo único (locks, auditoria, rate limit, eventos)</td><td>Indisponibilidade em falha de nó; inconsistência se escalar sem preparo</td><td>Operar com 1 réplica + reinício automático; roadmap Redis/outbox</td></tr>
+<tr><td><span class="sev HIGH">HIGH</span></td><td>dealHash não recomputado on-chain (freeze pendente)</td><td>Contrato depende do backend para provar campos não estruturados</td><td>Decisão de arquitetura: serialização binária canônica ou aceitar vínculo por assinatura</td></tr>
+<tr><td><span class="sev MEDIUM">MEDIUM</span></td><td><span class="k">persist()</span> sem transação SQL</td><td>Lacuna evento/auditoria após queda (detectável)</td><td>Transação + advisory lock</td></tr>
+<tr><td><span class="sev MEDIUM">MEDIUM</span></td><td>Token WS na query string; sessão sem revogação</td><td>Sequestro de sessão por ≤ 10 min via logs</td><td>Ticket de uso único para WS; denylist opcional</td></tr>
+<tr><td><span class="sev MEDIUM">MEDIUM</span></td><td>Screening de carteiras é denylist local</td><td>Compliance insuficiente</td><td>Provedor de screening (Chainalysis/TRM) atrás da mesma interface</td></tr>
+<tr><td><span class="sev MEDIUM">MEDIUM</span></td><td>Fontes de preço/liquidez são estáticas (dev)</td><td>Sem produção possível</td><td>Pyth/Chainlink + 2 CEX; venues reais; calibrar limiares com dados</td></tr>
+<tr><td><span class="sev LOW">LOW</span></td><td>Guardian pode pausar até a expiração</td><td>Atraso; nunca perda (refund livre)</td><td>Multisig 2-de-3 + runbook</td></tr>
+<tr><td><span class="sev LOW">LOW</span></td><td>Sem tracing distribuído</td><td>Diagnóstico mais lento</td><td>OpenTelemetry quando houver &gt;1 serviço</td></tr>
+</table></div>
+</section>
+
+<section id="s8"><h2>8 · Production Readiness Checklist</h2>
+<ul class="check">
+<li class="done">Lint, typecheck, build, testes (69 backend + 19 UI + 5 contrato) verdes — <span class="k">npm run verify</span></li>
+<li class="done">Todos os achados CRITICAL corrigidos com teste de regressão</li>
+<li class="done">Matriz de assinaturas 0…3/3 e 0…4/4: somente N/N liquida</li>
+<li class="done">Expiração em massa (1.000) e concorrência (100 × 3 settles; 1.000 e 10.000 criações) sem dupla liquidação</li>
+<li class="done">Disjuntor de preço, obsolescência, fonte única, venue offline, liquidez insuficiente, slippage, rota inviável</li>
+<li class="done">Rejeição de token falso, contrato/mint errado, rede errada, decimals divergente, bytecode/mint authority divergente, símbolo falsificado, ativo suspenso</li>
+<li class="done">Cabeçalhos de segurança, CSP, request-id, métricas HTTP, alertas Prometheus</li>
+<li class="done">Retenção (nonces/idempotência) e política de retenção regulatória definida</li>
+<li class="no">Auditoria externa do contrato + fuzzing/invariantes</li>
+<li class="no">Adaptadores reais EVM/Solana/Bitcoin + Chain Indexer (funding assíncrono)</li>
+<li class="no">Programa Solana e script HTLC Bitcoin</li>
+<li class="no">Cliente Postgres (pg.Pool) + transação em <span class="k">persist</span> + advisory lock</li>
+<li class="no">Fontes reais de preço/liquidez e screening de carteiras</li>
+<li class="no">Teste de carga contra Postgres real e testnets (p95 de settle ponta a ponta)</li>
+<li class="no">Backups PITR testados; runbooks; on-call</li>
+<li class="no">Decisão de freeze: recomputação canônica on-chain</li>
+</ul>
+<div class="note bad"><b>Veredito</b>: <b>NÃO pronto para produção</b>. Pronto para <b>testnet/devnet</b> assim que os adaptadores reais existirem. Nenhum deploy foi feito.</div>
+</section>
+
+<section id="s9"><h2>9 · Deployment Checklist (staging → production)</h2>
+<h3>Staging (testnets)</h3>
+<ol>
+<li>Provisionar Postgres 16 (PITR ativo), aplicar <span class="k">db/migrations/001</span> e <span class="k">002</span> (ambas idempotentes/aditivas); rodar <span class="k">/ops/audit/verify</span> vazio.</li>
+<li>Variáveis (<span class="k">.env.example</span>): <span class="k">OTC_ENV=staging</span>, <span class="k">DATABASE_MODE=postgres</span>, <span class="k">SESSION_SECRET</span> (≥32, secret manager), <span class="k">OPERATOR_ADDRESSES</span> (multisig/operadores), <span class="k">TREASURY_ADDRESS</span>, <span class="k">PLATFORM_FEE_BPS=25</span>, <span class="k">EXEC_MARGIN_MS=60000</span>.</li>
+<li>Deploy do contrato em Sepolia com <span class="k">constructor(admin=multisig, guardian=multisig, registrar=keeperKMS, treasury)</span>; verificar código; anotar endereço no registro de rotas; <span class="k">scheduleToken</span> → 24 h → <span class="k">executeToken</span> para USDT/USDC de teste.</li>
+<li>Keeper com chave em KMS; testar <span class="k">register/supersede/settle/refund</span> e negar qualquer outra operação.</li>
+<li>Subir 1 réplica; verificar <span class="k">/health</span>, <span class="k">/metrics</span>, alertas em <span class="k">ops/alerts.yml</span> carregados, logs JSON com <span class="k">x-request-id</span>.</li>
+<li>Smoke test: fluxo completo 3/3 em devnet/Sepolia com valores mínimos; expiração com refund; cancelamento; anomalia de preço induzida ⇒ disjuntor ⇒ reset auditado.</li>
+<li>Carga: 100 Deals concorrentes contra Postgres real; registrar p95.</li>
+<li>4 semanas em testnet sem incidente crítico + auditoria externa concluída.</li>
+</ol>
+<h3>Production</h3>
+<ol>
+<li>Change ticket aprovado (four-eyes); janela; comunicação a Pay Masters.</li>
+<li>Deploy do contrato (mainnet) por multisig; verificação de código; allowlist via timelock; <b>limites reduzidos</b> na primeira semana (<span class="k">MAX_DEAL_USD</span> baixo).</li>
+<li>Migrações aditivas → deploy blue/green da API (1 réplica escritora) → smoke com Deal real de valor mínimo entre carteiras internas.</li>
+<li>Monitorar 24 h: <span class="k">OtcSettlementFailed</span>, <span class="k">OtcInvariantViolationAttempts</span>, <span class="k">OtcRefundsPending</span>, <span class="k">OtcRpcErrors</span>, <span class="k">OtcPriceBreakerOpen</span> devem permanecer silenciosos.</li>
+<li>Elevar limites gradualmente; manter guardian de prontidão.</li>
+</ol>
+</section>
+
+<section id="s10"><h2>10 · Rollback Plan</h2>
+<div class="tbl"><table><tr><th>Camada</th><th>Gatilho</th><th>Procedimento</th><th>Tempo alvo</th></tr>
+<tr><td>API/keeper</td><td>5xx &gt; 1%, invariantes violadas, comportamento inesperado</td><td>Blue/green: apontar o LB para a versão anterior (migrações são aditivas — 002 só cria índices/coluna nula; versão anterior continua compatível). Ao subir, <span class="k">recover()</span> reconcilia Deals em voo. Nenhuma Deal é perdida: o estado está no Postgres e on-chain.</td><td>&lt; 5 min</td></tr>
+<tr><td>Contrato (imutável)</td><td>Bug ou exploit suspeito</td><td>1) Guardian: <span class="k">pause()</span> (bloqueia deposit/settle/register; <b>refund continua</b>). 2) Backend: bloquear Deals ativas (<span class="k">/ops/deals/:id/block</span>) e <span class="k">supersede</span> para liberar refunds imediatos. 3) Reembolsar todos os depósitos. 4) Novo contrato = novo endereço; atualizar rota e allowlist; Deals antigas nunca migram.</td><td>pausa &lt; 15 min; refunds &lt; 24 h</td></tr>
+<tr><td>Keeper (chave)</td><td>Suspeita de comprometimento</td><td>Admin revoga <span class="k">REGISTRAR_ROLE</span>, concede a nova chave KMS; a chave antiga nunca pôde mover fundos (SC-02/SC-03).</td><td>&lt; 30 min</td></tr>
+<tr><td>Banco</td><td>Corrupção ou perda</td><td>PITR para o ponto anterior; <span class="k">/ops/audit/verify</span> para validar a cadeia; <span class="k">recover()</span> reconcilia com on-chain — a verdade de custódia é a cadeia, nunca o banco.</td><td>RTO &lt; 1 h</td></tr>
+<tr><td>Preço</td><td>Disjuntor aberto por falso positivo</td><td>Investigar fontes; <span class="k">POST /ops/price/breaker/reset</span> (auditado). Nunca reduzir limiares sob pressão.</td><td>—</td></tr>
+<tr><td>Comunicação</td><td>Qualquer rollback</td><td>Status page + aviso aos participantes com Deals ativas; registrar incidente e post-mortem em 72 h.</td><td>—</td></tr>
+</table></div>
+<p class="sub">Regra final: nenhum rollback pode deixar fundos em custódia sem caminho de reembolso — por isso <span class="k">refund</span> é permissionless, não pausável e independe do backend.</p>
+</section>
+
+<section><h2>Anexo · Artefatos e como reproduzir</h2>
+<ul>
+<li><span class="k">verum-otc-hardened.tar.gz</span> — código completo (sem <span class="k">node_modules</span>). <span class="k">npm ci && npm run verify</span>; <span class="k">npx tsx scripts/bench.mts</span> para as medições.</li>
+<li>Arquivos alterados nesta rodada: <span class="k">contracts/VerumOtcEscrow.sol</span>, <span class="k">db/migrations/002_hardening.sql</span>, <span class="k">src/db/{repository,memoryStore,sqlStore}.ts</span>, <span class="k">src/engines/{deal,price,signature,settlement}.ts</span>, <span class="k">src/adapters/local.ts</span>, <span class="k">src/wallet/auth.ts</span>, <span class="k">src/api/server.ts</span>, <span class="k">src/app.ts</span>, <span class="k">src/monitoring/metrics.ts</span>, <span class="k">web/verum-otc.html</span>, <span class="k">web/ui.test.mjs</span>, <span class="k">test/{contract,hardening,api,helpers}.ts</span>, <span class="k">scripts/bench.mts</span>, <span class="k">ops/alerts.yml</span>, <span class="k">.env.example</span>.</li>
+</ul>
+</section>
+
+</div>
+</body>
+</html>
