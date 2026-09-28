@@ -106,11 +106,23 @@ async function readXrp(c: ChainDef, address: string): Promise<NativeBalance | nu
 }
 
 async function readZcash(c: ChainDef, address: string): Promise<NativeBalance | null> {
-  // Blockchair bloqueia IPs sem chave (HTTP 430). Com BLOCKCHAIR_API_KEY no env,
-  // a leitura passa a funcionar; sem chave, devolve null (UI: "indisponível").
+  // Sem fonte pública estável sem chave p/ Zcash (Blockchair: 430; Blockbook da
+  // Trezor: Cloudflare; Zchain: morto). Ordem: NOWNodes (Blockbook, plano free)
+  // se NOWNODES_API_KEY existir; senão Blockchair se BLOCKCHAIR_API_KEY existir;
+  // senão null (UI: "indisponível").
+  const nowKey = process.env.NOWNODES_API_KEY?.trim();
+  if (nowKey) {
+    const j = await fetchJson(
+      `https://zecbook.nownodes.io/api/v2/address/${encodeURIComponent(address)}?details=basic`,
+      { headers: { 'api-key': nowKey } },
+    );
+    // Blockbook devolve balance em zatoshi (string); endereço nunca usado vem com balance "0".
+    const bal = j?.balance;
+    if (bal != null) { try { return pack(BigInt(bal), c); } catch { /* cai p/ Blockchair */ } }
+  }
   const key = process.env.BLOCKCHAIR_API_KEY?.trim();
-  const q = key ? `?key=${encodeURIComponent(key)}` : '';
-  const j = await fetchJson(`${c.endpoint}/dashboards/address/${encodeURIComponent(address)}${q}`);
+  if (!key) return null;
+  const j = await fetchJson(`${c.endpoint}/dashboards/address/${encodeURIComponent(address)}?key=${encodeURIComponent(key)}`);
   if (j?.__notFound) return pack(0n, c);
   const bal = j?.data?.[address]?.address?.balance;
   if (bal == null) return null;
