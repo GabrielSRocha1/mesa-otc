@@ -197,6 +197,27 @@ form{margin-top:26px;display:grid;gap:15px}
   .auth-brand{display:none}
   .grid{grid-template-columns:1fr}
 }
+/* ---------- Responsividade mobile (portal) ---------- */
+html,body{max-width:100%;overflow-x:hidden}
+img,svg{max-width:100%}
+@media (max-width:640px){
+  .auth-form-wrap{padding:24px 16px}
+  .auth-card h2{font-size:22px}
+  .row2{grid-template-columns:1fr}                 /* nome/sobrenome, etc. empilham */
+  .grid{grid-template-columns:1fr!important}
+  .dash-main{padding:20px 14px 48px}
+  .topbar{padding:12px 14px;gap:10px}
+  .userchip{padding:6px 8px 6px 10px}
+  /* Carteira/código empilham e não estouram. */
+  .wl-id{flex-wrap:wrap}
+  .wl-id .conn{margin-left:0}
+  .wl-meta .r{flex-wrap:wrap;gap:4px}
+  .wl-meta .r .v,.wl-meta .r .v.mono{word-break:break-all}
+  .code-value{font-size:20px}
+  .code-actions{flex-direction:column}
+  .code-actions .btn{width:100%}
+}
+@media (max-width:400px){ .auth-card h2{font-size:20px} .code-value{font-size:17px} }
 </style>
 </head>
 <body>

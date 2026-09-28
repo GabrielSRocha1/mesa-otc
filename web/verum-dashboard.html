@@ -587,6 +587,63 @@ svg{display:block}
 @media(max-width:1150px){ .op-layout{grid-template-columns:1fr} .op-aside{position:static} }
 @media(max-width:820px){ .op-parts{grid-template-columns:repeat(2,1fr)} }
 @media(max-width:560px){ .op-flow{grid-template-columns:1fr} .op-swap{display:none} .op-parts{grid-template-columns:1fr} .op-steps{grid-template-columns:1fr 1fr;gap:14px} .op-step .line{display:none} }
+
+/* ============================================================================
+   RESPONSIVIDADE MOBILE (abrangente). Fica no fim do <style> para vencer as
+   regras base por ordem; !important nos grids porque várias seções definem
+   grid-template-columns INLINE (só assim sobrepõe). Não afeta desktop (>900px).
+   ============================================================================ */
+/* Nunca deixa a página rolar na horizontal; conteúdo largo (tabelas) rola só no seu container. */
+html,body{max-width:100%;overflow-x:hidden}
+img,svg,canvas,video{max-width:100%}
+.tbl-wrap{-webkit-overflow-scrolling:touch}
+
+@media (max-width:900px){
+  .page{padding:20px 18px 40px}
+  .grid,.col.col-3{grid-template-columns:1fr!important}
+  .stats{grid-template-columns:repeat(2,1fr)!important}
+  .op-layout{grid-template-columns:1fr!important}
+  .op-aside{position:static!important;top:auto}
+}
+@media (max-width:640px){
+  .page{padding:16px 13px 40px}
+  /* Cabeçalho de página: título e ações empilham; ações ocupam a largura e quebram. */
+  .page-head{flex-direction:column;align-items:stretch;gap:12px;margin-bottom:18px}
+  .page-head .ph-actions{margin-left:0;width:100%;flex-wrap:wrap}
+  .page-head .ph-actions .btn{flex:1 1 auto}
+  .page-head h1{font-size:20px}
+  .op-head{flex-direction:column;gap:10px}
+  .op-head .titw h1{font-size:20px}
+  .op-head .op-status{margin-left:0;flex-wrap:wrap;white-space:normal}
+  /* Todos os grids multi-coluna viram 1 coluna. */
+  .grid,.col.col-3,.vgrid,.vgrid.wide,.parts,.wgrid,.op-parts,.op-flow,.sig-wrap,.sec-list{grid-template-columns:1fr!important}
+  .stats{grid-template-columns:repeat(2,1fr)!important;gap:12px}
+  .op-steps{grid-template-columns:1fr 1fr!important;gap:14px}
+  .op-step .line{display:none}
+  .op-swap{display:none}
+  /* Cards e tiles mais compactos. */
+  .card{padding:14px}
+  .stat{padding:14px}.stat .sv{font-size:22px}
+  /* Formulário de configurações: rótulo + campo empilham; campo ocupa 100% (fim do min-width:220 que estourava). */
+  .form-row{flex-wrap:wrap;gap:10px}
+  .inp{min-width:0}
+  .form-row .inp{width:100%}
+  /* Tabelas: rolagem horizontal suave dentro do próprio bloco, células compactas e sem quebra. */
+  .tbl th,.tbl td{padding:9px 10px;font-size:12px;white-space:nowrap}
+  /* Modais ocupam quase a tela e rolam se altos. */
+  .modal{width:min(96vw,460px);padding:18px;max-height:88vh;overflow:auto}
+  /* Endereços/hashes longos não estouram. */
+  .addr,.addr2,.wa,.mono,.code-value{word-break:break-all}
+  /* Topbar enxuta. */
+  .topbar{gap:10px}
+  .wallet{padding:6px 10px}
+}
+@media (max-width:400px){
+  .stats{grid-template-columns:1fr!important}
+  .op-steps{grid-template-columns:1fr!important}
+  .wallet .wt{display:none} /* mostra só o endereço no chip da carteira */
+  .page-head h1{font-size:19px}
+}
 </style>
 </head>
 <body>
