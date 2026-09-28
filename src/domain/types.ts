@@ -146,7 +146,7 @@ export interface Deal {
   expiresAt: number;
   /** Papel cuja VEZ de assinar é agora (assinatura sequencial); null quando ninguém falta. */
   turnRole?: Role | null;
-  /** Prazo (epoch ms) da vez atual — janela rolante por assinante (48h). Reinicia a cada assinatura. */
+  /** Prazo (epoch ms) da vez atual — janela rolante por assinante (5 min). Reinicia a cada assinatura. */
   turnExpiresAt?: number | null;
   shareToken: string;
   onChain: Record<string, { registered: boolean; revision: number }>; // por cadeia de escrow

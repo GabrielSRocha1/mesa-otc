@@ -7,8 +7,8 @@ import { EventEmitter } from 'node:events';
 import { z } from 'zod';
 import { computeDealHash, newId, randomHex, sha256Hex, canonicalize, NETWORK_KEY_SCHEME, ROLE_ORDER, SIGNING_ORDER, PRE_SETTLING_EXPIRABLE, TERMINAL_STATES, type Deal, type DealState, type Environment, type Leg, type Participant, type Role, type Terms, type CanonicalAsset, type Network } from '../domain/types.js';
 
-/** Janela rolante por assinante: cada papel tem 48h QUANDO chega a vez dele. */
-const SIGNER_WINDOW_MS = 48 * 3600 * 1000;
+/** Janela rolante por assinante: cada papel tem 5 minutos QUANDO chega a vez dele. */
+const SIGNER_WINDOW_MS = 5 * 60 * 1000;
 import { DomainError } from '../domain/errors.js';
 import { assertTransition, CANCELLABLE_STATES } from '../domain/stateMachine.js';
 import { hexToBytes } from '@noble/hashes/utils.js';
@@ -37,7 +37,7 @@ export const CreateDealInput = z.object({
   commissionSplitBps: z.array(z.number().int().min(0).max(5000)).max(2).default([]),
   maxSlippageBps: z.number().int().min(1).max(1000).default(50),
   maxPriceDriftBps: z.number().int().min(10).max(1000).default(100),
-  expiresInSec: z.number().int().min(900).max(10 * 86400).default(3600), // até 10 dias: cobre a assinatura sequencial (Nº participantes × 48h)
+  expiresInSec: z.number().int().min(900).max(10 * 86400).default(3600), // até 10 dias: cobre a assinatura sequencial (Nº participantes × janela de 5 min)
   participants: z.array(z.object({ role: z.enum(['SELLER', 'BUYER', 'PAYMASTER_1', 'PAYMASTER_2']), network: z.enum(['bitcoin', 'ethereum', 'solana', 'zcash']), chainId: z.string().min(1), address: z.string().min(20).max(120) })).min(3).max(4)
 });
 export type CreateDealInputT = z.infer<typeof CreateDealInput>;
@@ -82,13 +82,13 @@ export class DealEngine {
   private hasSigned(deal: Deal, role: Role): boolean { return deal.signatures.some(s => s.role === role && s.revision === deal.revision && s.status === 'valid'); }
   /** Próximo papel que deve assinar (o primeiro da ordem ainda sem assinatura válida). */
   private nextTurn(deal: Deal): Role | null { return this.signingOrder(deal).find(r => !this.hasSigned(deal, r)) ?? null; }
-  /** (Re)inicia a vez: define o papel atual e reinicia a janela de 48h (limitada pelo teto global). */
+  /** (Re)inicia a vez: define o papel atual e reinicia a janela de 5 min (limitada pelo teto global). */
   private startTurn(deal: Deal): void {
     const next = this.nextTurn(deal);
     deal.turnRole = next;
     deal.turnExpiresAt = next ? Math.min(this.now() + SIGNER_WINDOW_MS, deal.expiresAt) : null;
   }
-  /** Vez atual expirou (assinante não assinou dentro das 48h dele)? */
+  /** Vez atual expirou (assinante não assinou dentro dos 5 min dele)? */
   private turnExpired(deal: Deal): boolean { return deal.state === 'AWAITING_SIGNATURES' && deal.turnExpiresAt != null && this.now() >= deal.turnExpiresAt; }
 
   /* ---------- 1. criação ---------- */
@@ -110,8 +110,8 @@ export class DealEngine {
     const isCreator = participants.some(p => p.address.toLowerCase() === actor.toLowerCase()); if (!isCreator) throw new DomainError('NOT_PARTICIPANT', 'O criador precisa ser um dos participantes');
     const t = this.now(); const id = newId('OTC');
     // A janela global (→ terms.expiresAt, que entra no hash) deve ser criada grande o
-    // suficiente p/ cobrir as assinaturas sequenciais (Nº participantes × 48h). O piso
-    // por-turno abaixo se adapta: cada vez recebe min(48h, tempo global restante).
+    // suficiente p/ cobrir as assinaturas sequenciais (Nº participantes × 5 min). O piso
+    // por-turno abaixo se adapta: cada vez recebe min(5 min, tempo global restante).
     const deal: Deal = { id, version: 1, state: 'DRAFT', revision: 1, terms: null, hash: null, draft: { assetIn, assetOut, amountInBase: input.amountInBase, discountBps: input.discountBps, commissionBps: input.commissionBps, commissionSplitBps: split, maxSlippageBps: input.maxSlippageBps, maxPriceDriftBps: input.maxPriceDriftBps, expiresInSec: input.expiresInSec, participants },
       participants: participants.map(p => ({ ...p, connected: p.address.toLowerCase() === actor.toLowerCase(), fundingRequired: p.role === 'SELLER' || p.role === 'BUYER', funding: p.role === 'SELLER' || p.role === 'BUYER' ? 'PENDING' : 'N/A', riskLevel: 'UNKNOWN' })),
       requiredSignatures: participants.length, validSignatures: 0, signatures: [], settlement: null, refunds: [], risk: null, createdBy: actor, createdAt: t, updatedAt: t, expiresAt: t + input.expiresInSec * 1000, turnRole: null, turnExpiresAt: null, shareToken: randomHex(32), onChain: {} };
@@ -208,16 +208,16 @@ export class DealEngine {
       const order = this.signingOrder(deal); const idx = order.indexOf(sig.role);
       const pending = order.slice(0, idx).filter(r => !this.hasSigned(deal, r));
       if (pending.length) { metrics.signaturesRejected.inc({ reason: 'out_of_order' }); throw new DomainError('SIGNATURE_OUT_OF_ORDER', `Aguardando assinatura de ${pending[0]} antes de ${sig.role}`); }
-      // JANELA POR ASSINANTE: se as 48h da vez atual estouraram (antes do teto global), a Deal expira.
+      // JANELA POR ASSINANTE: se os 5 min da vez atual estouraram (antes do teto global), a Deal expira.
       // Quando o teto global já venceu, deixa a validação lançar DEAL_EXPIRED (semântica de deal expirada).
-      if (this.now() < deal.expiresAt && this.turnExpired(deal)) { metrics.signaturesRejected.inc({ reason: 'turn_expired' }); await this.expireNow(deal, 'system'); throw new DomainError('SIGNATURE_EXPIRED', 'Prazo de 48h desta assinatura expirou'); }
+      if (this.now() < deal.expiresAt && this.turnExpired(deal)) { metrics.signaturesRejected.inc({ reason: 'turn_expired' }); await this.expireNow(deal, 'system'); throw new DomainError('SIGNATURE_EXPIRED', 'Prazo de 5 minutos desta assinatura expirou'); }
       let envelope: Envelope; try { envelope = await this.d.signature.validateApproval(deal, sig); } catch (e) { metrics.signaturesRejected.inc({ reason: (e as DomainError).code ?? 'invalid' }); if ((e as DomainError).code === 'DEAL_EXPIRED') await this.expireNow(deal, 'system'); throw e; }
       const consumed = await this.d.store.consumeNonce(sig.nonce, this.now()); if (!consumed) throw new DomainError('NONCE_INVALID', 'nonce já utilizado');
       const existing = deal.signatures.find(s => s.role === sig.role && s.revision === deal.revision && s.status === 'valid');
       if (existing) { await this.d.store.updateSignatureStatus(existing.id, 'replaced'); existing.status = 'replaced'; }
       const rec = { id: newId('SG'), dealId: deal.id, revision: deal.revision, role: sig.role, signer: p.address, scheme: sig.scheme, envelopeHash: sha256Hex(envelope.message), signedHash: envelope.payload.dealHash, signature: sig.signature, nonce: sig.nonce, receivedAt: this.now(), status: 'valid' as const };
       await this.d.store.insertSignature(rec); deal.signatures.push(rec); deal.validSignatures = deal.signatures.filter(s => s.revision === deal.revision && s.status === 'valid').length; metrics.signaturesAccepted.inc();
-      this.startTurn(deal); // avança a vez para o próximo papel e reinicia a janela de 48h (null quando todos assinaram)
+      this.startTurn(deal); // avança a vez para o próximo papel e reinicia a janela de 5 min (null quando todos assinaram)
       await this.persist(deal, 'signature.accepted', actor, { role: sig.role, count: deal.validSignatures, required: deal.requiredSignatures, turnRole: deal.turnRole, turnExpiresAt: deal.turnExpiresAt });
       if (deal.validSignatures === deal.requiredSignatures && deal.participants.every(x => !x.fundingRequired || x.funding === 'FINAL')) { await this.transition(deal, 'FULLY_SIGNED', 'system'); await this.transition(deal, 'SETTLEMENT_VALIDATION', 'system'); this.events.emit('settle', deal.id); }
       return { deal, count: deal.validSignatures };

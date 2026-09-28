@@ -123,11 +123,11 @@ describe('Signature Engine', () => {
     const r = await signAs(app, d.id, 'BUYER', parts.BUYER); expect(r.count).toBe(3); expect(r.state).toBe('SETTLEMENT_VALIDATION');
     expect((await app.deals.get(d.id)).turnRole).toBeNull(); await app.close();
   });
-  it('janela rolante de 48h por assinante: se o da vez não assina em 48h, a Deal expira (turno)', async () => {
+  it('janela rolante de 5 min por assinante: se o da vez não assina em 5 min, a Deal expira (turno)', async () => {
     const { app, clock } = await makeApp({ autoSettle: false }); const parts = solParts();
     const d = await prepareDeal(app, parts, { expiresInSec: 10 * 24 * 3600 }); await app.deals.open(d.id, parts.SELLER.address); // teto global folgado
-    const opened = await app.deals.get(d.id); expect(opened.turnRole).toBe('SELLER'); expect(opened.turnExpiresAt).toBe(clock.now() + 48 * 3600 * 1000);
-    clock.advance(48 * 3600 * 1000 + 1000); // Vendedor deixou passar as 48h dele
+    const opened = await app.deals.get(d.id); expect(opened.turnRole).toBe('SELLER'); expect(opened.turnExpiresAt).toBe(clock.now() + 5 * 60 * 1000);
+    clock.advance(5 * 60 * 1000 + 1000); // Vendedor deixou passar os 5 min dele
     expect(await app.deals.expireDue()).toContain(d.id); expect((await app.deals.get(d.id)).state).toBe('EXPIRED'); await app.close();
   });
   it('Deal alterada após assinaturas: assinaturas invalidadas (superseded), depósitos devolvidos, novo hash, nova revisão', async () => {
