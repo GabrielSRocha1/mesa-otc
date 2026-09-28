@@ -1129,13 +1129,12 @@ svg{display:block}
   // Troque o domínio se o app web estiver noutro subdomínio (app./swap.).
   const VERUM_WALLET_URL='https://www.verumcrypto.com/wallet';
   // ── Mobile sem extensão: abrir ESTA dApp dentro do navegador da Verum Wallet ──
-  // No celular não há extensão, mas o app/PWA da Verum tem navegador dApp que injeta
-  // window.verum. Enviamos o usuário para lá apontando para a URL atual (ex.: /mesa),
-  // e a conexão acontece dentro da Verum. AJUSTE `verumDeepLink` ao esquema oficial da
-  // Verum Wallet caso seja diferente (é o único ponto a mudar).
+  // No celular não há extensão, mas o app da Verum tem navegador dApp (injeta window.verum).
+  // Esquema OFICIAL da Verum Wallet (app/_layout.tsx): verumwallet://browse?url=<enc>&name=<enc>
+  // → o app abre /dapp-browser com a URL. Apontamos para a URL atual (ex.: /mesa).
   const IS_MOBILE=/android|iphone|ipad|ipod|mobile/i.test(navigator.userAgent||'');
   function verumDappUrl(){ return location.origin+location.pathname; } // ex.: https://otcdesk.verumcrypto.com/mesa
-  function verumDeepLink(){ return 'https://www.verumcrypto.com/dapp?url='+encodeURIComponent(verumDappUrl()); }
+  function verumDeepLink(){ return 'verumwallet://browse?url='+encodeURIComponent(verumDappUrl())+'&name='+encodeURIComponent('VERUM OTC'); }
   function openInVerumBrowser(){ try{ window.location.href=verumDeepLink(); }catch(e){ window.open(VERUM_WALLET_URL,'_blank','noopener'); } }
   function connectControls(cfg){
     // Conexão via Verum (Solana por baixo). O dropdown escolhe qual rede fica como
