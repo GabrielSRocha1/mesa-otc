@@ -40,7 +40,20 @@ export type MesaRole = 'SELLER' | 'BUYER' | 'PAYMASTER_2';
 /** Convite por papel: link portador que permite ao dono conectar a própria carteira sem login do PM. */
 export interface MesaInvite { token: string; payMasterId: string; role: MesaRole; network: string; label?: string; status: 'pending' | 'confirmed'; wallet: WalletLink | null; createdAt: number; expiresAt: number }
 
-interface PortalData { seq: number; payMasters: Record<string, PayMaster>; sessions: Record<string, PortalSession>; codes: Record<string, MesaCode>; invites: Record<string, MesaInvite> }
+export interface PortalData { seq: number; payMasters: Record<string, PayMaster>; sessions: Record<string, PortalSession>; codes: Record<string, MesaCode>; invites: Record<string, MesaInvite> }
+export function emptyPortalData(): PortalData { return { seq: 0, payMasters: {}, sessions: {}, codes: {}, invites: {} }; }
+
+/**
+ * Backend de persistência do portal. `file` (dev, síncrono) ou `postgres` (Supabase). No serverless
+ * o estado NÃO pode viver em memória/arquivo por-instância; o backend postgres é hidratado por
+ * request e persistido após mutações — assim a sessão sobrevive entre invocações.
+ */
+export interface PortalPersistence {
+  initial(): PortalData | null;          // dados síncronos no boot (file) ou null (postgres → hydrate async)
+  hydrate(): Promise<PortalData | null>; // carga assíncrona (postgres: SELECT; file: lê o arquivo)
+  save(data: PortalData): void;          // dispara persistência (postgres: async fire-and-forget rastreado)
+  flush(): Promise<void>;                // aguarda a última escrita pendente (no-op no file)
+}
 
 export interface SafePayMaster { id: string; name: string; email: string; org: string; role: 'Pay Master 1'; createdAt: number }
 /** Visão de segurança exposta ao painel (nunca inclui o segredo TOTP). */
@@ -61,25 +74,40 @@ const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
 export class PortalService {
   private data: PortalData;
-  constructor(private readonly opts: { file: string; sessionTtlMs?: number; now?: () => number }) {
-    this.data = this.read();
+  private readonly persistence?: PortalPersistence;
+  // `file` é opcional quando um `persistence` (ex.: postgres) é fornecido.
+  constructor(private readonly opts: { file?: string; sessionTtlMs?: number; now?: () => number; persistence?: PortalPersistence }) {
+    this.persistence = opts.persistence;
+    this.data = this.persistence ? (this.persistence.initial() ?? emptyPortalData()) : this.read();
   }
   private now(): number { return (this.opts.now ?? Date.now)(); }
   private sessionTtl(): number { return this.opts.sessionTtlMs ?? 24 * HOUR; }
 
+  /** Recarrega o estado do backend (postgres). Chamado por request no serverless p/ ver escritas de outras instâncias. No-op sem persistence async. */
+  async hydrate(): Promise<void> {
+    if (!this.persistence) return;
+    const d = await this.persistence.hydrate();
+    if (d) this.data = { seq: d.seq ?? 0, payMasters: d.payMasters ?? {}, sessions: d.sessions ?? {}, codes: d.codes ?? {}, invites: d.invites ?? {} };
+  }
+  /** Aguarda a última escrita pendente ser persistida (usado após mutações no serverless). */
+  async flush(): Promise<void> { if (this.persistence) await this.persistence.flush(); }
+
   private read(): PortalData {
+    const file = this.opts.file;
     try {
-      if (existsSync(this.opts.file)) {
-        const raw = JSON.parse(readFileSync(this.opts.file, 'utf8')) as Partial<PortalData>;
+      if (file && existsSync(file)) {
+        const raw = JSON.parse(readFileSync(file, 'utf8')) as Partial<PortalData>;
         return { seq: raw.seq ?? 0, payMasters: raw.payMasters ?? {}, sessions: raw.sessions ?? {}, codes: raw.codes ?? {}, invites: raw.invites ?? {} };
       }
     } catch { /* arquivo corrompido/ausente → começa vazio */ }
-    return { seq: 0, payMasters: {}, sessions: {}, codes: {}, invites: {} };
+    return emptyPortalData();
   }
   private write(): void {
-    const dir = path.dirname(this.opts.file);
+    if (this.persistence) { this.persistence.save(this.data); return; }
+    const file = this.opts.file; if (!file) return;
+    const dir = path.dirname(file);
     if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
-    writeFileSync(this.opts.file, JSON.stringify(this.data, null, 2), 'utf8');
+    writeFileSync(file, JSON.stringify(this.data, null, 2), 'utf8');
   }
 
   private hash(password: string, salt: string): string { return scryptSync(password, salt, 32).toString('hex'); }

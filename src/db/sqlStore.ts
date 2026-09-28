@@ -81,3 +81,28 @@ export async function createPgliteClient(dataDir?: string): Promise<SqlClient> {
     async close(): Promise<void> { await db.close(); }
   };
 }
+
+/**
+ * Cliente Postgres (node-postgres) — produção/Supabase. Usa a connection string do POOLER do
+ * Supabase (porta 6543, adequada a serverless) e SSL. Especificador não-literal p/ manter o `pg`
+ * fora do bundle quando não usado. Um Pool lazy por processo (reutilizado entre invocações quentes).
+ */
+export async function createPgClient(connectionString: string): Promise<SqlClient> {
+  const pkg = 'pg';
+  const pg = (await import(pkg)) as typeof import('pg');
+  const Pool = pg.Pool ?? (pg as unknown as { default: typeof import('pg') }).default.Pool;
+  const pool = new Pool({
+    connectionString,
+    // Supabase exige TLS; o pooler usa cert gerenciado (não verificamos a cadeia no cliente).
+    ssl: { rejectUnauthorized: false },
+    max: 3,
+    idleTimeoutMillis: 10_000,
+    connectionTimeoutMillis: 10_000,
+  });
+  return {
+    async query<T>(sql: string, params: unknown[] = []): Promise<{ rows: T[] }> { const r = await pool.query(sql, params as unknown[]); return { rows: r.rows as T[] }; },
+    // pg não tem "exec multi-statement" com params; as migrações são scripts sem params.
+    async exec(sql: string): Promise<void> { await pool.query(sql); },
+    async close(): Promise<void> { await pool.end(); },
+  };
+}

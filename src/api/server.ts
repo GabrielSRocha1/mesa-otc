@@ -74,6 +74,11 @@ export async function buildApi(deps: ApiDeps): Promise<FastifyInstance> {
     const key = `${req.session?.sub ?? req.ip}:${req.routeOptions.url ?? req.url}`;
     if (!bucket.take(key, Date.now())) { await reply.code(429).send({ error: 'RATE_LIMITED', message: 'Muitas requisições. Tente novamente em instantes.' }); }
   });
+  // Persistência do portal no serverless: hidrata o estado do backend (postgres) por request de
+  // portal (vê escritas de outras instâncias) e, após mutações, persiste antes de responder.
+  const isPortalPath = (u: string): boolean => u.startsWith('/v1/portal');
+  app.addHook('onRequest', async req => { if (isPortalPath(req.routeOptions.url ?? req.url)) await deps.portal.hydrate(); });
+  app.addHook('onSend', async (req, _reply, payload) => { const m = req.method; if ((m === 'POST' || m === 'PUT' || m === 'PATCH') && isPortalPath(req.routeOptions.url ?? req.url)) await deps.portal.flush(); return payload; });
   app.addHook('onResponse', async (req, reply) => { const route = req.routeOptions.url ?? 'unmatched'; metrics.httpRequests.inc({ route, status: String(reply.statusCode) }); metrics.httpSeconds.observe({ route }, reply.elapsedTime / 1000); if (reply.statusCode >= 500) logger.error({ rid: reply.getHeader('x-request-id'), route, status: reply.statusCode }, 'http 5xx'); });
   app.setErrorHandler((err, _req, reply) => {
     if (err instanceof DomainError) { void reply.code(HTTP_STATUS[err.code]).send({ error: err.code, message: err.message, details: err.details ?? null }); return; }

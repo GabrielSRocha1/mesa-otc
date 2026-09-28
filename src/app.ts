@@ -3,7 +3,7 @@
  * (LocalChainAdapter) e fontes estáticas; nunca conecta a fundos reais. Adaptadores reais entram por injeção (`overrides`).
  */
 import { MemoryStore } from './db/memoryStore.js';
-import { SqlStore, createPgliteClient } from './db/sqlStore.js';
+import { SqlStore, createPgliteClient, createPgClient, type SqlClient } from './db/sqlStore.js';
 import type { Store } from './db/repository.js';
 import { AdapterRegistry, type ApprovalVerifier, type SettlementAdapter } from './adapters/types.js';
 import { createLocalAdapters, type LocalChainAdapter } from './adapters/local.js';
@@ -18,6 +18,7 @@ import { SettlementEngine } from './engines/settlement.js';
 import { AuditLog } from './audit/audit.js';
 import { WalletAuth } from './wallet/auth.js';
 import { PortalService } from './portal/portal.js';
+import { PostgresPortalPersistence } from './portal/pgPortal.js';
 import { FieldCrypto, deriveDevKeys } from './identity/crypto.js';
 import { OtpManager, FakeEmailChannel, FakeSmsChannel, type OtpChannel } from './identity/otp.js';
 import { InMemoryIdentityStore } from './identity/store.js';
@@ -42,7 +43,13 @@ const LOCAL_DEPTH: Record<string, number> = Object.fromEntries(Object.keys(LOCAL
 export async function createApp(config: Config, o: AppOverrides = {}): Promise<App> {
   const now = o.now ?? (() => Date.now());
   let store: Store;
-  if (o.store) store = o.store; else if (config.DATABASE_MODE === 'pglite') store = new SqlStore(await createPgliteClient(config.PGLITE_DIR)); else if (config.DATABASE_MODE === 'postgres') throw new Error('DATABASE_MODE=postgres: forneça um SqlClient node-postgres via overrides.store'); else store = new MemoryStore();
+  // Cliente SQL compartilhado (deals + portal) quando em pglite/postgres. Em postgres (Supabase)
+  // usamos a connection string do pooler; guardamos o cliente p/ o PortalService persistir junto.
+  let sqlClient: SqlClient | undefined;
+  if (o.store) { store = o.store; }
+  else if (config.DATABASE_MODE === 'pglite') { sqlClient = await createPgliteClient(config.PGLITE_DIR); store = new SqlStore(sqlClient); }
+  else if (config.DATABASE_MODE === 'postgres') { if (!config.DATABASE_URL) throw new Error('DATABASE_MODE=postgres exige DATABASE_URL'); sqlClient = await createPgClient(config.DATABASE_URL); store = new SqlStore(sqlClient); }
+  else { store = new MemoryStore(); }
   await store.init();
   const audit = new AuditLog(store, now);
   const adapters = new AdapterRegistry();
@@ -75,7 +82,11 @@ export async function createApp(config: Config, o: AppOverrides = {}): Promise<A
   const settlement = new SettlementEngine({ store, adapters, price, router, risk, signature, registry, audit, now, execMarginMs: config.EXEC_MARGIN_MS }, deals.mutator());
   if (o.autoSettle !== false) deals.events.on('settle', (id: string) => { void settlement.settle(id, 'keeper').catch(e => logger.warn({ dealId: id, code: (e as { code?: string }).code, err: (e as Error).message }, 'liquidação automática rejeitada')); });
   const auth = new WalletAuth(store, adapters, { env: config.OTC_ENV, sessionSecret: config.sessionSecret, sessionTtlMs: config.SESSION_TTL_MS, challengeTtlMs: 5 * 60_000, operators: config.operators, appDomain: config.APP_DOMAIN }, now);
-  const portal = new PortalService({ file: config.PORTAL_DATA_FILE, sessionTtlMs: 24 * 3600_000, now });
+  // Persistência do portal: postgres/Supabase quando há cliente SQL (sessão sobrevive ao serverless);
+  // senão arquivo local (dev). Hidrata o estado inicial antes de servir requisições.
+  const portalPersistence = sqlClient ? new PostgresPortalPersistence(sqlClient, now) : undefined;
+  const portal = new PortalService({ file: config.PORTAL_DATA_FILE, sessionTtlMs: 24 * 3600_000, now, persistence: portalPersistence });
+  if (portalPersistence) await portal.hydrate();
   // Identidade mínima (§2). Canais de OTP: fakes locais em dev/teste; adaptadores reais (SES/SNS/Twilio)
   // entram por injeção em produção. O `devOutbox` só é exposto quando OTC_ENV=dev.
   const identityCrypto = new FieldCrypto(deriveDevKeys(config.identityMasterSecret));

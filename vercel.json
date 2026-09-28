@@ -5,7 +5,7 @@
   "outputDirectory": "public",
   "functions": {
     "api/index.js": {
-      "includeFiles": "web/**",
+      "includeFiles": "{web/**,db/migrations/**}",
       "maxDuration": 30
     }
   },
