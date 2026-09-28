@@ -70,7 +70,10 @@ export class SqlStore implements Store {
 
 /** Cliente PGlite (PostgreSQL em WASM) — desenvolvimento e testes. Em produção: mesma interface sobre node-postgres. */
 export async function createPgliteClient(dataDir?: string): Promise<SqlClient> {
-  const { PGlite } = await import('@electric-sql/pglite');
+  // Especificador não-literal de propósito: mantém o PGlite (WASM) FORA do bundle serverless
+  // (Vercel). Só é carregado quando DATABASE_MODE=pglite — nunca no modo memory (default serverless).
+  const pkg = '@electric-sql/pglite';
+  const { PGlite } = (await import(pkg)) as typeof import('@electric-sql/pglite');
   const db = dataDir ? new PGlite(dataDir) : new PGlite();
   return {
     async query<T>(sql: string, params: unknown[] = []): Promise<{ rows: T[] }> { const r = await db.query<T>(sql, params); return { rows: r.rows }; },
