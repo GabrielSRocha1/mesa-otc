@@ -525,6 +525,13 @@ form{margin-top:26px;display:grid;gap:15px}
   // A OTC conecta só à Verum Wallet, por UM botão. A prova de posse é Solana
   // (window.verum) e o getAddresses() expõe os endereços das demais redes.
   const VERUM_WALLET_URL='https://www.verumcrypto.com/wallet';
+  // Mobile sem extensão: abrir ESTA página dentro do navegador da Verum Wallet (injeta window.verum).
+  // Esquema oficial da Verum: verumwallet://browse?url=<enc>&name=<enc> (abre /dapp-browser no app).
+  const IS_MOBILE=/android|iphone|ipad|ipod|mobile/i.test(navigator.userAgent||'');
+  function hasInjectedWallet(){ const w=window; return !!(w.verum||w.solana||w.ethereum); }
+  function verumDappUrl(){ return location.origin+location.pathname; }
+  function verumDeepLink(){ return 'verumwallet://browse?url='+encodeURIComponent(verumDappUrl())+'&name='+encodeURIComponent('VERUM OTC'); }
+  function openInVerumBrowser(){ try{ window.location.href=verumDeepLink(); }catch(e){ window.open(VERUM_WALLET_URL,'_blank','noopener'); } }
   const walletErr = (msg,code) => { const e=new Error(msg); e.code=code; return e; };
   function solProvider(){
     const w=window;
@@ -681,6 +688,9 @@ form{margin-top:26px;display:grid;gap:15px}
   }
 
   $('#btnConnect').addEventListener('click',async ()=>{
+    // Mobile sem carteira injetada → abre no navegador da Verum Wallet. SÍNCRONO no clique:
+    // navegadores mobile bloqueiam navegação p/ esquema de app se ocorrer após um await.
+    if(IS_MOBILE && !hasInjectedWallet()){ toast('Abrindo no navegador da Verum Wallet…','info'); openInVerumBrowser(); return; }
     const b=$('#btnConnect'); b.disabled=true; const prev=b.innerHTML; b.textContent='Conectando…';
     try{
       // Prova de posse via Solana (window.verum) e captura das demais redes.
