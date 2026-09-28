@@ -27,7 +27,17 @@ let appPromise;
 function boot() { if (!appPromise) appPromise = createApp(loadConfig()); return appPromise; }
 
 export default async function handler(req, res) {
-  const app = await boot();
-  await app.api.ready();
-  app.api.server.emit('request', req, res);
+  try {
+    const app = await boot();
+    await app.api.ready();
+    app.api.server.emit('request', req, res);
+  } catch (err) {
+    // Diagnóstico: superfície o erro de inicialização (em vez de uma página genérica do Vercel).
+    // Permite novo boot na próxima requisição caso a causa seja transitória/corrigida por env.
+    appPromise = undefined;
+    const e = /** @type {Error} */ (err);
+    res.statusCode = 500;
+    res.setHeader('content-type', 'application/json; charset=utf-8');
+    res.end(JSON.stringify({ error: 'BOOT_FAILED', message: String((e && e.message) || e), reqUrl: req.url, stack: String((e && e.stack) || '').split('\n').slice(0, 8) }));
+  }
 }
