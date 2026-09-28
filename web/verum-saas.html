@@ -525,20 +525,16 @@ form{margin-top:26px;display:grid;gap:15px}
   // A OTC conecta só à Verum Wallet, por UM botão. A prova de posse é Solana
   // (window.verum) e o getAddresses() expõe os endereços das demais redes.
   const VERUM_WALLET_URL='https://www.verumcrypto.com/wallet';
-  // Mobile sem extensão: abrir ESTA página dentro do navegador da Verum Wallet (injeta window.verum).
-  // Esquema oficial da Verum: verumwallet://browse?url=<enc>&name=<enc> (abre /dapp-browser no app).
+  // No celular (sem extensão/ window.verum) abrimos o NAVEGADOR dApp da Verum já carregando o
+  // próprio OTC — o site roda DENTRO da Verum (onde window.verum existe) e conecta lá, igual ao
+  // Verum Vesting. Rota HTTPS do PWA da Verum: /dapp-browser?url=<enc do OTC>.
   const IS_MOBILE=/android|iphone|ipad|ipod|mobile/i.test(navigator.userAgent||'');
   function hasInjectedWallet(){ const w=window; return !!(w.verum||w.solana||w.ethereum); }
+  const VERUM_DAPP_BROWSER='https://www.verumcrypto.com/dapp-browser';
   function verumDappUrl(){ return location.origin+location.pathname; }
-  function verumSchemeLink(){ return 'verumwallet://browse?url='+encodeURIComponent(verumDappUrl())+'&name='+encodeURIComponent('VERUM OTC'); }
-  // Android Chrome ignora esquema custom via location.href → exige intent:// (com package + fallback).
-  function verumIntentLink(){ const q='url='+encodeURIComponent(verumDappUrl())+'&name='+encodeURIComponent('VERUM OTC'); return 'intent://browse?'+q+'#Intent;scheme=verumwallet;package=com.verumcrypto.wallet;S.browser_fallback_url='+encodeURIComponent(VERUM_WALLET_URL)+';end'; }
   function openInVerumBrowser(){
-    const ua=navigator.userAgent||'';
-    if(/android/i.test(ua)){ window.location.href=verumIntentLink(); return; }
-    const t=setTimeout(function(){ if(!document.hidden){ try{ window.location.href=VERUM_WALLET_URL; }catch(e){} } },1600);
-    try{ window.addEventListener('pagehide',function(){ clearTimeout(t); },{once:true}); }catch(e){}
-    try{ window.location.href=verumSchemeLink(); }catch(e){ clearTimeout(t); window.open(VERUM_WALLET_URL,'_blank','noopener'); }
+    const url=VERUM_DAPP_BROWSER+'?url='+encodeURIComponent(verumDappUrl())+'&name='+encodeURIComponent('VERUM OTC');
+    window.location.href=url; // leva o usuário à Verum com o OTC aberto no navegador dela
   }
   const walletErr = (msg,code) => { const e=new Error(msg); e.code=code; return e; };
   function solProvider(){
