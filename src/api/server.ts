@@ -320,11 +320,17 @@ export async function buildApi(deps: ApiDeps): Promise<FastifyInstance> {
   /* ---------- UI (HTML autocontido) ---------- */
   // HTML autocontido servido sem cache: garante que toda alteração de UI apareça no próximo reload (sem hard-refresh manual).
   const sendHtml = (reply: FastifyReply, html: string): FastifyReply => reply.type('text/html; charset=utf-8').header('cache-control', 'no-store, must-revalidate').send(html);
-  // As páginas recebem as tags PWA (manifest/ícones) e o registro do service worker.
-  const prepHtml = (path: string): string => injectPwa(readFileSync(path, 'utf8').replace('<meta name="verum-otc-api" content="">', `<meta name="verum-otc-api" content="/">`));
+  // As páginas recebem as tags PWA (manifest/ícones), o registro do SW e o provider da Verum
+  // (window.verum p/ quando o OTC roda DENTRO do navegador dApp da Verum — via iframe/postMessage).
+  const dirOf = (p: string): string => p.replace(/[\\/][^\\/]*$/, '');
+  const prepHtml = (path: string): string => injectPwa(readFileSync(path, 'utf8').replace('<meta name="verum-otc-api" content="">', `<meta name="verum-otc-api" content="/">`)).replace('</head>', '<script src="/verum-provider.js"></script></head>');
   if (deps.mesaHtmlPath) { const mesa = prepHtml(deps.mesaHtmlPath); for (const p of ['/mesa', '/operacao']) app.get(p, async (_req, reply) => sendHtml(reply, mesa)); }
   if (deps.portalHtmlPath) { const portalHtml = prepHtml(deps.portalHtmlPath); for (const p of ['/portal', '/cadastro', '/login']) app.get(p, async (_req, reply) => sendHtml(reply, portalHtml)); }
   if (deps.conviteHtmlPath) { const convite = prepHtml(deps.conviteHtmlPath); for (const p of ['/convite', '/convite/:token', '/invite', '/invite/:token']) app.get(p, async (_req, reply) => sendHtml(reply, convite)); }
+  // Provider da Verum (window.verum) — só ativa quando embutido no iframe do navegador dApp da Verum.
+  // Same-origin (CSP script-src 'self'). Lido do mesmo diretório dos HTML.
+  const webDir = deps.mesaHtmlPath ? dirOf(deps.mesaHtmlPath) : deps.portalHtmlPath ? dirOf(deps.portalHtmlPath) : deps.conviteHtmlPath ? dirOf(deps.conviteHtmlPath) : null;
+  if (webDir) { let providerJs = ''; try { providerJs = readFileSync(`${webDir}/verum-provider.js`, 'utf8'); } catch { /* ausente */ } app.get('/verum-provider.js', async (_req, reply) => reply.type('text/javascript; charset=utf-8').header('cache-control', 'public, max-age=3600').send(providerJs)); }
   // A raiz encaminha para a entrada do portal (login/cadastro exigido antes da mesa).
   app.get('/', async (_req, reply) => reply.redirect('/portal'));
 
