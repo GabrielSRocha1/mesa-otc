@@ -65,8 +65,11 @@ export async function buildApi(deps: ApiDeps): Promise<FastifyInstance> {
 
   app.addHook('onRequest', async (req, reply) => {
     const rid = typeof req.headers['x-request-id'] === 'string' && /^[\w.-]{8,64}$/.test(req.headers['x-request-id']) ? req.headers['x-request-id'] : randomUUID(); void reply.header('x-request-id', rid);
-    void reply.header('x-content-type-options', 'nosniff'); void reply.header('x-frame-options', 'DENY'); void reply.header('referrer-policy', 'no-referrer'); void reply.header('cache-control', 'no-store'); void reply.header('strict-transport-security', 'max-age=63072000; includeSubDomains'); void reply.header('permissions-policy', 'camera=(), microphone=(), geolocation=()');
-    if (!(req.routeOptions.url ?? req.url).startsWith('/v1/ws')) void reply.header('content-security-policy', "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; connect-src 'self'; img-src 'self' data:; frame-ancestors 'none'; base-uri 'none'; form-action 'none'");
+    // O OTC precisa rodar DENTRO do navegador dApp da Verum (iframe) → permitimos enquadramento
+    // apenas pelas origens da Verum. Não enviamos X-Frame-Options (não faz allowlist por origem e
+    // sobreporia o CSP); o controle fica no `frame-ancestors` do CSP abaixo.
+    void reply.header('x-content-type-options', 'nosniff'); void reply.header('referrer-policy', 'no-referrer'); void reply.header('cache-control', 'no-store'); void reply.header('strict-transport-security', 'max-age=63072000; includeSubDomains'); void reply.header('permissions-policy', 'camera=(), microphone=(), geolocation=()');
+    if (!(req.routeOptions.url ?? req.url).startsWith('/v1/ws')) void reply.header('content-security-policy', "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; connect-src 'self'; img-src 'self' data:; frame-ancestors 'self' https://verumcrypto.com https://*.verumcrypto.com; base-uri 'none'; form-action 'none'");
     req.session = deps.auth.parse((req.headers.authorization ?? '').replace(/^Bearer\s+/i, '') || undefined);
     const key = `${req.session?.sub ?? req.ip}:${req.routeOptions.url ?? req.url}`;
     if (!bucket.take(key, Date.now())) { await reply.code(429).send({ error: 'RATE_LIMITED', message: 'Muitas requisições. Tente novamente em instantes.' }); }

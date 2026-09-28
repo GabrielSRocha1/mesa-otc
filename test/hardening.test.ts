@@ -86,7 +86,7 @@ describe('5 · Price Engine — disjuntor, obsolescência, fonte única', () => 
 describe('2 · Segurança — cabeçalhos, request-id, nonce vinculado à carteira, HTLC consistente', () => {
   it('respostas carregam cabeçalhos de segurança e x-request-id; CSP presente', async () => {
     const { app } = await makeApp(); const r = await app.api.inject({ method: 'GET', url: '/health', headers: { 'x-request-id': 'req-abc-12345' } });
-    expect(r.headers['x-request-id']).toBe('req-abc-12345'); expect(r.headers['x-content-type-options']).toBe('nosniff'); expect(r.headers['x-frame-options']).toBe('DENY'); expect(String(r.headers['content-security-policy'])).toContain("frame-ancestors 'none'"); expect(r.headers['cache-control']).toBe('no-store');
+    expect(r.headers['x-request-id']).toBe('req-abc-12345'); expect(r.headers['x-content-type-options']).toBe('nosniff'); expect(r.headers['x-frame-options']).toBeUndefined(); expect(String(r.headers['content-security-policy'])).toContain("frame-ancestors 'self' https://verumcrypto.com https://*.verumcrypto.com"); expect(r.headers['cache-control']).toBe('no-store');
     const r2 = await app.api.inject({ method: 'GET', url: '/health', headers: { 'x-request-id': '<script>' } }); expect(String(r2.headers['x-request-id'])).toMatch(/^[0-9a-f-]{36}$/); await app.close();
   });
   it('desafio de login emitido para A não pode ser consumido por B', async () => {
