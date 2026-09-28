@@ -530,8 +530,16 @@ form{margin-top:26px;display:grid;gap:15px}
   const IS_MOBILE=/android|iphone|ipad|ipod|mobile/i.test(navigator.userAgent||'');
   function hasInjectedWallet(){ const w=window; return !!(w.verum||w.solana||w.ethereum); }
   function verumDappUrl(){ return location.origin+location.pathname; }
-  function verumDeepLink(){ return 'verumwallet://browse?url='+encodeURIComponent(verumDappUrl())+'&name='+encodeURIComponent('VERUM OTC'); }
-  function openInVerumBrowser(){ try{ window.location.href=verumDeepLink(); }catch(e){ window.open(VERUM_WALLET_URL,'_blank','noopener'); } }
+  function verumSchemeLink(){ return 'verumwallet://browse?url='+encodeURIComponent(verumDappUrl())+'&name='+encodeURIComponent('VERUM OTC'); }
+  // Android Chrome ignora esquema custom via location.href → exige intent:// (com package + fallback).
+  function verumIntentLink(){ const q='url='+encodeURIComponent(verumDappUrl())+'&name='+encodeURIComponent('VERUM OTC'); return 'intent://browse?'+q+'#Intent;scheme=verumwallet;package=com.verumcrypto.wallet;S.browser_fallback_url='+encodeURIComponent(VERUM_WALLET_URL)+';end'; }
+  function openInVerumBrowser(){
+    const ua=navigator.userAgent||'';
+    if(/android/i.test(ua)){ window.location.href=verumIntentLink(); return; }
+    const t=setTimeout(function(){ if(!document.hidden){ try{ window.location.href=VERUM_WALLET_URL; }catch(e){} } },1600);
+    try{ window.addEventListener('pagehide',function(){ clearTimeout(t); },{once:true}); }catch(e){}
+    try{ window.location.href=verumSchemeLink(); }catch(e){ clearTimeout(t); window.open(VERUM_WALLET_URL,'_blank','noopener'); }
+  }
   const walletErr = (msg,code) => { const e=new Error(msg); e.code=code; return e; };
   function solProvider(){
     const w=window;
