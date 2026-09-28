@@ -868,14 +868,15 @@ img,svg,canvas,video{max-width:100%}
               <div><div class="st" style="font-family:var(--f-head);font-weight:700;font-size:16px">Assinaturas Multisig</div><div class="ss" style="font-size:12px;color:var(--ink-3)">Assinatura sequencial: Vendedor → Pay Master 1 → Pay Master 2 → Comprador. Cada participante tem 5 minutos na sua vez.</div></div>
               <div class="op-ms-prog"><span id="opSigTxt" style="font-size:12px;color:var(--ink-2)">— assinaturas</span><div class="op-bar"><span id="opSigBar" style="width:0%"></span></div><b id="opSigPct" style="font-size:12.5px">0%</b></div>
             </div>
-            <div style="display:flex;align-items:center;gap:12px;margin:2px 0 14px;padding:11px 13px;border:1px solid var(--line);border-radius:11px;background:var(--bg-2)">
+            <div style="display:flex;flex-wrap:wrap;align-items:center;gap:12px;margin:2px 0 14px;padding:11px 13px;border:1px solid var(--line);border-radius:11px;background:var(--bg-2)">
               <div style="flex:1;font-size:12.5px;color:var(--ink-3)" id="opDealStatus">Nenhuma operação ativa na mesa. Conecte as 4 carteiras e inicie.</div>
               <button class="btn btn-primary" id="opStartDeal" type="button" style="height:38px"><svg viewBox="0 0 24 24"><path d="M4 12h13M11 6l6 6-6 6"/></svg>Iniciar operação</button>
               <button class="btn btn-primary" id="opSignTurn" type="button" style="height:38px;display:none"><svg viewBox="0 0 24 24"><path d="M4 20h4l10-10-4-4L4 16v4z"/><path d="M13.5 6.5l4 4"/></svg>Assinar minha vez</button>
+              <button class="btn" id="opNewDeal" type="button" style="height:38px;display:none"><svg viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg>Criar nova operação</button>
             </div>
             <div class="op-steps" id="opSteps">
               <div class="op-step done"><div class="line"></div><div class="dot"><svg viewBox="0 0 24 24"><path d="M5 13l4 4L19 7"/></svg></div><div class="nm">Vendedor</div><div class="meta">Assinado em 12/05/2025 14:21</div><div class="addr2">bc1qxy2kg…9f3a</div></div>
-              <div class="op-step turn"><div class="line"></div><div class="dot"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 8v4l2 2"/></svg></div><div class="nm">Pay Master 1</div><div class="meta">Sua vez de assinar</div><div class="op-turn-chip"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 8v4l2 2"/></svg>47h58m restantes</div><div class="addr2">0x82a…A91F</div></div>
+              <div class="op-step turn"><div class="line"></div><div class="dot"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 8v4l2 2"/></svg></div><div class="nm">Pay Master 1</div><div class="meta">Sua vez de assinar</div><div class="op-turn-chip"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 8v4l2 2"/></svg>4m58s restantes</div><div class="addr2">0x82a…A91F</div></div>
               <div class="op-step lock"><div class="line"></div><div class="dot"><svg viewBox="0 0 24 24"><rect x="5" y="11" width="14" height="9" rx="2"/><path d="M8 11V8a4 4 0 018 0v3"/></svg></div><div class="nm">Pay Master 2</div><div class="meta">Aguardando Pay Master 1</div><div class="addr2">9H2q…P81D</div></div>
               <div class="op-step lock"><div class="line"></div><div class="dot"><svg viewBox="0 0 24 24"><rect x="5" y="11" width="14" height="9" rx="2"/><path d="M8 11V8a4 4 0 018 0v3"/></svg></div><div class="nm">Comprador</div><div class="meta">Aguardando Pay Master 2</div><div class="addr2">7xK9…91Ac</div></div>
             </div>
@@ -1609,6 +1610,12 @@ img,svg,canvas,video{max-width:100%}
     });
     const sd=$('#opStartDeal'); if(sd) sd.addEventListener('click',startMesaDeal);
     const sg=$('#opSignTurn'); if(sg) sg.addEventListener('click',signTurn);
+    // Criar nova operação com uma deal em andamento: confirma e substitui (o POST /mesa/deal sempre cria outra).
+    const nd=$('#opNewDeal'); if(nd) nd.addEventListener('click',async()=>{
+      const d=opDeal;
+      if(d&&d.state==='AWAITING_SIGNATURES'&&!confirm('Criar uma nova operação? A operação atual ('+d.id+') será abandonada e substituída.')) return;
+      nd.disabled=true; try{ await startMesaDeal(); } finally{ nd.disabled=false; }
+    });
     refreshMesaDeal(); // liga a esteira a uma deal já existente da mesa, se houver
     await opUpdateSellerCap();
     opRecalc();
@@ -1700,7 +1707,7 @@ img,svg,canvas,video{max-width:100%}
   let opDeal=null, opDealTimer=null, opTurnTimer=null;
   const OP_STEP_LABEL={SELLER:'Vendedor',PAYMASTER_1:'Pay Master 1',PAYMASTER_2:'Pay Master 2',BUYER:'Comprador'};
   const OP_SIGN_ORDER=['SELLER','PAYMASTER_1','PAYMASTER_2','BUYER'];
-  function fmtCountdown(exp){ const ms=Math.max(0,exp-Date.now()); const h=Math.floor(ms/3600000), m=Math.floor(ms%3600000/60000); return h+'h'+('0'+m).slice(-2)+'m restantes'; }
+  function fmtCountdown(exp){ const ms=Math.max(0,exp-Date.now()); if(ms>=3600000){ const h=Math.floor(ms/3600000), m=Math.floor(ms%3600000/60000); return h+'h'+('0'+m).slice(-2)+'m restantes'; } const m=Math.floor(ms/60000), s=Math.floor(ms%60000/1000); return m+'m'+('0'+s).slice(-2)+'s restantes'; }
   const OP_DOT={ done:'<svg viewBox="0 0 24 24"><path d="M5 13l4 4L19 7"/></svg>', turn:'<svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 8v4l2 2"/></svg>', lock:'<svg viewBox="0 0 24 24"><rect x="5" y="11" width="14" height="9" rx="2"/><path d="M8 11V8a4 4 0 018 0v3"/></svg>' };
   function renderEsteira(d){
     const steps=$('#opSteps'); if(!steps||!d) return;
@@ -1721,6 +1728,7 @@ img,svg,canvas,video{max-width:100%}
     const awaiting=d.state==='AWAITING_SIGNATURES';
     const btn=$('#opStartDeal'); if(btn) btn.style.display = awaiting?'none':'';
     const sbtn=$('#opSignTurn'); if(sbtn) sbtn.style.display = (awaiting&&d.turnRole)?'':'none';
+    const nbtn=$('#opNewDeal'); if(nbtn) nbtn.style.display = awaiting?'':'none'; // com deal em andamento, permite abandonar e criar outra
     startTurnCountdown();
   }
   // Base58 (Bitcoin/Solana) — sem dependência externa (CSP bloqueia CDN).
@@ -1756,7 +1764,7 @@ img,svg,canvas,video{max-width:100%}
     }catch(e){ toast(e.message||'Falha ao assinar','err'); }
     finally{ const b=$('#opSignTurn'); if(b){ b.disabled=false; b.textContent='Assinar minha vez'; } }
   }
-  function startTurnCountdown(){ if(opTurnTimer) clearInterval(opTurnTimer); opTurnTimer=setInterval(()=>{ const el=$('#opSteps .op-turn-chip'); if(!el){ clearInterval(opTurnTimer); return; } const cd=el.querySelector('.op-turn-cd'); if(cd) cd.textContent=fmtCountdown(Number(el.dataset.turnExp)); },30000); }
+  function startTurnCountdown(){ if(opTurnTimer) clearInterval(opTurnTimer); opTurnTimer=setInterval(()=>{ const el=$('#opSteps .op-turn-chip'); if(!el){ clearInterval(opTurnTimer); return; } const cd=el.querySelector('.op-turn-cd'); if(cd) cd.textContent=fmtCountdown(Number(el.dataset.turnExp)); },1000); }
   async function refreshMesaDeal(){ if(!getTok()) return; try{ const r=await pmApi('/v1/portal/mesa/deal'); if(r&&r.deal){ opDeal=r.deal; renderEsteira(r.deal); if(!opDealTimer) startDealPolling(); } }catch(e){} }
   function startDealPolling(){ if(opDealTimer) clearInterval(opDealTimer); opDealTimer=setInterval(refreshMesaDeal,5000); }
   async function startMesaDeal(){
