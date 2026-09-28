@@ -35,7 +35,10 @@ const Schema = z.object({
 export type Config = z.infer<typeof Schema> & { sessionSecret: string; operators: Set<string>; identityMasterSecret: string };
 
 export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
-  const c = Schema.parse(env);
+  // Variáveis de ambiente VAZIAS ("") são tratadas como NÃO-definidas — assim os defaults do
+  // schema valem (ex.: OTC_ENV="" na Vercel não quebra mais o boot; cai em 'dev').
+  const clean = Object.fromEntries(Object.entries(env).filter(([, v]) => v !== undefined && v !== ''));
+  const c = Schema.parse(clean);
   if (c.OTC_ENV === 'prod') {
     if (!c.SESSION_SECRET) throw new Error('SESSION_SECRET é obrigatório em produção');
     if (c.DATABASE_MODE !== 'postgres' || !c.DATABASE_URL) throw new Error('Produção exige DATABASE_MODE=postgres e DATABASE_URL');

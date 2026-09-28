@@ -10,7 +10,7 @@ import { PostgresPortalPersistence } from '../src/portal/pgPortal.js';
 
 async function freshDb(): Promise<SqlClient> {
   const sql = await createPgliteClient(); // efêmero em memória
-  await sql.exec('CREATE TABLE IF NOT EXISTS portal_state (id text PRIMARY KEY, doc jsonb NOT NULL, updated_at bigint NOT NULL)');
+  await sql.query('CREATE TABLE IF NOT EXISTS portal_state (id text PRIMARY KEY, doc jsonb NOT NULL, updated_at bigint NOT NULL)');
   return sql;
 }
 // Simula uma invocação serverless: novo PortalService sobre o MESMO banco, hidratado.
