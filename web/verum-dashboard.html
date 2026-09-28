@@ -997,12 +997,12 @@ svg{display:block}
   let _redirecting=false;
   function goToRegister(){ if(_redirecting) return; _redirecting=true; clearTok(); window.location.replace('/cadastro'); }
   async function integratePortal(){
-    const t=getTok(); if(!t){ goToRegister(); return; }
+    const t=getTok(); if(!t){ return; } // sem token: modo navegação, não redireciona
     let st; try{
       const res=await fetch(API+'/v1/portal/me',{ headers:{ 'accept':'application/json','authorization':'Bearer '+t } });
       // Token expirado/inválido → volta pro cadastro. Erro de rede (catch) NÃO
       // redireciona (pode ser transitório).
-      if(!res.ok){ if(res.status===401||res.status===403) goToRegister(); return; }
+      if(!res.ok){ if((res.status===401||res.status===403)&&getTok()) goToRegister(); return; }
       st=await res.json();
     }catch(e){ return; }
     if(!st||!st.payMaster){ goToRegister(); return; }
@@ -1051,7 +1051,7 @@ svg{display:block}
     if(t) headers['authorization']='Bearer '+t;
     const res=await fetch(API+path,{method:opts.method||'GET',headers,body:opts.body!==undefined?JSON.stringify(opts.body):undefined});
     let data=null; try{ data=await res.json(); }catch(e){}
-    if(!res.ok){ if(res.status===401||res.status===403) goToRegister(); const m=(data&&(data.message||data.error))||('Erro '+res.status); const e=new Error(m); e.status=res.status; e.code=(data&&data.error)||null; throw e; }
+    if(!res.ok){ if((res.status===401||res.status===403)&&getTok()) goToRegister(); const m=(data&&(data.message||data.error))||('Erro '+res.status); const e=new Error(m); e.status=res.status; e.code=(data&&data.error)||null; throw e; }
     return data;
   }
   function clip(t){ try{ if(navigator.clipboard&&navigator.clipboard.writeText) return navigator.clipboard.writeText(t); }catch(e){} return Promise.resolve(); }
@@ -1804,9 +1804,9 @@ svg{display:block}
   opInit();
   cfgInit();
   loadNetCatalog();
-  // Guard de auth: sem login/cadastro feito → vai direto pro cadastro do portal.
-  if(!getTok()){ goToRegister(); }
-  else { integratePortal(); mesaInit(); securityInit(); }
+  // Navegação livre (temporário): sem carteira/token a mesa é apenas navegável — NÃO redireciona
+  // ao cadastro. Com token, integra o portal, a mesa e a segurança normalmente.
+  if(getTok()){ integratePortal(); mesaInit(); securityInit(); }
 })();
 </script>
 </body>
