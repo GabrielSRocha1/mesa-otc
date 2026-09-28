@@ -6,6 +6,7 @@
  * `null` quando NÃO conseguiu ler (erro/tempo) — o que é diferente de saldo 0.
  * `0` só é retornado quando a rede confirma que a conta está vazia/inexistente.
  */
+import http2 from 'node:http2';
 import { getChain, type ChainDef } from './registry.js';
 
 export interface NativeBalance {
@@ -105,11 +106,48 @@ async function readXrp(c: ChainDef, address: string): Promise<NativeBalance | nu
   return pack(BigInt(bal), c);
 }
 
+// ─── Zcash via lightwalletd público (gRPC, SEM chave) ────────────────────────
+// Os servidores lightwalletd que atendem as carteiras Zcash (zec.rocks etc.) são
+// públicos e keyless. GetTaddressBalance usa protobuf trivial: request
+// AddressList{campo 1: string}, response Balance{campo 1: varint valueZat}.
+// gRPC = HTTP/2 + frame de 5 bytes; dá para falar com node:http2, sem deps.
+const LWD_HOSTS = ['zec.rocks', 'na.zec.rocks'];
+function lwdTaddrBalance(host: string, address: string): Promise<bigint> {
+  return new Promise((resolve, reject) => {
+    const addr = Buffer.from(address, 'utf8');
+    if (!addr.length || addr.length > 127) return reject(new Error('endereço inválido p/ lightwalletd'));
+    const client = http2.connect(`https://${host}:443`);
+    const timer = setTimeout(() => { client.destroy(); reject(new Error('timeout lightwalletd')); }, TIMEOUT_MS);
+    const done = (fn: () => void) => { clearTimeout(timer); client.close(); fn(); };
+    client.on('error', err => { clearTimeout(timer); reject(err); });
+    const req = client.request({ ':method': 'POST', ':path': '/cash.z.wallet.sdk.rpc.CompactTxStreamer/GetTaddressBalance', 'content-type': 'application/grpc', te: 'trailers' });
+    const chunks: Buffer[] = []; let status: string | null = null;
+    req.on('response', h => { if (h['grpc-status'] !== undefined) status = String(h['grpc-status']); });
+    req.on('trailers', t => { if (t['grpc-status'] !== undefined) status = String(t['grpc-status']); });
+    req.on('data', c => chunks.push(c as Buffer));
+    req.on('error', err => done(() => reject(err)));
+    req.on('end', () => done(() => {
+      if (status !== null && status !== '0') return reject(new Error('grpc-status ' + status));
+      const body = Buffer.concat(chunks);
+      if (body.length < 5) return resolve(0n); // sem corpo = conta vazia
+      const msg = body.subarray(5, 5 + body.readUInt32BE(1));
+      if (!msg.length) return resolve(0n);
+      if (msg[0] !== 0x08) return reject(new Error('resposta gRPC inesperada'));
+      let x = 0n, shift = 0n;
+      for (let i = 1; i < msg.length; i++) { const b = BigInt(msg[i]!); x |= (b & 0x7fn) << shift; if (!(b & 0x80n)) break; shift += 7n; }
+      resolve(x);
+    }));
+    const frame = Buffer.alloc(5); frame.writeUInt32BE(addr.length + 2, 1);
+    req.end(Buffer.concat([frame, Buffer.from([0x0a, addr.length]), addr]));
+  });
+}
+
 async function readZcash(c: ChainDef, address: string): Promise<NativeBalance | null> {
-  // Sem fonte pública estável sem chave p/ Zcash (Blockchair: 430; Blockbook da
-  // Trezor: Cloudflare; Zchain: morto). Ordem: NOWNodes (Blockbook, plano free)
-  // se NOWNODES_API_KEY existir; senão Blockchair se BLOCKCHAIR_API_KEY existir;
-  // senão null (UI: "indisponível").
+  // 1º lightwalletd público (keyless); fallbacks com chave: NOWNodes (free) e
+  // Blockchair (paga). Só devolve null se TODAS as fontes falharem.
+  for (const host of LWD_HOSTS) {
+    try { return pack(await lwdTaddrBalance(host, address), c); } catch { /* tenta a próxima fonte */ }
+  }
   const nowKey = process.env.NOWNODES_API_KEY?.trim();
   if (nowKey) {
     const j = await fetchJson(
