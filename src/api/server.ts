@@ -322,8 +322,8 @@ export async function buildApi(deps: ApiDeps): Promise<FastifyInstance> {
   if (deps.mesaHtmlPath) { const mesa = prepHtml(deps.mesaHtmlPath); for (const p of ['/mesa', '/operacao']) app.get(p, async (_req, reply) => sendHtml(reply, mesa)); }
   if (deps.portalHtmlPath) { const portalHtml = prepHtml(deps.portalHtmlPath); for (const p of ['/portal', '/cadastro', '/login']) app.get(p, async (_req, reply) => sendHtml(reply, portalHtml)); }
   if (deps.conviteHtmlPath) { const convite = prepHtml(deps.conviteHtmlPath); for (const p of ['/convite', '/convite/:token', '/invite', '/invite/:token']) app.get(p, async (_req, reply) => sendHtml(reply, convite)); }
-  // A raiz encaminha para a mesa (navegação livre por enquanto; sem exigir carteira/login).
-  app.get('/', async (_req, reply) => reply.redirect('/mesa'));
+  // A raiz encaminha para a entrada do portal (login/cadastro exigido antes da mesa).
+  app.get('/', async (_req, reply) => reply.redirect('/portal'));
 
   /* ---------- PWA (manifest, service worker, ícones, offline) — same-origin, sem dados sensíveis em cache ---------- */
   app.get('/manifest.webmanifest', async (_req, reply) => reply.type('application/manifest+json').header('cache-control', 'public, max-age=3600').send(MANIFEST_JSON));

@@ -609,12 +609,14 @@ form{margin-top:26px;display:grid;gap:15px}
     err('eTerms',!terms);
     if(!(okName&&okEmail&&okPass&&terms)){ toast('Revise os campos destacados','err'); return; }
 
-    // guarda o cadastro e exige verificação de e-mail antes de criar a conta
-    pendingReg={name,email,password:pass};
-    $('#fCode').value=''; mark('fCode',true); err('eCode',false);
-    sendVerifyCode(email);
-    showView('viewVerify');
-    $('#fCode').focus();
+    // Confirmação de e-mail DESATIVADA por enquanto — cria a conta direto.
+    try{
+      const r=await api('/v1/portal/register',{method:'POST',body:{name,email,password:pass}});
+      setTok(r.token);
+      toast('Conta criada','ok');
+      const data=await api('/v1/portal/me');
+      showDash(data);
+    }catch(ex){ toast(ex.message,'err'); }
   });
 
   // Verifica o código e só então cria a conta de fato
