@@ -206,8 +206,10 @@ img,svg{max-width:100%}
   .row2{grid-template-columns:1fr}                 /* nome/sobrenome, etc. empilham */
   .grid{grid-template-columns:1fr!important}
   .dash-main{padding:20px 14px 48px}
-  .topbar{padding:12px 14px;gap:10px}
-  .userchip{padding:6px 8px 6px 10px}
+  /* Topbar em duas linhas: marca + sair na primeira; o card "Conectado como"
+     desce para uma linha própria, ocupando toda a largura. */
+  .topbar{padding:12px 14px;gap:10px;flex-wrap:wrap}
+  .userchip{padding:6px 8px 6px 10px;order:5;width:100%;justify-content:space-between}
   /* Carteira/código empilham e não estouram. */
   .wl-id{flex-wrap:wrap}
   .wl-id .conn{margin-left:0}
