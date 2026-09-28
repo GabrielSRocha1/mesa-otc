@@ -278,7 +278,7 @@ export async function buildApi(deps: ApiDeps): Promise<FastifyInstance> {
   app.get('/v1/portal/mesa', async req => deps.portal.listMesa(portalToken(req)));
 
   // ---- Operação (Deal real) a partir da mesa: cria no DealEngine e expõe o estado vivo p/ a esteira ----
-  const mesaDealView = (d: Deal) => ({ id: d.id, state: d.state, requiredSignatures: d.requiredSignatures, validSignatures: d.validSignatures, turnRole: d.turnRole ?? null, turnExpiresAt: d.turnExpiresAt ?? null, expiresAt: d.expiresAt, signed: d.signatures.filter(s => s.status === 'valid' && s.revision === d.revision).map(s => s.role), participants: d.participants.map(p => ({ role: p.role, address: p.address })) });
+  const mesaDealView = (d: Deal) => ({ id: d.id, state: d.state, createdAt: d.createdAt, amountInBase: d.draft?.amountInBase ?? null, requiredSignatures: d.requiredSignatures, validSignatures: d.validSignatures, turnRole: d.turnRole ?? null, turnExpiresAt: d.turnExpiresAt ?? null, expiresAt: d.expiresAt, signed: d.signatures.filter(s => s.status === 'valid' && s.revision === d.revision).map(s => s.role), participants: d.participants.map(p => ({ role: p.role, address: p.address })) });
   app.post('/v1/portal/mesa/deal', async (req, reply) => {
     const token = portalToken(req);
     if (!deps.dev) throw new DomainError('SETTLEMENT_NOT_ALLOWED', 'Criação de operação da mesa está disponível apenas em ambiente de desenvolvimento');
@@ -303,6 +303,21 @@ export async function buildApi(deps: ApiDeps): Promise<FastifyInstance> {
     void reply.code(201); return mesaDealView(opened);
   });
   app.get('/v1/portal/mesa/deal', async req => { const id = deps.portal.getMesaDeal(portalToken(req)); if (!id) return { deal: null }; const d = await deps.deals.get(id).catch(() => null); return { deal: d ? mesaDealView(d) : null }; });
+  // Histórico da mesa: todas as operações já criadas (mais recentes primeiro) + qual está ativa na esteira.
+  app.get('/v1/portal/mesa/deals', async req => {
+    const token = portalToken(req);
+    const ids = deps.portal.getMesaDeals(token);
+    const deals = (await Promise.all(ids.map(id => deps.deals.get(id).catch(() => null)))).filter((d): d is Deal => d !== null).map(mesaDealView);
+    return { deals, activeId: deps.portal.getMesaDeal(token) };
+  });
+  // Abre (torna ativa) uma operação do histórico — a esteira e a assinatura passam a apontar p/ ela.
+  app.post('/v1/portal/mesa/deal/select', async req => {
+    const token = portalToken(req);
+    const b = parse(z.object({ dealId: z.string().min(4).max(60) }), req.body);
+    deps.portal.selectMesaDeal(token, b.dealId);
+    const d = await deps.deals.get(b.dealId);
+    return mesaDealView(d);
+  });
   // Público: a página /convite resolve o contexto do convite (sem login do PM).
   app.get('/v1/portal/mesa/invites/:token', async req => { const { token } = req.params as { token: string }; const r = deps.portal.resolveInvite(token); if (!r) throw new DomainError('INVALID_INPUT', 'Convite inválido ou expirado'); return r; });
   // Confirmação do dono: prova = sessão de carteira (challenge/verify). Em dev, aceita corpo sem assinatura.

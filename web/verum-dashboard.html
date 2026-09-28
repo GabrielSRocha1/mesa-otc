@@ -560,6 +560,15 @@ svg{display:block}
 .op-step.lock .meta{color:var(--ink-4)}
 .op-turn-chip{display:inline-flex;align-items:center;gap:5px;margin-top:5px;padding:2px 9px;border-radius:999px;background:var(--blue-soft);border:1px solid rgba(79,155,255,.3);color:var(--blue);font-size:10px;font-weight:700}
 .op-turn-chip svg{width:11px;height:11px;stroke:currentColor;fill:none;stroke-width:2}
+/* Lista de operações da mesa: cada operação é um card clicável; a ativa fica destacada */
+.op-deal-list{display:flex;flex-direction:column;gap:9px}
+.op-deal-card{display:flex;align-items:center;gap:13px;padding:12px 14px;border:1px solid var(--line-2);border-radius:12px;background:var(--bg-2);cursor:pointer;transition:border-color .15s,background .15s}
+.op-deal-card:hover{border-color:var(--blue)}
+.op-deal-card.active{border-color:var(--blue);background:var(--blue-soft)}
+.op-deal-card .dpair{font-weight:700;font-size:13.5px}
+.op-deal-card .did{font-family:var(--f-mono);font-size:11.5px;color:var(--ink-2);margin-top:1px}
+.op-deal-card .dmeta{font-size:11.5px;color:var(--ink-3);margin-top:2px}
+.op-deal-card .dright{margin-left:auto;text-align:right;display:flex;flex-direction:column;align-items:flex-end;gap:5px;flex:none}
 .op-aside{display:flex;flex-direction:column;gap:14px;position:sticky;top:16px}
 .op-sum-asset{display:flex;align-items:center;gap:11px;padding:9px 0}
 .op-sum-asset .lbl{font-size:11px;color:var(--ink-3)}
@@ -859,6 +868,12 @@ img,svg,canvas,video{max-width:100%}
                 <label style="display:flex;align-items:center;gap:9px;cursor:pointer"><span style="font-size:12.5px;color:var(--ink-2);font-weight:600">Comprador</span><button class="sw" id="opFeeBuyer" type="button" role="switch" aria-checked="false"></button></label>
               </div>
             </div>
+          </section>
+
+          <!-- Operações da mesa: cada operação é um card; clicar abre na esteira -->
+          <section class="card">
+            <div class="card-h"><div class="t"><svg viewBox="0 0 24 24" style="width:17px;height:17px;stroke:var(--blue);fill:none;stroke-width:2;vertical-align:-3px;margin-right:6px"><rect x="4" y="4" width="16" height="16" rx="2"/><path d="M8 9h8M8 13h5"/></svg>Operações da mesa</div><span class="badge info" id="opListCount">0</span></div>
+            <div class="op-deal-list" id="opDealList"><p style="color:var(--ink-3);font-size:12.5px;margin:0">Nenhuma operação criada ainda. Use "Iniciar operação" abaixo.</p></div>
           </section>
 
           <!-- Assinaturas Multisig -->
@@ -1765,8 +1780,36 @@ img,svg,canvas,video{max-width:100%}
     finally{ const b=$('#opSignTurn'); if(b){ b.disabled=false; b.textContent='Assinar minha vez'; } }
   }
   function startTurnCountdown(){ if(opTurnTimer) clearInterval(opTurnTimer); opTurnTimer=setInterval(()=>{ const el=$('#opSteps .op-turn-chip'); if(!el){ clearInterval(opTurnTimer); return; } const cd=el.querySelector('.op-turn-cd'); if(cd) cd.textContent=fmtCountdown(Number(el.dataset.turnExp)); },1000); }
-  async function refreshMesaDeal(){ if(!getTok()) return; try{ const r=await pmApi('/v1/portal/mesa/deal'); if(r&&r.deal){ opDeal=r.deal; renderEsteira(r.deal); if(!opDealTimer) startDealPolling(); } }catch(e){} }
+  async function refreshMesaDeal(){ if(!getTok()) return; refreshMesaDeals(); try{ const r=await pmApi('/v1/portal/mesa/deal'); if(r&&r.deal){ opDeal=r.deal; renderEsteira(r.deal); if(!opDealTimer) startDealPolling(); } }catch(e){} }
   function startDealPolling(){ if(opDealTimer) clearInterval(opDealTimer); opDealTimer=setInterval(refreshMesaDeal,5000); }
+  /* ---------- Lista de operações da mesa (histórico; card clicável abre na esteira) ---------- */
+  let opDealsCache=[];
+  function opStateBadge(s){ const M={AWAITING_SIGNATURES:['wait','Aguardando assinaturas'],FULLY_SIGNED:['info','Assinada'],SETTLEMENT_VALIDATION:['info','Validando liquidação'],SETTLING:['info','Liquidando'],SETTLED:['ok','Liquidada'],EXPIRED:['err','Expirada'],CANCELLED:['err','Cancelada'],BLOCKED:['err','Bloqueada'],REFUNDING:['err','Reembolsando'],REFUNDED:['err','Reembolsada']}; const e2=M[s]||['info',s]; return '<span class="badge '+e2[0]+'">'+esc(e2[1])+'</span>'; }
+  function renderDealList(list,activeId){
+    const box=$('#opDealList'); if(!box) return;
+    if($('#opListCount')) $('#opListCount').textContent=String(list.length);
+    if(!list.length){ box.innerHTML='<p style="color:var(--ink-3);font-size:12.5px;margin:0">Nenhuma operação criada ainda. Use "Iniciar operação" abaixo.</p>'; return; }
+    box.innerHTML=list.map(d=>{
+      const sol=d.amountInBase?Number(BigInt(d.amountInBase)/1000000n)/1000:null; // base 9 casas → até 3 decimais
+      const dt=d.createdAt?new Date(d.createdAt).toLocaleString('pt-BR',{day:'2-digit',month:'2-digit',hour:'2-digit',minute:'2-digit'}):'';
+      const turn=(d.state==='AWAITING_SIGNATURES'&&d.turnRole)?(' · vez: '+(OP_STEP_LABEL[d.turnRole]||d.turnRole)):'';
+      return '<div class="op-deal-card'+(d.id===activeId?' active':'')+'" data-deal="'+esc(d.id)+'" role="button" tabindex="0">'
+        +'<div><div class="dpair">'+(sol!=null?opNum(sol)+' ':'')+'SOL → USDC</div><div class="did">'+esc(d.id)+'</div><div class="dmeta">'+esc(dt)+' · '+d.validSignatures+'/'+d.requiredSignatures+' assinaturas'+esc(turn)+'</div></div>'
+        +'<div class="dright">'+opStateBadge(d.state)+(d.id===activeId?'<span style="font-size:10.5px;color:var(--blue);font-weight:700">Aberta na esteira</span>':'')+'</div></div>';
+    }).join('');
+    $$('#opDealList .op-deal-card').forEach(c=>{ const open=()=>openMesaDeal(c.dataset.deal); c.addEventListener('click',open); c.addEventListener('keydown',e=>{ if(e.key==='Enter'||e.key===' '){ e.preventDefault(); open(); } }); });
+  }
+  async function refreshMesaDeals(){ if(!getTok()) return; try{ const r=await pmApi('/v1/portal/mesa/deals'); if(r&&Array.isArray(r.deals)){ opDealsCache=r.deals; renderDealList(r.deals,r.activeId); } }catch(e){} }
+  async function openMesaDeal(id){
+    if(!id) return;
+    if(opDeal&&opDeal.id===id){ const sec=$('#opSteps'); if(sec) sec.scrollIntoView({behavior:'smooth',block:'center'}); return; }
+    try{
+      const d=await pmApi('/v1/portal/mesa/deal/select',{method:'POST',body:{dealId:id}});
+      opDeal=d; renderEsteira(d); renderDealList(opDealsCache,id); if(!opDealTimer) startDealPolling();
+      const sec=$('#opSteps'); if(sec) sec.scrollIntoView({behavior:'smooth',block:'center'});
+      toast('Operação '+id+' aberta na esteira','ok');
+    }catch(e){ toast(e.message||'Falha ao abrir operação','err'); }
+  }
   async function startMesaDeal(){
     const amt=parseFloat(String($('#opDelAmt').value||'0').replace(',','.'))||100;
     const solBase=String(Math.max(1,Math.min(Math.floor(amt),500)))+'000000000'; // dev: ≤500 SOL (9 casas)

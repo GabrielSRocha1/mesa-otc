@@ -31,7 +31,7 @@ export interface DeskSecurity {
 }
 export type SecurityAlertType = 'new_wallet' | '2fa_enabled' | '2fa_disabled' | 'idle_logout';
 export interface SecurityAlert { id: string; type: SecurityAlertType; at: number; message: string; read: boolean }
-export interface PayMaster { id: string; name: string; email: string; org: string; salt: string; passHash: string; createdAt: number; wallet: WalletLink | null; mesaDealId?: string | null; security?: DeskSecurity; knownWallets?: string[]; alerts?: SecurityAlert[] }
+export interface PayMaster { id: string; name: string; email: string; org: string; salt: string; passHash: string; createdAt: number; wallet: WalletLink | null; mesaDealId?: string | null; mesaDealIds?: string[]; security?: DeskSecurity; knownWallets?: string[]; alerts?: SecurityAlert[] }
 export interface PortalSession { token: string; payMasterId: string; createdAt: number; expiresAt: number; lastSeenAt: number }
 export interface MesaCode { code: string; uid: string; payMasterId: string; createdAt: number; expiresAt: number }
 
@@ -464,8 +464,23 @@ export class PortalService {
     if (out.length < 3) throw new DomainError('INVALID_INPUT', 'A mesa precisa de Vendedor, Comprador e Pay Master 1 confirmados');
     return out;
   }
-  setMesaDeal(token: string | undefined, dealId: string | null): void { const s = this.session(token); const pm = this.pm(s.payMasterId); pm.mesaDealId = dealId; this.write(); }
+  setMesaDeal(token: string | undefined, dealId: string | null): void {
+    const s = this.session(token); const pm = this.pm(s.payMasterId);
+    pm.mesaDealId = dealId;
+    // Histórico da mesa: toda deal criada entra na lista (sem duplicar; cap de 50, mais recentes ao fim).
+    if (dealId) { const ids = (pm.mesaDealIds ?? []).filter(id => id !== dealId); ids.push(dealId); pm.mesaDealIds = ids.slice(-50); }
+    this.write();
+  }
   getMesaDeal(token: string | undefined): string | null { const s = this.session(token, false); const pm = this.pm(s.payMasterId); return pm.mesaDealId ?? null; }
+  /** Ids de todas as deals já criadas nesta mesa (mais recentes primeiro). */
+  getMesaDeals(token: string | undefined): string[] { const s = this.session(token, false); const pm = this.pm(s.payMasterId); const ids = [...(pm.mesaDealIds ?? [])]; if (pm.mesaDealId && !ids.includes(pm.mesaDealId)) ids.push(pm.mesaDealId); return ids.reverse(); }
+  /** Torna ativa uma deal do histórico (a esteira/assinatura passam a apontar p/ ela). */
+  selectMesaDeal(token: string | undefined, dealId: string): void {
+    const s = this.session(token); const pm = this.pm(s.payMasterId);
+    const ids = pm.mesaDealIds ?? (pm.mesaDealId ? [pm.mesaDealId] : []);
+    if (!ids.includes(dealId)) throw new DomainError('INVALID_INPUT', 'Operação não pertence a esta mesa');
+    pm.mesaDealId = dealId; this.write();
+  }
 
   /** Resolve um convite pelo token — público (sem sessão), para a página /convite. */
   resolveInvite(token: string): ResolvedInvite | null {
