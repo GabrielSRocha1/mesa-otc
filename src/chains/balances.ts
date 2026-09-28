@@ -83,7 +83,14 @@ async function readTron(c: ChainDef, address: string): Promise<NativeBalance | n
   // O endpoint público /v1/accounts limita a 3 rps e devolve 429 (exige API key).
   // O nó /wallet/getaccount aceita o endereço base58 (visible:true), não é
   // limitado do mesmo jeito e devolve `{}` para conta ainda não ativada (= 0).
-  const j = await rpcPost(`${c.endpoint}/wallet/getaccount`, { address, visible: true });
+  // Em IP compartilhado (serverless) a TronGrid pode limitar mesmo assim; com
+  // TRONGRID_API_KEY no env, envia o header TRON-PRO-API-KEY e escapa do limite.
+  const key = process.env.TRONGRID_API_KEY?.trim();
+  const j = await fetchJson(`${c.endpoint}/wallet/getaccount`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json', ...(key ? { 'TRON-PRO-API-KEY': key } : {}) },
+    body: JSON.stringify({ address, visible: true }),
+  });
   if (!j || typeof j !== 'object') return null;
   const bal = (j as { balance?: number | string }).balance;
   return pack(BigInt(bal ?? 0), c); // sem campo balance = conta vazia/não ativada

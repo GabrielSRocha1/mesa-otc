@@ -85,7 +85,11 @@ async function readSolanaTokens(endpoint: string, owner: string): Promise<TokenB
 // ─── Tron: TRC-20 via TronGrid ───────────────────────────────────────────────
 
 async function readTronTokens(endpoint: string, address: string): Promise<TokenBalance[]> {
-  const j = await fetchJson(`${endpoint}/v1/accounts/${encodeURIComponent(address)}`);
+  // Mesmo esquema do saldo nativo: com TRONGRID_API_KEY no env, manda o header
+  // e escapa do rate limit de IP compartilhado (o /v1/accounts é o mais restrito).
+  const key = process.env.TRONGRID_API_KEY?.trim();
+  const j = await fetchJson(`${endpoint}/v1/accounts/${encodeURIComponent(address)}`,
+    key ? { headers: { 'TRON-PRO-API-KEY': key } } : undefined);
   const trc20 = j?.data?.[0]?.trc20;
   if (!Array.isArray(trc20)) return [];
   const byContract: Record<string, TokenDef> = {};
