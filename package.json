@@ -5,7 +5,7 @@
   "type": "module",
   "description": "VERUM OTC — plataforma institucional OTC/P2P multichain com liquidação N-de-N",
   "engines": {
-    "node": ">=22"
+    "node": "22.x"
   },
   "scripts": {
     "typecheck": "tsc --noEmit -p tsconfig.json",

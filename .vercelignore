@@ -1,0 +1,11 @@
+# Reduz o upload: nada disso é necessário no runtime serverless.
+.data
+.claude
+test
+docs
+contracts/out
+contracts/out-foundry
+lib
+bin
+cache
+*.log
