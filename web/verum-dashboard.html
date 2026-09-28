@@ -101,6 +101,10 @@ svg{display:block}
   border-bottom:1px solid var(--line);position:sticky;top:0;z-index:20;
   background:rgba(8,13,26,.82);backdrop-filter:blur(12px);
 }
+.hamburger{display:none;flex:none;width:42px;height:42px;border-radius:11px;border:1px solid var(--line);background:var(--panel);color:var(--ink);place-items:center;cursor:pointer}
+.hamburger:hover{border-color:var(--ink-3);background:rgba(79,155,255,.06)}
+.hamburger svg{width:22px;height:22px;stroke:currentColor;fill:none;stroke-width:2}
+.nav-backdrop{display:none}
 .search{flex:1;max-width:520px;position:relative}
 .search svg{position:absolute;left:14px;top:50%;transform:translateY(-50%);width:18px;height:18px;stroke:var(--ink-3);fill:none;stroke-width:1.8}
 .search input{
@@ -412,10 +416,16 @@ svg{display:block}
 }
 @media (max-width:1080px){
   .shell{grid-template-columns:1fr}
-  .sidebar{display:none}
+  /* Sidebar vira gaveta off-canvas, aberta pelo hambúrguer. */
+  .sidebar{position:fixed;top:0;left:0;width:284px;max-width:86vw;height:100vh;z-index:60;transform:translateX(-100%);transition:transform .26s ease;box-shadow:0 20px 60px rgba(0,0,0,.55)}
+  .sidebar.open{transform:none}
+  .nav-backdrop{display:block;position:fixed;inset:0;background:rgba(2,6,16,.62);backdrop-filter:blur(2px);z-index:55;opacity:0;pointer-events:none;transition:opacity .26s}
+  .nav-backdrop.show{opacity:1;pointer-events:auto}
+  .hamburger{display:grid}
   .grid{grid-template-columns:1fr}
   .col.col-3{grid-template-columns:1fr}
 }
+@media (max-width:720px){ .search{display:none} .topbar{padding:12px 16px;gap:12px} }
 
 /* ---------- views (navegação por aba) ---------- */
 .view{display:none}
@@ -618,12 +628,14 @@ svg{display:block}
       <div class="v">v1.0.0</div>
     </div>
   </aside>
+  <div class="nav-backdrop" id="navBackdrop"></div>
 
   <!-- ============ CONTENT ============ -->
   <div class="content">
 
     <!-- topbar -->
     <header class="topbar">
+      <button class="hamburger" id="navToggle" type="button" aria-label="Abrir menu" aria-expanded="false"><svg viewBox="0 0 24 24"><path d="M4 6h16M4 12h16M4 18h16"/></svg></button>
       <div class="search">
         <svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="M21 21l-4-4"/></svg>
         <input id="search" placeholder="Buscar operação, ativo, hash…">
@@ -968,8 +980,21 @@ svg{display:block}
     const main=document.querySelector('.content .page'); if(main) main.scrollTop=0;
     window.scrollTo(0,0);
   }
+  // ── Sidebar responsiva (mobile): gaveta aberta pelo hambúrguer ──────────────
+  function setNav(open){
+    const sb=document.querySelector('.sidebar'), bd=$('#navBackdrop'), tg=$('#navToggle');
+    if(sb) sb.classList.toggle('open',open);
+    if(bd) bd.classList.toggle('show',open);
+    if(tg) tg.setAttribute('aria-expanded',String(open));
+    document.body.style.overflow=open?'hidden':'';
+  }
+  (function(){ const tg=$('#navToggle'), bd=$('#navBackdrop');
+    if(tg) tg.addEventListener('click',()=>setNav(!document.querySelector('.sidebar').classList.contains('open')));
+    if(bd) bd.addEventListener('click',()=>setNav(false));
+    document.addEventListener('keydown',e=>{ if(e.key==='Escape') setNav(false); });
+  })();
   $$('.nav a').forEach(a=>a.addEventListener('click',e=>{
-    e.preventDefault(); if(a.dataset.view) showView(a.dataset.view);
+    e.preventDefault(); if(a.dataset.view) showView(a.dataset.view); setNav(false); // fecha a gaveta ao navegar (mobile)
   }));
   // botões que levam a outra view (ex.: "Nova Operação")
   $$('[data-goto]').forEach(b=>b.addEventListener('click',()=>showView(b.dataset.goto)));
@@ -1103,6 +1128,15 @@ svg{display:block}
   // A OTC NÃO cria a sessão da carteira (origem diferente) — só direciona.
   // Troque o domínio se o app web estiver noutro subdomínio (app./swap.).
   const VERUM_WALLET_URL='https://www.verumcrypto.com/wallet';
+  // ── Mobile sem extensão: abrir ESTA dApp dentro do navegador da Verum Wallet ──
+  // No celular não há extensão, mas o app/PWA da Verum tem navegador dApp que injeta
+  // window.verum. Enviamos o usuário para lá apontando para a URL atual (ex.: /mesa),
+  // e a conexão acontece dentro da Verum. AJUSTE `verumDeepLink` ao esquema oficial da
+  // Verum Wallet caso seja diferente (é o único ponto a mudar).
+  const IS_MOBILE=/android|iphone|ipad|ipod|mobile/i.test(navigator.userAgent||'');
+  function verumDappUrl(){ return location.origin+location.pathname; } // ex.: https://otcdesk.verumcrypto.com/mesa
+  function verumDeepLink(){ return 'https://www.verumcrypto.com/dapp?url='+encodeURIComponent(verumDappUrl()); }
+  function openInVerumBrowser(){ try{ window.location.href=verumDeepLink(); }catch(e){ window.open(VERUM_WALLET_URL,'_blank','noopener'); } }
   function connectControls(cfg){
     // Conexão via Verum (Solana por baixo). O dropdown escolhe qual rede fica como
     // PRIMÁRIA do slot; Multichain (padrão) usa Solana como base e traz todas as
@@ -1266,7 +1300,13 @@ svg{display:block}
         try{ w=await connectWallet('solana'); }
         catch(ex){
           if(ex.code==='NO_WALLET'){
-            // Sem carteira injetada → leva o usuário direto à Verum Wallet (web).
+            if(IS_MOBILE){
+              // Celular sem extensão → abre a dApp dentro do navegador da Verum Wallet.
+              toast('Abrindo no navegador da Verum Wallet…','info');
+              openInVerumBrowser();
+              return;
+            }
+            // Desktop sem carteira injetada → leva o usuário à Verum Wallet (web).
             window.open(VERUM_WALLET_URL,'_blank','noopener');
             toast('Abrindo a Verum Wallet… conecte sua carteira por lá.','info');
             return;
