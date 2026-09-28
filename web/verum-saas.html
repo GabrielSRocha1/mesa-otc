@@ -220,6 +220,28 @@ img,svg{max-width:100%}
   .code-actions .btn{width:100%}
 }
 @media (max-width:400px){ .auth-card h2{font-size:20px} .code-value{font-size:17px} }
+
+/* ============================================================================
+   TECLADO SEGURO (senhas no mobile). Defesa contra roubo por gravação de tela:
+   o teclado do sistema anima a tecla tocada e mostra o último caractere — uma
+   gravação captura isso. Este teclado in-app NÃO tem feedback visual de tecla
+   (sem :active/:hover de propósito) e o campo só exibe pontos; como gravação
+   de tela não captura toques, o vídeo mostra um teclado parado e pontos.
+   ============================================================================ */
+.skb-back{position:fixed;inset:0;background:rgba(4,8,18,.55);z-index:80;display:none}
+.skb{position:fixed;left:0;right:0;bottom:0;z-index:81;background:#0d1526;border-top:1px solid var(--line);padding:10px 8px calc(12px + env(safe-area-inset-bottom,0px));display:none}
+.skb.show,.skb-back.show{display:block}
+.skb-head{display:flex;align-items:center;gap:7px;padding:0 6px 9px;font-size:11.5px;color:var(--ink-3)}
+.skb-head svg{width:14px;height:14px;stroke:var(--green);fill:none;stroke-width:2;flex:none}
+.skb-done{margin-left:auto;background:var(--blue);color:#fff;border:none;border-radius:8px;font:inherit;font-weight:700;font-size:13px;padding:7px 18px;cursor:pointer;-webkit-tap-highlight-color:transparent}
+.skb-row{display:flex;justify-content:center;gap:5px;margin-bottom:6px}
+.skb-k{flex:1;max-width:42px;height:42px;border-radius:8px;border:1px solid var(--line-2);background:var(--bg-2);color:var(--ink);font:inherit;font-size:16px;font-weight:600;padding:0;cursor:pointer;-webkit-tap-highlight-color:transparent;user-select:none;-webkit-user-select:none;touch-action:manipulation}
+.skb-k.fn{max-width:58px;font-size:12px;color:var(--ink-2)}
+.skb-k.sp{max-width:none;flex:3}
+/* Sem estado visual de toque: é o que impede a gravação de "ver" a digitação. */
+.skb-k:active,.skb-k:hover,.skb-k:focus{background:var(--bg-2);border-color:var(--line-2);outline:none}
+/* Em telas de toque, esconde o "mostrar senha": revelar a senha na tela anula a proteção. */
+@media (pointer:coarse){ .control .peek{display:none} }
 </style>
 </head>
 <body>
@@ -473,6 +495,10 @@ img,svg{max-width:100%}
 </section>
 
 <div class="toasts" id="toasts"></div>
+
+<!-- Teclado seguro p/ senhas (mobile) — montado pelo JS -->
+<div class="skb-back" id="skbBack"></div>
+<div class="skb" id="skb" aria-hidden="true"></div>
 
 <script>
 (function(){
@@ -817,6 +843,61 @@ img,svg{max-width:100%}
     const t=getTok(); window.location.href='/mesa'+(t?('#tok='+encodeURIComponent(t)):'');
   },350); }
   $('#btnOpenMesa').addEventListener('click',openMesa);
+
+  /* ================= TECLADO SEGURO (senhas · mobile) =================
+     Não existe API web para detectar/bloquear gravação de tela (do sistema ou
+     de malware). A defesa efetiva é não deixar rastro visual da digitação:
+     o teclado do sistema anima a tecla tocada e mostra o último caractere —
+     é isso que uma gravação rouba. Aqui a senha é digitada num teclado in-app
+     SEM feedback visual de tecla, e o campo só exibe pontos. Gravação de tela
+     não captura toques: o vídeo mostra um teclado parado e pontos surgindo.
+     A camada numérica ainda é embaralhada a cada abertura (estilo banco). */
+  (function(){
+    if(!IS_MOBILE) return;
+    const FIELDS=['lPass','fPass','fPass2'];
+    const skb=$('#skb'), back=$('#skbBack');
+    if(!skb||!back) return;
+    let target=null, layer='abc';
+    const shuffle=a=>{ for(let i=a.length-1;i>0;i--){ const j=Math.floor(Math.random()*(i+1)); const t=a[i]; a[i]=a[j]; a[j]=t; } return a; };
+    function rows(){
+      if(layer==='num'){
+        const d=shuffle('1234567890'.split(''));
+        return [d.slice(0,5),d.slice(5),['@','#','$','%','*','-','_','+','='],['.',',','!','?',';',':','⌫'],['abc','␣','OK']];
+      }
+      const up=layer==='ABC';
+      const r=['qwertyuiop','asdfghjkl','zxcvbnm'].map(s=>s.split('').map(ch=>up?ch.toUpperCase():ch));
+      return [r[0],r[1],['⇧'].concat(r[2],['⌫']),['123','␣','OK']];
+    }
+    function render(){
+      const head='<div class="skb-head"><svg viewBox="0 0 24 24"><path d="M12 3l7 3v5c0 5-3 8-7 10-4-2-7-5-7-10V6z"/><path d="M9 12l2 2 4-4"/></svg>Teclado seguro — a digitação não aparece em gravações de tela<button type="button" class="skb-done" data-k="OK">OK</button></div>';
+      skb.innerHTML=head+rows().map(r=>'<div class="skb-row">'+r.map(k=>{
+        const fn=(k==='⇧'||k==='⌫'||k==='123'||k==='abc'||k==='OK');
+        const cls='skb-k'+(fn?' fn':'')+(k==='␣'?' sp':'');
+        return '<button type="button" class="'+cls+'" data-k="'+k+'">'+(k==='␣'?'espaço':k)+'</button>';
+      }).join('')+'</div>').join('');
+    }
+    function open(inp){ target=inp; layer='abc'; render(); skb.classList.add('show'); back.classList.add('show'); skb.setAttribute('aria-hidden','false'); }
+    function close(){ skb.classList.remove('show'); back.classList.remove('show'); skb.setAttribute('aria-hidden','true'); target=null; }
+    skb.addEventListener('mousedown',e=>e.preventDefault()); // não rouba o foco do campo
+    skb.addEventListener('click',e=>{
+      const b=e.target.closest('[data-k]'); if(!b||!target) return;
+      const k=b.dataset.k;
+      if(k==='OK') return close();
+      if(k==='⇧'){ layer=(layer==='ABC')?'abc':'ABC'; return render(); }
+      if(k==='123'){ layer='num'; return render(); }
+      if(k==='abc'){ layer='abc'; return render(); }
+      if(k==='⌫') target.value=target.value.slice(0,-1);
+      else target.value+=(k==='␣'?' ':k);
+      target.dispatchEvent(new Event('input',{bubbles:true}));
+    });
+    back.addEventListener('click',close);
+    FIELDS.forEach(id=>{ const inp=$('#'+id); if(!inp) return;
+      inp.setAttribute('readonly','readonly'); // o teclado do sistema nunca abre p/ senha
+      inp.setAttribute('inputmode','none');
+      inp.addEventListener('click',()=>open(inp));
+      inp.addEventListener('focus',()=>open(inp));
+    });
+  })();
 
   /* ================= LOGOUT ================= */
   $('#btnLogout').addEventListener('click',async ()=>{
