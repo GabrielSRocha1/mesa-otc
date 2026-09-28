@@ -1016,8 +1016,12 @@ svg{display:block}
   const META=document.querySelector('meta[name="verum-otc-api"]');
   const API=((META&&META.content)||'/').replace(/\/$/,'');
   const shortAddr = a => a && a.length>12 ? a.slice(0,6)+'…'+a.slice(-4) : a;
-  function getTok(){ try{ return localStorage.getItem(TOK)||''; }catch(e){ return ''; } }
-  function clearTok(){ try{ localStorage.removeItem(TOK); }catch(e){} }
+  // Token em memória + localStorage. Dentro do iframe da Verum o localStorage pode ser
+  // bloqueado; a cópia em memória mantém a sessão. Hand-off do portal chega via URL (#tok=).
+  let _tok='';
+  (function(){ try{ const m=/[#&]tok=([^&]+)/.exec(location.hash); if(m){ _tok=decodeURIComponent(m[1]); try{ localStorage.setItem(TOK,_tok); }catch(e){} history.replaceState(null,'',location.pathname+location.search); } }catch(e){} })();
+  function getTok(){ try{ return localStorage.getItem(TOK)||_tok; }catch(e){ return _tok; } }
+  function clearTok(){ _tok=''; try{ localStorage.removeItem(TOK); }catch(e){} }
   // Sem login/cadastro (ou sessão inválida) → manda pro cadastro do portal.
   let _redirecting=false;
   function goToRegister(){ if(_redirecting) return; _redirecting=true; clearTok(); window.location.replace('/cadastro'); }

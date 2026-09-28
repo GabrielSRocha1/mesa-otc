@@ -478,8 +478,12 @@ form{margin-top:26px;display:grid;gap:15px}
   /* ---------- API real ---------- */
   const META = document.querySelector('meta[name="verum-otc-api"]');
   const API = ((META && META.content) || '/').replace(/\/$/,'');
-  const getTok = () => { try{ return localStorage.getItem(TOK)||''; }catch(e){ return ''; } };
-  const setTok = t => { try{ t?localStorage.setItem(TOK,t):localStorage.removeItem(TOK); }catch(e){} };
+  // Token de sessão do portal. Guardamos TAMBÉM em memória: dentro do navegador dApp da Verum
+  // o OTC roda em iframe de terceiro, onde o localStorage pode ser bloqueado/particionado — a
+  // cópia em memória mantém a sessão viva na navegação, e o hand-off para /mesa vai pela URL.
+  let _tok = '';
+  const getTok = () => { try{ return localStorage.getItem(TOK) || _tok; }catch(e){ return _tok; } };
+  const setTok = t => { _tok = t || ''; try{ t?localStorage.setItem(TOK,t):localStorage.removeItem(TOK); }catch(e){} };
   async function api(path, opts){
     opts = opts||{};
     const headers = { 'accept':'application/json' };
@@ -781,7 +785,11 @@ form{margin-top:26px;display:grid;gap:15px}
   $('#btnGenerate').addEventListener('click',()=>newCode());
   $('#btnRegen').addEventListener('click',()=>newCode('Novo código gerado'));
   $('#btnCopy').addEventListener('click',()=>{ if(me&&me.code) copy(me.code.code,'Código copiado para a área de transferência'); });
-  $('#btnOpenMesa').addEventListener('click',()=>{ toast('Abrindo Mesa de Operação…','info'); setTimeout(()=>{ window.location.href='/mesa'; },350); });
+  $('#btnOpenMesa').addEventListener('click',()=>{ toast('Abrindo Mesa de Operação…','info'); setTimeout(()=>{
+    // Hand-off do token pela URL (fragment, não vai ao servidor) — sobrevive mesmo se o
+    // localStorage estiver bloqueado no iframe da Verum. O /mesa lê e limpa o fragment.
+    const t=getTok(); window.location.href='/mesa'+(t?('#tok='+encodeURIComponent(t)):'');
+  },350); });
 
   /* ================= LOGOUT ================= */
   $('#btnLogout').addEventListener('click',async ()=>{
