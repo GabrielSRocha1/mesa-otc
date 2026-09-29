@@ -7,6 +7,8 @@ import { SqlStore, createPgliteClient, createPgClient, type SqlClient } from './
 import type { Store } from './db/repository.js';
 import { AdapterRegistry, type ApprovalVerifier, type SettlementAdapter } from './adapters/types.js';
 import { createLocalAdapters, type LocalChainAdapter } from './adapters/local.js';
+import { EvmChainAdapter, EvmDevKeyring } from './adapters/evm.js';
+import { evmConfig } from './config.js';
 import { AssetRegistry, defaultRegistry } from './engines/assetRegistry.js';
 import { PriceEngine, StaticPriceSource, type PriceSource } from './engines/price.js';
 import { LiquidityEngine, StaticLiquiditySource, type LiquiditySource } from './engines/liquidity.js';
@@ -33,12 +35,11 @@ import type { Deal, Participant } from './domain/types.js';
 import type { ApprovalSignature } from './adapters/types.js';
 
 export interface AppOverrides { autoSettle?: boolean; store?: Store; adapters?: SettlementAdapter[]; priceSources?: PriceSource[]; liquiditySources?: LiquiditySource[]; screening?: WalletScreening; now?: () => number; denylist?: string[] }
-export interface App { config: Config; store: Store; adapters: AdapterRegistry; local?: { evm: LocalChainAdapter; solana: LocalChainAdapter; bitcoin: LocalChainAdapter }; registry: AssetRegistry; price: PriceEngine; liquidity: LiquidityEngine; router: RouterEngine; signature: SignatureEngine; risk: RiskEngine; audit: AuditLog; deals: DealEngine; settlement: SettlementEngine; auth: WalletAuth; identity: IdentityService; rooms: RoomService; proposals: ProposalService; api: Awaited<ReturnType<typeof buildApi>>; sources: { price: StaticPriceSource[]; liquidity: StaticLiquiditySource[] }; startScheduler(): void; stopScheduler(): void; close(): Promise<void> }
+export interface App { config: Config; store: Store; adapters: AdapterRegistry; local?: { evm: LocalChainAdapter; solana: LocalChainAdapter; bitcoin: LocalChainAdapter }; evm?: EvmChainAdapter; registry: AssetRegistry; price: PriceEngine; liquidity: LiquidityEngine; router: RouterEngine; signature: SignatureEngine; risk: RiskEngine; audit: AuditLog; deals: DealEngine; settlement: SettlementEngine; auth: WalletAuth; identity: IdentityService; rooms: RoomService; proposals: ProposalService; api: Awaited<ReturnType<typeof buildApi>>; sources: { price: StaticPriceSource[]; liquidity: StaticLiquiditySource[] }; startScheduler(): void; stopScheduler(): void; close(): Promise<void> }
 
 export const LOCAL_TOKENS = { usdtEth: '0x0000000000000000000000000000000000000001', usdcEth: '0x0000000000000000000000000000000000000002', usdtSol: 'USDT1111111111111111111111111111111111111111', usdcSol: 'USDC1111111111111111111111111111111111111111' };
 export const LOCAL_CODE_HASHES = { usdtEth: 'codehash-usdt-v1', usdcEth: 'codehash-usdc-v1' };
 export const LOCAL_PRICES: Record<string, number> = { 'bip122:regtest/slip44:0': 64_230.5, 'eip155:31337/slip44:60': 2_418.75, 'solana:localnet/slip44:501': 151.2, [`eip155:31337/erc20:${LOCAL_TOKENS.usdtEth}`]: 1.0002, [`eip155:31337/erc20:${LOCAL_TOKENS.usdcEth}`]: 0.9999, [`solana:localnet/token:${LOCAL_TOKENS.usdtSol}`]: 1.0001, [`solana:localnet/token:${LOCAL_TOKENS.usdcSol}`]: 1.0 };
-const LOCAL_DEPTH: Record<string, number> = Object.fromEntries(Object.keys(LOCAL_PRICES).map(k => [k, 8_000_000]));
 
 export async function createApp(config: Config, o: AppOverrides = {}): Promise<App> {
   const now = o.now ?? (() => Date.now());
@@ -65,13 +66,24 @@ export async function createApp(config: Config, o: AppOverrides = {}): Promise<A
   };
   const verifierDealRef = new Map<string, Deal>();
   let local: App['local'];
+  // Modo EVM (contrato real na Sepolia/anvil): o adaptador ethereum real SUBSTITUI o simulador;
+  // solana/bitcoin continuam locais. Keyring dev só fora de produção.
+  const evmCfg = o.adapters ? null : evmConfig(config);
+  let evmAdapter: EvmChainAdapter | undefined; let evmKeyring: EvmDevKeyring | undefined;
   if (o.adapters) o.adapters.forEach(a => adapters.register(a));
   else { local = createLocalAdapters(verifier, now); adapters.register(local.evm).register(local.solana).register(local.bitcoin);
     local.evm.addToken({ contract: LOCAL_TOKENS.usdtEth, symbol: 'USDT', decimals: 6, standard: 'ERC-20', codeHash: LOCAL_CODE_HASHES.usdtEth }).addToken({ contract: LOCAL_TOKENS.usdcEth, symbol: 'USDC', decimals: 6, standard: 'ERC-20', codeHash: LOCAL_CODE_HASHES.usdcEth });
-    local.solana.addToken({ contract: LOCAL_TOKENS.usdtSol, symbol: 'USDT', decimals: 6, standard: 'SPL', codeHash: 'spl', mintAuthority: null }).addToken({ contract: LOCAL_TOKENS.usdcSol, symbol: 'USDC', decimals: 6, standard: 'SPL', codeHash: 'spl', mintAuthority: null }); }
-  const registry = defaultRegistry({ ethereum: adapters.require('ethereum').chain.chainId, solana: adapters.require('solana').chain.chainId, bitcoin: adapters.require('bitcoin').chain.chainId }, LOCAL_TOKENS, LOCAL_CODE_HASHES, { usdtSol: null, usdcSol: null });
-  const priceSources = (o.priceSources as StaticPriceSource[] | undefined) ?? [new StaticPriceSource('Pyth', 1.0, LOCAL_PRICES), new StaticPriceSource('Chainlink', 1.0, LOCAL_PRICES), new StaticPriceSource('Coinbase', 0.8, LOCAL_PRICES), new StaticPriceSource('Kraken', 0.8, LOCAL_PRICES)];
-  const liquiditySources = (o.liquiditySources as StaticLiquiditySource[] | undefined) ?? [new StaticLiquiditySource('Binance', 1.0, LOCAL_DEPTH), new StaticLiquiditySource('Coinbase', 0.9, LOCAL_DEPTH), new StaticLiquiditySource('Jupiter', 0.7, LOCAL_DEPTH)];
+    local.solana.addToken({ contract: LOCAL_TOKENS.usdtSol, symbol: 'USDT', decimals: 6, standard: 'SPL', codeHash: 'spl', mintAuthority: null }).addToken({ contract: LOCAL_TOKENS.usdcSol, symbol: 'USDC', decimals: 6, standard: 'SPL', codeHash: 'spl', mintAuthority: null });
+    if (evmCfg) { evmKeyring = config.OTC_ENV === 'prod' ? undefined : new EvmDevKeyring(config.identityMasterSecret); evmAdapter = new EvmChainAdapter(evmCfg, evmKeyring ?? null); adapters.register(evmAdapter); logger.info({ chainId: evmCfg.chainId, escrow: evmCfg.escrow }, 'modo EVM ativo: liquidação via VerumOtcEscrow real'); } }
+  const tokens = evmCfg ? { ...LOCAL_TOKENS, usdtEth: evmCfg.tusdt } : LOCAL_TOKENS;
+  const registry = defaultRegistry({ ethereum: adapters.require('ethereum').chain.chainId, solana: adapters.require('solana').chain.chainId, bitcoin: adapters.require('bitcoin').chain.chainId }, tokens, LOCAL_CODE_HASHES, { usdtSol: null, usdcSol: null });
+  if (evmCfg) registry.add({ code: 'BTC', network: 'ethereum', chainId: evmCfg.chainId, contractOrMint: evmCfg.tbtc, assetId: `eip155:${evmCfg.chainId}/erc20:${evmCfg.tbtc.toLowerCase()}`, decimals: 8, tokenStandard: 'ERC-20', issuer: 'Verum tBTC (mock)', status: 'active' });
+  // Preços/profundidade dev: no modo EVM os assetIds reais (chainId da testnet) entram na fonte estática.
+  const prices: Record<string, number> = { ...LOCAL_PRICES };
+  if (evmCfg) { prices[`eip155:${evmCfg.chainId}/erc20:${evmCfg.tbtc.toLowerCase()}`] = 64_230.5; prices[`eip155:${evmCfg.chainId}/erc20:${evmCfg.tusdt.toLowerCase()}`] = 1.0002; prices[`eip155:${evmCfg.chainId}/slip44:60`] = 2_418.75; }
+  const depth: Record<string, number> = Object.fromEntries(Object.keys(prices).map(k => [k, 8_000_000]));
+  const priceSources = (o.priceSources as StaticPriceSource[] | undefined) ?? [new StaticPriceSource('Pyth', 1.0, prices), new StaticPriceSource('Chainlink', 1.0, prices), new StaticPriceSource('Coinbase', 0.8, prices), new StaticPriceSource('Kraken', 0.8, prices)];
+  const liquiditySources = (o.liquiditySources as StaticLiquiditySource[] | undefined) ?? [new StaticLiquiditySource('Binance', 1.0, depth), new StaticLiquiditySource('Coinbase', 0.9, depth), new StaticLiquiditySource('Jupiter', 0.7, depth)];
   const price = new PriceEngine(priceSources, undefined, now); const liquidity = new LiquidityEngine(liquiditySources, undefined, now);
   const router = new RouterEngine(adapters); const signature = new SignatureEngine(store, config.OTC_ENV, escrowByChain, now);
   const risk = new RiskEngine(store, o.screening ?? new DenylistScreening(new Set(o.denylist ?? [])), { maxDealUsd: config.MAX_DEAL_USD, maxWalletDailyUsd: config.MAX_DEAL_USD * 5, maxOpenDealsPerWallet: 10 }, now);
@@ -112,11 +124,11 @@ export async function createApp(config: Config, o: AppOverrides = {}): Promise<A
   });
   // Propostas estruturadas de alteração de termos (§5.3/§6) — porta de entrada tipada para o amend.
   const proposals = new ProposalService({ deals, now, audit, notifier: { notify: dealId => logger.info({ dealId }, 'atualização de proposta de termos') } });
-  const api = await buildApi({ deals, settlement, price, liquidity, router, registry, platformFeeBps: config.PLATFORM_FEE_BPS, networkCostUsd: async n => adapters.require(n).estimateCostUsd('settle'), auth, portal, identity, identityDev, rooms, proposals, store, audit, mesaHtmlPath: config.MESA_HTML_PATH, portalHtmlPath: config.PORTAL_HTML_PATH, conviteHtmlPath: config.CONVITE_HTML_PATH, env: config.OTC_ENV, rateLimit: { windowMs: 60_000, max: config.OTC_ENV === 'dev' ? 100_000 : 120 }, dev: local ? { solanaChainId: adapters.require('solana').chain.chainId, mint: (a, c, amt) => local!.solana.mint(a, c, amt) } : undefined });
+  const api = await buildApi({ deals, settlement, price, liquidity, router, registry, platformFeeBps: config.PLATFORM_FEE_BPS, networkCostUsd: async n => adapters.require(n).estimateCostUsd('settle'), auth, portal, identity, identityDev, rooms, proposals, store, audit, mesaHtmlPath: config.MESA_HTML_PATH, portalHtmlPath: config.PORTAL_HTML_PATH, conviteHtmlPath: config.CONVITE_HTML_PATH, env: config.OTC_ENV, rateLimit: { windowMs: 60_000, max: config.OTC_ENV === 'dev' ? 100_000 : 120 }, dev: local ? { solanaChainId: local.solana.chain.chainId, mint: (a, c, amt) => local!.solana.mint(a, c, amt), evm: evmAdapter && evmKeyring && evmCfg ? { chainId: evmCfg.chainId, escrow: evmCfg.escrow, tbtc: evmCfg.tbtc, tusdt: evmCfg.tusdt, explorerBase: evmCfg.explorerBase, keyring: evmKeyring, mintToken: (t, to, amt) => evmAdapter!.mintToken(t, to, amt) } : undefined } : undefined });
   let timer: NodeJS.Timeout | null = null;
   let ticks = 0;
   const tick = async () => { try { const ids = await deals.expireDue(); if (ids.length) logger.info({ ids }, 'deals expiradas'); if (++ticks % 720 === 0) { const purged = await store.purge(now(), 24 * 3600_000); logger.info(purged, 'retenção'); } metrics.priceBreakerOpen.set(price.breakerState().open ? 1 : 0); for (const s of ['AWAITING_SIGNATURES', 'SETTLING', 'SETTLEMENT_VALIDATION', 'REFUNDING'] as const) metrics.activeDeals.set({ state: s }, (await store.listDeals({ states: [s] })).length); } catch (e) { logger.error({ err: (e as Error).message }, 'scheduler'); } };
-  return { config, store, adapters, local, registry, price, liquidity, router, signature, risk, audit, deals, settlement, auth, identity, rooms, proposals, api, sources: { price: priceSources, liquidity: liquiditySources },
+  return { config, store, adapters, local, evm: evmAdapter, registry, price, liquidity, router, signature, risk, audit, deals, settlement, auth, identity, rooms, proposals, api, sources: { price: priceSources, liquidity: liquiditySources },
     startScheduler() { if (!timer) timer = setInterval(() => { void tick(); }, config.EXPIRY_SCAN_MS); }, stopScheduler() { if (timer) clearInterval(timer); timer = null; },
     async close() { if (timer) clearInterval(timer); timer = null; await api.close(); await store.close(); } };
 }

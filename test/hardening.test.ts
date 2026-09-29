@@ -1,7 +1,7 @@
 /** Production hardening: matriz de assinaturas, expiração em massa, concorrência/dupla liquidação, disjuntor de preço, cabeçalhos, nonces. */
 import { describe, it, expect } from 'vitest';
 import { makeApp, prepareDeal, signAs, solWallet, participantsOf, ASSETS, type Parts } from './helpers.js';
-import { SIGNING_ORDER, type Role } from '../src/domain/types.js';
+import { SIGNING_ORDER } from '../src/domain/types.js';
 import { DomainError } from '../src/domain/errors.js';
 import { htlcHashOf } from '../src/engines/deal.js';
 import { sha256Hex } from '../src/domain/types.js';

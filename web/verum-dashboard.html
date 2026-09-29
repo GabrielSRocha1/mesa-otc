@@ -923,6 +923,12 @@ img,svg,canvas,video{max-width:100%}
               <div class="op-step lock"><div class="line"></div><div class="dot"><svg viewBox="0 0 24 24"><rect x="5" y="11" width="14" height="9" rx="2"/><path d="M8 11V8a4 4 0 018 0v3"/></svg></div><div class="nm">Comprador</div><div class="meta">Aguardando Pay Master 2</div><div class="addr2">7xK9…91Ac</div></div>
             </div>
           </section>
+
+          <!-- Contrato de liquidação (modo EVM): escrow real + transferências BTC→Vendedor / USDT→Comprador -->
+          <section class="card" id="opContractCard" style="display:none">
+            <div class="card-h"><div class="t"><svg viewBox="0 0 24 24" style="width:17px;height:17px;stroke:var(--blue);fill:none;stroke-width:2;vertical-align:-3px;margin-right:6px"><path d="M9 12h6M9 8h6M9 16h3"/><rect x="4" y="3" width="16" height="18" rx="2"/></svg>Contrato de liquidação</div><span class="badge info" id="opCtrChain">EVM</span></div>
+            <div class="kv" id="opCtrRows"></div>
+          </section>
         </div>
 
         <!-- Aside: Resumo -->
@@ -952,6 +958,7 @@ img,svg,canvas,video{max-width:100%}
               <div class="r"><span class="k">Criada em</span><span class="v" id="opInfoCreated">—</span></div>
               <div class="r"><span class="k">Expiração</span><span class="v" id="opInfoExp">—</span></div>
               <div class="r"><span class="k">Rede de liquidação</span><span class="v" id="opInfoNet">—</span></div>
+              <div class="r"><span class="k">Contrato de liquidação</span><span class="v mono" id="opInfoContract">—</span></div>
               <div class="r"><span class="k">Comissão</span><span class="v" id="opInfoComm">—</span></div>
               <div class="r"><span class="k">Deságio</span><span class="v" id="opInfoDesc">—</span></div>
               <div class="r"><span class="k">Slippage máximo</span><span class="v" id="opInfoSlip">—</span></div>
@@ -1764,6 +1771,7 @@ img,svg,canvas,video{max-width:100%}
     if($('#opInfoSlip')) $('#opInfoSlip').textContent=opNum(opFees.maxSlippagePct,2)+'%';
     const on=OP_ROLES.filter(r=>{ const s=opSlot(r.role); return s&&s.wallet&&s.status==='confirmed'; }).length;
     if($('#opInfoWallets')) $('#opInfoWallets').textContent=on+'/4 conectadas';
+    if($('#opInfoContract')) $('#opInfoContract').textContent=(d&&d.escrowContract)?shortAddr(d.escrowContract):'— (criado ao iniciar na mesa)';
     const note=$('#opInfoSimNote'); if(note) note.style.display=sim?'':'none';
   }
   // Atualiza o teto (saldo real do Vendedor na rede do ativo entregue) — só nativo.
@@ -1789,12 +1797,19 @@ img,svg,canvas,video{max-width:100%}
     const order=OP_SIGN_ORDER.filter(r=>(d.participants||[]).some(p=>p.role===r));
     const signed=new Set(d.signed||[]);
     const addrOf=r=>{ const p=(d.participants||[]).find(x=>x.role===r); return p?shortAddr(p.address):''; };
+    // 5ª etapa: liquidação via smart contract (dirigida pelos estados pós-assinatura)
+    let sCls='lock', sMeta='Aguardando as 4 assinaturas';
+    if(['FULLY_SIGNED','SETTLEMENT_VALIDATION'].includes(d.state)){ sCls='turn'; sMeta='Validando liquidação…'; }
+    else if(d.state==='SETTLING'){ sCls='turn'; sMeta='Executando no contrato…'; }
+    else if(d.state==='SETTLED'){ sCls='done'; sMeta='Liquidada no contrato'; }
+    else if(['BLOCKED','REFUNDING','REFUNDED','EXPIRED','CANCELLED'].includes(d.state)){ sMeta='Não liquidada ('+d.state+')'; }
+    const settleStep='<div class="op-step '+sCls+'"><div class="line"></div><div class="dot">'+OP_DOT[sCls]+'</div><div class="nm">Liquidação via contrato</div><div class="meta">'+esc(sMeta)+'</div><div class="addr2">'+esc(d.escrowContract?shortAddr(d.escrowContract):'')+'</div></div>';
     steps.innerHTML=order.map((r,i)=>{
       const isSigned=signed.has(r), isTurn=d.turnRole===r; const cls=isSigned?'done':isTurn?'turn':'lock';
       const meta=isSigned?'Assinado':isTurn?'Sua vez de assinar':('Aguardando '+(OP_STEP_LABEL[order[i-1]]||'anterior'));
       const chip=(isTurn&&d.turnExpiresAt)?'<div class="op-turn-chip" data-turn-exp="'+d.turnExpiresAt+'"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 8v4l2 2"/></svg><span class="op-turn-cd">'+fmtCountdown(d.turnExpiresAt)+'</span></div>':'';
       return '<div class="op-step '+cls+'"><div class="line"></div><div class="dot">'+OP_DOT[cls]+'</div><div class="nm">'+esc(OP_STEP_LABEL[r]||r)+'</div><div class="meta">'+esc(meta)+'</div>'+chip+'<div class="addr2">'+esc(addrOf(r))+'</div></div>';
-    }).join('');
+    }).join('')+settleStep;
     const req=d.requiredSignatures||order.length, val=d.validSignatures||0, pct=req?Math.round(val/req*100):0;
     if($('#opSigTxt')) $('#opSigTxt').textContent=val+' de '+req+' assinaturas';
     if($('#opSigBar')) $('#opSigBar').style.width=pct+'%';
@@ -1805,7 +1820,30 @@ img,svg,canvas,video{max-width:100%}
     const sbtn=$('#opSignTurn'); if(sbtn) sbtn.style.display = (awaiting&&d.turnRole)?'':'none';
     const nbtn=$('#opNewDeal'); if(nbtn) nbtn.style.display = awaiting?'':'none'; // com deal em andamento, permite abandonar e criar outra
     startTurnCountdown();
+    renderContract(d);
     opRenderInfo();
+  }
+  // Painel "Contrato de liquidação" (modo EVM): endereço do escrow + transferências reais com txids.
+  function renderContract(d){
+    const card=$('#opContractCard'); if(!card) return;
+    if(!d||d.settlementMode!=='evm'||!d.escrowContract){ card.style.display='none'; return; }
+    card.style.display='';
+    const chainEl=$('#opCtrChain'); if(chainEl) chainEl.textContent=d.escrowChainId===('11155111')?'Sepolia':(d.escrowChainId?('Chain '+d.escrowChainId):'EVM');
+    const ex=d.explorerBase||'';
+    const link=(kind,val,text)=> ex?('<a href="'+ex+'/'+kind+'/'+encodeURIComponent(val)+'" target="_blank" rel="noopener" style="color:var(--blue);text-decoration:none">'+esc(text)+' ↗</a>'):('<span class="mono copy" data-ctr-copy="'+esc(val)+'" style="cursor:pointer" title="Copiar">'+esc(text)+' ⧉</span>');
+    const STEP={VALIDATED:['info','Validada'],SUBMITTED:['info','Enviada'],INCLUDED:['info','Incluída'],FINAL:['ok','Final'],FAILED:['err','Falhou']};
+    let rows='<div class="r"><span class="k">Endereço do contrato (escrow)</span><span class="v mono">'+link('address',d.escrowContract,shortAddr(d.escrowContract))+'</span></div>';
+    const legs=(d.settlement&&d.settlement.legs)||[];
+    if(!legs.length){
+      rows+='<div class="r"><span class="k">Transferências</span><span class="v" style="color:var(--ink-3)">Executadas pelo contrato após as 4 assinaturas</span></div>';
+    }
+    legs.forEach(l=>{
+      const st=STEP[l.step]||['info',l.step||'—'];
+      rows+='<div class="r"><span class="k">'+esc(l.label||('Transferência '+l.index))+'</span><span class="v" style="display:flex;gap:8px;align-items:center;justify-content:flex-end;flex-wrap:wrap">'
+        +(l.txRef&&/^0x[0-9a-fA-F]{64}$/.test(l.txRef)?link('tx',l.txRef,shortAddr(l.txRef)):'<span style="color:var(--ink-3)">—</span>')
+        +'<span class="badge '+st[0]+'">'+esc(st[1])+(l.confirmations?(' · '+l.confirmations+' conf'):'')+'</span></span></div>';
+    });
+    const box=$('#opCtrRows'); if(box){ box.innerHTML=rows; $$('#opCtrRows [data-ctr-copy]').forEach(el=>el.addEventListener('click',()=>{ clip(el.dataset.ctrCopy); toast('Copiado','ok'); })); }
   }
   // Base58 (Bitcoin/Solana) — sem dependência externa (CSP bloqueia CDN).
   const B58='123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz';
@@ -1826,6 +1864,21 @@ img,svg,canvas,video{max-width:100%}
     const turn=(d.participants||[]).find(p=>p.role===d.turnRole);
     const btn=$('#opSignTurn'); if(btn){ btn.disabled=true; btn.textContent='Assinando…'; }
     try{
+      // Modo EVM: o backend assina o digest EIP-712 do turno com a EOA dev do papel (contrato real).
+      if(d.settlementMode==='evm'){
+        const body={};
+        if(is2FAOn()){ const code=await ask2FACode(); if(!code) throw new Error('Assinatura cancelada'); body.twoFactorCode=code; }
+        let out;
+        try{ out=await pmApi('/v1/portal/mesa/deal/sign',{method:'POST',body}); }
+        catch(e){
+          if(e&&e.code==='TWO_FACTOR_REQUIRED'){ secState.twoFactor={enabled:true}; reflectSecurity(); const code=await ask2FACode(); if(!code) throw new Error('Assinatura cancelada'); body.twoFactorCode=code; out=await pmApi('/v1/portal/mesa/deal/sign',{method:'POST',body}); }
+          else throw e;
+        }
+        opDeal=out; renderEsteira(out);
+        const all=['SETTLEMENT_VALIDATION','SETTLING','SETTLED'].includes(out.state);
+        toast('Assinatura registrada · '+(OP_STEP_LABEL[d.turnRole]||d.turnRole)+(all?' · todas assinadas! Liquidando no contrato…':''),'ok');
+        refreshMesaDeal(); return;
+      }
       const prov=solProvider(); if(!prov) throw new Error('Verum Wallet (Solana) não encontrada nesta aba');
       __dbg('signTurn connect'); const r=await prov.connect(); const address=(r&&r.publicKey?r.publicKey:prov.publicKey).toString();
       if(turn && address!==turn.address) throw new Error('Carteira conectada ('+shortAddr(address)+') não é a do papel da vez: '+OP_STEP_LABEL[d.turnRole]+' ('+shortAddr(turn.address)+')');
@@ -1898,11 +1951,14 @@ img,svg,canvas,video{max-width:100%}
   }
   function dealCardsHtml(list,activeId){
     return list.map(d=>{
-      const sol=d.amountInBase?Number(BigInt(d.amountInBase)/1000000n)/1000:null; // base 9 casas → até 3 decimais
+      // Par real vindo do backend (pair.in/out); fallback: demo antiga SOL→USDC (base 9)
+      let amt=null, pairTxt='SOL → USDC';
+      if(d.pair&&d.pair.in&&d.pair.in.code){ pairTxt=d.pair.in.code+' → '+(d.pair.out&&d.pair.out.code?d.pair.out.code:'—'); if(d.pair.in.amountBase!=null&&d.pair.in.decimals!=null){ try{ amt=opNum(Number(d.pair.in.amountBase)/Math.pow(10,d.pair.in.decimals)); }catch(e){} } }
+      else if(d.amountInBase){ try{ amt=opNum(Number(BigInt(d.amountInBase)/1000000n)/1000); }catch(e){} }
       const dt=d.createdAt?new Date(d.createdAt).toLocaleString('pt-BR',{day:'2-digit',month:'2-digit',hour:'2-digit',minute:'2-digit'}):'';
       const turn=(d.state==='AWAITING_SIGNATURES'&&d.turnRole)?(' · vez: '+(OP_STEP_LABEL[d.turnRole]||d.turnRole)):'';
       return '<div class="op-deal-card'+(d.id===activeId?' active':'')+'" data-deal="'+esc(d.id)+'" role="button" tabindex="0">'
-        +'<div><div class="dpair">'+(sol!=null?opNum(sol)+' ':'')+'SOL → USDC</div><div class="did">'+esc(d.id)+'</div><div class="dmeta">'+esc(dt)+' · '+d.validSignatures+'/'+d.requiredSignatures+' assinaturas'+esc(turn)+'</div></div>'
+        +'<div><div class="dpair">'+(amt!=null?amt+' ':'')+esc(pairTxt)+'</div><div class="did">'+esc(d.id)+'</div><div class="dmeta">'+esc(dt)+' · '+d.validSignatures+'/'+d.requiredSignatures+' assinaturas'+esc(turn)+'</div></div>'
         +'<div class="dright">'+opStateBadge(d.state)+(d.id===activeId?'<span style="font-size:10.5px;color:var(--blue);font-weight:700">Aberta na esteira</span>':'')+'</div></div>';
     }).join('');
   }

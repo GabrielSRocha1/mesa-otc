@@ -20,6 +20,7 @@ export interface NativeBalance {
 
 const TIMEOUT_MS = 8000;
 
+// eslint-disable-next-line @typescript-eslint/no-explicit-any -- JSON externo de RPCs públicos; shape varia por chain
 export async function fetchJson(url: string, init?: RequestInit): Promise<any> {
   const ctrl = new AbortController();
   const timer = setTimeout(() => ctrl.abort(), TIMEOUT_MS);
@@ -52,6 +53,7 @@ function pack(rawInt: bigint, c: ChainDef): NativeBalance {
   return { raw: rawInt.toString(), amount: fromBase(rawInt, c.nativeDecimals), symbol: c.nativeSymbol, decimals: c.nativeDecimals };
 }
 
+// eslint-disable-next-line @typescript-eslint/no-explicit-any -- JSON-RPC externo; shape varia por chain
 export async function rpcPost(endpoint: string, body: unknown): Promise<any> {
   return fetchJson(endpoint, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) });
 }
@@ -208,6 +210,7 @@ async function readStellar(c: ChainDef, address: string): Promise<NativeBalance 
   if (j?.__notFound) return pack(0n, c); // conta não fundada
   const balances = j?.balances;
   if (!Array.isArray(balances)) return null;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- resposta do Horizon (Stellar)
   const native = balances.find((b: any) => b.asset_type === 'native');
   if (!native) return pack(0n, c);
   // Stellar já devolve decimal ("123.4567000"); converte para base inteira.

@@ -170,7 +170,7 @@ export class DealEngine {
       return deal;
     } finally { end(); }
   }
-  private commitment(deal: Deal): DealCommitment { const t = deal.terms as Terms; const h = deal.hash as NonNullable<Deal['hash']>; return { dealId: deal.id, revision: deal.revision, dealHash: h.dealHash, expiresAt: t.expiresAt, participants: t.participants, legs: t.legs, pricingHash: h.pricingHash, routeHash: h.routeHash, domainHash: h.domainHash, dealNonce: t.dealNonce, feeBps: t.pricing.platformFeeBps, treasury: this.d.config.treasury, htlcHash: t.route.htlcHash }; }
+  private commitment(deal: Deal): DealCommitment { const t = deal.terms as Terms; const h = deal.hash as NonNullable<Deal['hash']>; return { dealId: deal.id, revision: deal.revision, dealHash: h.dealHash, expiresAt: t.expiresAt, participants: t.participants, legs: t.legs, pricingHash: h.pricingHash, routeHash: h.routeHash, domainHash: h.domainHash, dealNonce: t.dealNonce, feeBps: t.pricing.platformFeeBps, treasury: this.d.config.treasury, htlcHash: t.route.htlcHash, terms: t }; }
   private async registerOnChain(deal: Deal): Promise<void> {
     const c = this.commitment(deal);
     for (const chain of new Set(c.legs.map(l => l.escrowChain))) { try { const tx = await this.d.adapters.require(chain).registerDeal(c); deal.onChain[chain] = { registered: true, revision: deal.revision }; await this.persist(deal, 'chain.registered', 'keeper', { chain, tx: tx.ref }); } catch (e) { metrics.adapterErrors.inc({ chain, op: 'register' }); throw e; } }

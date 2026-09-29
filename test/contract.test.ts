@@ -17,8 +17,19 @@ async function fullFlow(d: DealSetup) { await fundAll(d); const r = await regist
 beforeAll(async () => {
   await chain.init(); for (const w of [admin, guardian, keeper, outsider]) await chain.fund(w.address, 10n ** 20n);
   usdc = await chain.deploy(admin.address, ERC20, ['USD Coin', 'USDC', 6]); guard = await chain.deploy(admin.address, GUARD, []);
-  chain.contract = await chain.deploy(admin.address, ESCROW, [admin.address, guardian.address, keeper.address, treasury, guard, NATIVE_HASH]);
+  chain.contract = await chain.deploy(admin.address, ESCROW, [admin.address, guardian.address, keeper.address, treasury, guard, NATIVE_HASH, []]);
   await chain.allowAsset(admin.address, usdc, 6, keccak256(stringToHex(usdcId())));
+});
+
+describe('Constructor initialAssets (devnet/testnet)', () => {
+  it('registra ativos no deploy sem timelock; revert se decimals divergirem ou token for o nativo', async () => {
+    const tok = await chain.deploy(admin.address, ERC20, ['Test BTC', 'tBTC', 8]);
+    const cid = keccak256(stringToHex(`eip155:1/erc20:${tok.toLowerCase()}`));
+    const c2 = await chain.deploy(admin.address, ESCROW, [admin.address, guardian.address, keeper.address, treasury, guard, NATIVE_HASH, [{ token: tok, decimals: 8, canonicalId: cid }]]);
+    expect(await chain.view<boolean>('tokenAllowed', [tok], c2)).toBe(true);
+    await expect(chain.deploy(admin.address, ESCROW, [admin.address, guardian.address, keeper.address, treasury, guard, NATIVE_HASH, [{ token: tok, decimals: 6, canonicalId: cid }]])).rejects.toThrow();
+    await expect(chain.deploy(admin.address, ESCROW, [admin.address, guardian.address, keeper.address, treasury, guard, NATIVE_HASH, [{ token: '0x0000000000000000000000000000000000000000', decimals: 18, canonicalId: cid }]])).rejects.toThrow();
+  });
 });
 
 describe('Máquina de estados e fluxo feliz', () => {

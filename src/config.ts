@@ -30,6 +30,16 @@ const Schema = z.object({
   SMS_ALLOWED_CALLING_CODES: z.string().default('1,33,34,39,44,49,351,52,54,55,56,57,595,598'),
   SMS_DAILY_CAP: z.coerce.number().int().min(1).default(1000),
   WALLET_RECOVERY_GRACE_MS: z.coerce.number().int().min(60_000).default(72 * 3600_000),
+  // Liquidação via contrato REAL numa rede EVM de teste (Sepolia/anvil). Todas opcionais:
+  // sem o conjunto completo, o modo simulado (LocalChainAdapter) permanece intacto.
+  EVM_RPC_URL: z.string().optional(),
+  EVM_CHAIN_ID: z.string().optional(),
+  EVM_ESCROW_ADDRESS: z.string().regex(/^0x[0-9a-fA-F]{40}$/).optional(),
+  EVM_KEEPER_KEY: z.string().regex(/^0x[0-9a-fA-F]{64}$/).optional(),
+  EVM_TBTC: z.string().regex(/^0x[0-9a-fA-F]{40}$/).optional(),
+  EVM_TUSDT: z.string().regex(/^0x[0-9a-fA-F]{40}$/).optional(),
+  EVM_CONFIRMATIONS: z.coerce.number().int().min(1).max(64).default(1),
+  EVM_EXPLORER_BASE: z.string().optional(),
   LOG_LEVEL: z.string().default('info')
 });
 export type Config = z.infer<typeof Schema> & { sessionSecret: string; operators: Set<string>; identityMasterSecret: string };
@@ -47,5 +57,16 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
   const sessionSecret = c.SESSION_SECRET ?? randomBytes(48).toString('hex');
   // Em dev/teste, deriva um segredo mestre efêmero de 32 bytes (nunca no código).
   const identityMasterSecret = c.IDENTITY_MASTER_SECRET ?? randomBytes(32).toString('hex');
+  // Modo EVM: ou o conjunto essencial completo, ou nada (evita meia-configuração silenciosa).
+  const evmKeys = [c.EVM_RPC_URL, c.EVM_CHAIN_ID, c.EVM_ESCROW_ADDRESS, c.EVM_KEEPER_KEY, c.EVM_TBTC, c.EVM_TUSDT];
+  const evmSet = evmKeys.filter(Boolean).length;
+  if (evmSet > 0 && evmSet < evmKeys.length) throw new Error('Modo EVM exige TODAS as envs: EVM_RPC_URL, EVM_CHAIN_ID, EVM_ESCROW_ADDRESS, EVM_KEEPER_KEY, EVM_TBTC, EVM_TUSDT (rode npm run contracts:deploy)');
   return { ...c, sessionSecret, identityMasterSecret, operators: new Set(c.OPERATOR_ADDRESSES.split(',').map(s => s.trim().toLowerCase()).filter(Boolean)) };
+}
+
+/** Configuração do modo EVM (contrato real). null = modo simulado. */
+export interface EvmSettings { rpcUrl: string; chainId: string; escrow: `0x${string}`; keeperKey: `0x${string}`; tbtc: `0x${string}`; tusdt: `0x${string}`; confirmations: number; explorerBase: string | null }
+export function evmConfig(c: Config): EvmSettings | null {
+  if (!c.EVM_RPC_URL || !c.EVM_CHAIN_ID || !c.EVM_ESCROW_ADDRESS || !c.EVM_KEEPER_KEY || !c.EVM_TBTC || !c.EVM_TUSDT) return null;
+  return { rpcUrl: c.EVM_RPC_URL, chainId: c.EVM_CHAIN_ID, escrow: c.EVM_ESCROW_ADDRESS as `0x${string}`, keeperKey: c.EVM_KEEPER_KEY as `0x${string}`, tbtc: c.EVM_TBTC as `0x${string}`, tusdt: c.EVM_TUSDT as `0x${string}`, confirmations: c.EVM_CONFIRMATIONS, explorerBase: c.EVM_EXPLORER_BASE?.replace(/\/$/, '') ?? null };
 }

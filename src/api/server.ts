@@ -39,7 +39,9 @@ import { getIconMap } from '../chains/icons.js';
 const MAX_STREAMS_PER_SESSION = 8; const streams = new Map<string, number>();
 
 /** Simulador local usado só em dev para dar saldo ao Vendedor ao criar a Deal-demo da mesa. */
-export interface DevMint { solanaChainId: string; mint: (address: string, contract: string | null, amount: bigint) => unknown }
+export interface DevMint { solanaChainId: string; mint: (address: string, contract: string | null, amount: bigint) => unknown; evm?: DevEvm }
+/** Modo EVM dev: contrato real (Sepolia/anvil), keyring de EOAs dev e mint dos tokens mock. */
+export interface DevEvm { chainId: string; escrow: string; tbtc: `0x${string}`; tusdt: `0x${string}`; explorerBase: string | null; keyring: import('../adapters/evm.js').EvmDevKeyring; mintToken: (token: `0x${string}`, to: string, amount: bigint) => Promise<void> }
 export interface ApiDeps { deals: DealEngine; settlement: SettlementEngine; price: PriceEngine; liquidity: LiquidityEngine; router: RouterEngine; registry: AssetRegistry; platformFeeBps: number; networkCostUsd: (n: Network) => Promise<string>; auth: WalletAuth; portal: PortalService; identity: IdentityService; identityDev?: { email: FakeEmailChannel; sms: FakeSmsChannel }; rooms: RoomService; proposals: ProposalService; store: Store; audit: AuditLog; mesaHtmlPath?: string; portalHtmlPath?: string; conviteHtmlPath?: string; env: string; rateLimit?: { windowMs: number; max: number }; dev?: DevMint }
 declare module 'fastify' { interface FastifyRequest { session: Session | null } }
 
@@ -278,7 +280,23 @@ export async function buildApi(deps: ApiDeps): Promise<FastifyInstance> {
   app.get('/v1/portal/mesa', async req => deps.portal.listMesa(portalToken(req)));
 
   // ---- Operação (Deal real) a partir da mesa: cria no DealEngine e expõe o estado vivo p/ a esteira ----
-  const mesaDealView = (d: Deal) => ({ id: d.id, state: d.state, createdAt: d.createdAt, amountInBase: d.draft?.amountInBase ?? null, requiredSignatures: d.requiredSignatures, validSignatures: d.validSignatures, turnRole: d.turnRole ?? null, turnExpiresAt: d.turnExpiresAt ?? null, expiresAt: d.expiresAt, signed: d.signatures.filter(s => s.status === 'valid' && s.revision === d.revision).map(s => s.role), participants: d.participants.map(p => ({ role: p.role, address: p.address })) });
+  // No modo EVM inclui o contrato de liquidação e as transferências (txids reais) p/ o painel do frontend.
+  const mesaDealView = async (d: Deal) => {
+    const ev = deps.dev?.evm ?? null;
+    const legs = d.terms?.legs ?? [];
+    const rec = d.settlement ?? (legs.length && ['SETTLEMENT_VALIDATION', 'SETTLING', 'SETTLED', 'BLOCKED', 'REFUNDING', 'REFUNDED'].includes(d.state) ? await deps.store.getSettlement(d.id).catch(() => null) : null);
+    const legLabel = (i: number) => { const leg = legs.find(l => l.index === i); return leg ? `${leg.asset.code} → carteira do ${leg.to === 'SELLER' ? 'Vendedor' : 'Comprador'}` : `Transferência ${i}`; };
+    return {
+      id: d.id, state: d.state, createdAt: d.createdAt, amountInBase: d.draft?.amountInBase ?? null, requiredSignatures: d.requiredSignatures, validSignatures: d.validSignatures,
+      turnRole: d.turnRole ?? null, turnExpiresAt: d.turnExpiresAt ?? null, expiresAt: d.expiresAt,
+      signed: d.signatures.filter(s => s.status === 'valid' && s.revision === d.revision).map(s => s.role),
+      participants: d.participants.map(p => ({ role: p.role, address: p.address })),
+      settlementMode: ev ? 'evm' as const : 'local' as const,
+      escrowContract: legs[0]?.escrowContract ?? null, escrowChainId: ev?.chainId ?? null, explorerBase: ev?.explorerBase ?? null,
+      pair: { in: { code: d.draft.assetIn.code, decimals: d.draft.assetIn.decimals, amountBase: d.draft.amountInBase }, out: { code: d.draft.assetOut.code, decimals: d.draft.assetOut.decimals, amountBase: legs[1]?.amountBase ?? null } },
+      settlement: rec ? { status: rec.status, legs: rec.legs.map(l => ({ index: l.index, label: legLabel(l.index), txRef: l.txRef, step: l.step, confirmations: l.confirmations })) } : null
+    };
+  };
   app.post('/v1/portal/mesa/deal', async (req, reply) => {
     const token = portalToken(req);
     if (!deps.dev) throw new DomainError('SETTLEMENT_NOT_ALLOWED', 'Criação de operação da mesa está disponível apenas em ambiente de desenvolvimento');
@@ -286,6 +304,25 @@ export async function buildApi(deps: ApiDeps): Promise<FastifyInstance> {
     deps.portal.require2FA(token, b.twoFactorCode); // 2FA (se ativo) exigido para assinar operações
     const parts = deps.portal.mesaParticipants(token);
     const seller = parts.find(p => p.role === 'SELLER'); if (!seller) throw new DomainError('INVALID_INPUT', 'Mesa sem Vendedor');
+    // ── Modo EVM: deal REAL no VerumOtcEscrow (Sepolia/anvil). Vendedor entrega tUSDT (leg 0 → Comprador);
+    // Comprador paga tBTC (leg 1 → Vendedor). EOAs dev derivadas por dono do slot; depósitos on-chain de verdade.
+    if (deps.dev.evm) {
+      const ev = deps.dev.evm;
+      const evmParts = parts.map(p => ({ role: p.role, network: 'ethereum', chainId: ev.chainId, address: ev.keyring.addressFor(p.address) }));
+      const sellerEvm = evmParts.find(p => p.role === 'SELLER') as { role: Role; address: string }; const buyerEvm = evmParts.find(p => p.role === 'BUYER');
+      // teto dev: mantém o valor abaixo do limite de risco (MAX_DEAL_USD) — tUSDT tem 6 casas
+      const amountInBase = String(BigInt(b.amountInBase ?? '50000000000') > 80_000_000_000n ? 80_000_000_000n : BigInt(b.amountInBase ?? '50000000000'));
+      await ev.mintToken(ev.tusdt, sellerEvm.address, BigInt(amountInBase) * 2n);      // tUSDT p/ o Vendedor depositar (verify checa saldo)
+      if (buyerEvm) await ev.mintToken(ev.tbtc, buyerEvm.address, 10n ** 12n);         // 10.000 tBTC — folga p/ amountOut + comissão
+      const input = { assetIn: { network: 'ethereum', chainId: ev.chainId, contractOrMint: ev.tusdt }, assetOut: { network: 'ethereum', chainId: ev.chainId, contractOrMint: ev.tbtc }, amountInBase, discountBps: b.discountBps, commissionBps: b.commissionBps, commissionSplitBps: b.commissionSplitBps, maxSlippageBps: b.maxSlippageBps, maxPriceDriftBps: 100, expiresInSec: b.expiresInSec, participants: evmParts };
+      const created = await deps.deals.create(input, sellerEvm.address);
+      for (const p of evmParts) await deps.deals.connectWallet(created.id, p.role, p.address, p.address); // último connect congela termos + register() on-chain
+      await deps.deals.open(created.id, sellerEvm.address);
+      try { await deps.deals.fund(created.id, 'SELLER', sellerEvm.address); if (buyerEvm) await deps.deals.fund(created.id, 'BUYER', buyerEvm.address); } catch (e) { logger.warn({ dealId: created.id, err: (e as Error).message }, 'auto-funding EVM dev falhou'); }
+      deps.portal.setMesaDeal(token, created.id);
+      await deps.audit.append({ actorType: 'user', actorId: sellerEvm.address, category: 'portal.mesa.deal.created', dealId: created.id, payload: { participants: parts.length, mode: 'evm', chainId: ev.chainId } });
+      void reply.code(201); return mesaDealView(await deps.deals.get(created.id));
+    }
     const chainId = deps.dev.solanaChainId;
     const usdc = deps.registry.list().find(a => a.code === 'USDC' && a.network === 'solana'); if (!usdc) throw new DomainError('ASSET_NOT_CANONICAL', 'USDC (Solana) ausente no registro');
     const amountInBase = b.amountInBase ?? '100000000000'; // 100 SOL (demo dev)
@@ -302,13 +339,32 @@ export async function buildApi(deps: ApiDeps): Promise<FastifyInstance> {
     await deps.audit.append({ actorType: 'user', actorId: seller.address, category: 'portal.mesa.deal.created', dealId: created.id, payload: { participants: parts.length } });
     void reply.code(201); return mesaDealView(opened);
   });
-  app.get('/v1/portal/mesa/deal', async req => { const id = deps.portal.getMesaDeal(portalToken(req)); if (!id) return { deal: null }; const d = await deps.deals.get(id).catch(() => null); return { deal: d ? mesaDealView(d) : null }; });
+  app.get('/v1/portal/mesa/deal', async req => { const id = deps.portal.getMesaDeal(portalToken(req)); if (!id) return { deal: null }; const d = await deps.deals.get(id).catch(() => null); return { deal: d ? await mesaDealView(d) : null }; });
+  // Assinatura da vez pela mesa (modo EVM dev): o backend assina o digest EIP-712 do turno atual com a
+  // EOA dev do papel — todas as validações do Deal Engine (ordem, turno 5 min, nonce, cripto) permanecem.
+  app.post('/v1/portal/mesa/deal/sign', async req => {
+    const token = portalToken(req);
+    const ev = deps.dev?.evm; if (!ev) throw new DomainError('SETTLEMENT_NOT_ALLOWED', 'Assinatura pela mesa disponível apenas no modo EVM (dev)');
+    const b = parse(z.object({ twoFactorCode: z.string().max(12).optional() }), req.body ?? {});
+    deps.portal.require2FA(token, b.twoFactorCode);
+    const id = deps.portal.getMesaDeal(token); if (!id) throw new DomainError('INVALID_INPUT', 'Nenhuma operação ativa na mesa');
+    const d = await deps.deals.get(id);
+    const role = d.turnRole; if (!role) throw new DomainError('SETTLEMENT_NOT_ALLOWED', 'Nenhum turno de assinatura em aberto');
+    const p = d.participants.find(x => x.role === role); if (!p) throw new DomainError('NOT_PARTICIPANT', 'papel da vez sem participante');
+    const acc = ev.keyring.accountByAddress(p.address); if (!acc) throw new DomainError('FORBIDDEN', 'carteira do papel não é gerida pelo keyring dev');
+    const env = await deps.deals.envelope(id, role, p.address);
+    if (!env.typedData) throw new DomainError('SETTLEMENT_NOT_ALLOWED', 'envelope EIP-712 ausente (participante não é EVM)');
+    const signature = await acc.signTypedData({ domain: env.typedData.domain, types: env.typedData.types, primaryType: 'DealApproval', message: env.typedData.message });
+    const r = await deps.deals.submitSignature(id, { role, signer: p.address, scheme: 'secp256k1', signature, nonce: env.payload.nonce }, p.address);
+    await deps.audit.append({ actorType: 'user', actorId: p.address, category: 'portal.mesa.deal.signed', dealId: id, payload: { role, count: r.count } });
+    return mesaDealView(r.deal);
+  });
   // Histórico da mesa: todas as operações já criadas (mais recentes primeiro) + qual está ativa na esteira.
   app.get('/v1/portal/mesa/deals', async req => {
     const token = portalToken(req);
     const ids = deps.portal.getMesaDeals(token);
-    const deals = (await Promise.all(ids.map(id => deps.deals.get(id).catch(() => null)))).filter((d): d is Deal => d !== null).map(mesaDealView);
-    return { deals, activeId: deps.portal.getMesaDeal(token) };
+    const found = (await Promise.all(ids.map(id => deps.deals.get(id).catch(() => null)))).filter((d): d is Deal => d !== null);
+    return { deals: await Promise.all(found.map(mesaDealView)), activeId: deps.portal.getMesaDeal(token) };
   });
   // Abre (torna ativa) uma operação do histórico — a esteira e a assinatura passam a apontar p/ ela.
   app.post('/v1/portal/mesa/deal/select', async req => {

@@ -49,6 +49,8 @@ contract VerumOtcEscrow is EIP712, AccessControl, Pausable, ReentrancyGuard {
     enum Status { NONE, CREATED, ASSETS_LOCKED, AWAITING_SIGNATURES, FULLY_SIGNED, VALIDATING, SETTLING, SETTLED, EXPIRED, REFUNDING, REFUNDED, CANCELLED, SUPERSEDED }
 
     struct AssetInfo { bool allowed; uint8 decimals; bytes32 canonicalId; }
+    /// @dev Ativo ERC-20 registrado no deploy (devnet/testnet): decisão de deploy-time, tão imutável quanto `treasury`.
+    struct AssetInit { address token; uint8 decimals; bytes32 canonicalId; }
     struct LegInput { uint8 index; address token; uint8 decimals; bytes32 canonicalId; uint256 amount; bool isPayment; }
     struct Leg { uint8 index; address token; uint256 amount; bool isPayment; bool deposited; bool settled; }
     struct RegisterInput {
@@ -108,12 +110,20 @@ contract VerumOtcEscrow is EIP712, AccessControl, Pausable, ReentrancyGuard {
     error NothingToRefund(); error FundsStillEscrowed(); error BadLegParties(); error ParticipantMustBeEOA(address who); error NotParticipant(); error SignedAlready();
     error SlippageExceeded(); error PriceGuardRejected(); error AlreadyApproved(uint8 role); error NotFullySigned();
 
-    constructor(address admin, address guardian, address registrar, address treasury_, address priceGuard_, bytes32 nativeCanonicalId) EIP712("VerumOTC", "1") {
+    /// @dev `initialAssets`: allowlist inicial gravada no deploy (uso: devnet/testnet, onde o timelock de 24 h inviabiliza o setup).
+    ///      Não cria nenhum poder novo em runtime — é decisão de deploy-time, imutável como `treasury`. Em produção passa-se `[]`
+    ///      e o ÚNICO caminho pós-deploy continua sendo scheduleAsset/executeAsset com REGISTRY_TIMELOCK (24 h).
+    constructor(address admin, address guardian, address registrar, address treasury_, address priceGuard_, bytes32 nativeCanonicalId, AssetInit[] memory initialAssets) EIP712("VerumOTC", "1") {
         if (admin == address(0) || guardian == address(0) || registrar == address(0) || treasury_ == address(0)) revert BadInput();
         _grantRole(DEFAULT_ADMIN_ROLE, admin); _grantRole(ADMIN_ROLE, admin); _grantRole(GUARDIAN_ROLE, guardian); _grantRole(REGISTRAR_ROLE, registrar);
         treasury = treasury_; priceGuard = IPriceGuard(priceGuard_);
         assets[NATIVE] = AssetInfo({ allowed: true, decimals: 18, canonicalId: nativeCanonicalId });
         emit AssetRegistered(NATIVE, true, 18, nativeCanonicalId);
+        for (uint256 i = 0; i < initialAssets.length; i++) {
+            AssetInit memory a = initialAssets[i];
+            if (a.token == NATIVE) revert BadInput(); // o nativo já foi registrado acima
+            _registerAsset(a.token, true, a.decimals, a.canonicalId);
+        }
     }
 
     /* ═══════════════════════════ DealManager ═══════════════════════════ */
@@ -297,7 +307,11 @@ contract VerumOtcEscrow is EIP712, AccessControl, Pausable, ReentrancyGuard {
     function executeAsset(address token, bool allowed, uint8 decimals_, bytes32 canonicalId) external onlyRole(ADMIN_ROLE) {
         bytes32 k = keccak256(abi.encode(token, allowed, decimals_, canonicalId)); uint64 eta = registryEta[k]; if (eta == 0 || block.timestamp < eta) revert TimelockPending(eta);
         delete registryEta[k];
-        if (allowed && token != NATIVE) { if (token.code.length == 0) revert AssetMismatch(token); if (IERC20Decimals(token).decimals() != decimals_) revert AssetMismatch(token); } // registro só se o contrato existe e os decimais batem
+        _registerAsset(token, allowed, decimals_, canonicalId);
+    }
+    /// @dev Registro efetivo (constructor e executeAsset): só se o contrato existe e os decimais batem.
+    function _registerAsset(address token, bool allowed, uint8 decimals_, bytes32 canonicalId) private {
+        if (allowed && token != NATIVE) { if (token.code.length == 0) revert AssetMismatch(token); if (IERC20Decimals(token).decimals() != decimals_) revert AssetMismatch(token); }
         assets[token] = AssetInfo({ allowed: allowed, decimals: decimals_, canonicalId: canonicalId });
         emit AssetRegistered(token, allowed, decimals_, canonicalId);
     }

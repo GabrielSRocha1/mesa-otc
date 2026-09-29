@@ -1,7 +1,7 @@
 /**
  * Porta SettlementAdapter (arquitetura §4.3/§10). O OTC Engine nunca vê RPC, ABI, scripts ou formatos de endereço.
  */
-import type { CanonicalAsset, ChainRef, KeyScheme, Leg, Network, Participant, Role } from '../domain/types.js';
+import type { CanonicalAsset, ChainRef, KeyScheme, Leg, Network, Participant, Role, Terms } from '../domain/types.js';
 
 export interface AdapterCapabilities { escrowNN: boolean; htlc: boolean; verifiableSigSchemes: KeyScheme[]; finalityConfirmations: number; nativeCode: string }
 export interface AssetVerification { ok: boolean; reasons: string[]; observed: { exists: boolean; decimals?: number; symbol?: string; codeHash?: string; mintAuthority?: string | null; standard?: string }; checkedAt: number }
@@ -13,6 +13,8 @@ export interface TxStatus { ref: string; status: 'pending' | 'included' | 'final
 export interface DealCommitment {
   dealId: string; revision: number; dealHash: string; expiresAt: number; participants: Participant[];
   legs: Leg[]; pricingHash: string; routeHash: string; domainHash: string; dealNonce: string; feeBps: number; treasury: string; htlcHash?: string;
+  /** Termos congelados completos — adaptadores on-chain reais (EVM) precisam do pricing p/ montar o RegisterInput. O simulador local ignora. */
+  terms: Terms;
 }
 export interface ApprovalSignature { role: Role; signer: string; scheme: KeyScheme; signature: string; nonce: string }
 /** Verificador injetado: o simulador local reutiliza a mesma verificação criptográfica que o Signature Engine. */
