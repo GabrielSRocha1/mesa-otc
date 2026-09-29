@@ -240,8 +240,8 @@ img,svg{max-width:100%}
 .skb-k.sp{max-width:none;flex:3}
 /* Sem estado visual de toque: é o que impede a gravação de "ver" a digitação. */
 .skb-k:active,.skb-k:hover,.skb-k:focus{background:var(--bg-2);border-color:var(--line-2);outline:none}
-/* Em telas de toque, esconde o "mostrar senha": revelar a senha na tela anula a proteção. */
-@media (pointer:coarse){ .control .peek{display:none} }
+/* Em telas de toque o "mostrar senha" fica visível; ao revelar, o app avisa que
+   a proteção anti-gravação de tela deixa de valer enquanto a senha estiver exposta. */
 </style>
 </head>
 <body>
@@ -520,7 +520,11 @@ img,svg{max-width:100%}
         btn.innerHTML=show?EYEOFF:EYE;
         const lbl=show?'Ocultar senha':'Mostrar senha';
         btn.setAttribute('aria-label',lbl); btn.title=lbl;
-        inp.focus();
+        // Mobile: alerta ao revelar (a proteção anti-gravação de tela não cobre a senha exposta)
+        // e não devolve o foco ao campo — senão o teclado seguro abriria só por espiar a senha.
+        const coarse=window.matchMedia&&window.matchMedia('(pointer:coarse)').matches;
+        if(coarse&&show){ try{ toast('Senha visível na tela — cuidado com gravação de tela e olhares. Oculte ao terminar.','err'); }catch(e){} }
+        if(!coarse) inp.focus();
       });
     });
   })();
