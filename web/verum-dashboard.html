@@ -758,6 +758,11 @@ img,svg,canvas,video{max-width:100%}
         <div class="stat"><div class="sl"><svg viewBox="0 0 24 24"><path d="M3 17l5-5 4 3 8-9"/></svg>Liquidez disponível</div><div class="sv">$48,7M</div><div class="sd up">Suficiente em 4 redes</div></div>
         <div class="stat"><div class="sl"><svg viewBox="0 0 24 24"><circle cx="9" cy="8" r="3.5"/><path d="M3.5 20a5.5 5.5 0 0111 0"/></svg>Pay Masters ativos</div><div class="sv">7</div><div class="sd">2 online agora</div></div>
       </div>
+      <!-- Carteiras da mesa: espelha o estado real das 4 carteiras (Vendedor, Comprador, Pay Masters) -->
+      <section class="card" style="margin-bottom:16px">
+        <div class="card-h"><div class="t"><svg viewBox="0 0 24 24" style="width:17px;height:17px;stroke:var(--blue);fill:none;stroke-width:2;vertical-align:-3px;margin-right:6px"><rect x="3" y="6" width="18" height="13" rx="2"/><path d="M16 12h2M3 10h18"/></svg>Carteiras da mesa</div><span class="badge info" id="dashMesaCount">0/4 conectadas</span></div>
+        <div class="op-parts" id="dashParts"><p style="color:var(--ink-3);font-size:12.5px;margin:0">Carregando estado da mesa…</p></div>
+      </section>
       <div class="grid" style="grid-template-columns:1.4fr .9fr">
         <section class="card">
           <div class="card-h"><div class="t">Operações recentes</div><span class="badge info">Últimas 24h</span></div>
@@ -788,10 +793,32 @@ img,svg,canvas,video{max-width:100%}
       </div>
     </section>
 
-    <!-- ===================== VIEW: OPERAÇÕES (Negociação OTC) ===================== -->
+    <!-- ===================== VIEW: OPERAÇÕES (lista) ===================== -->
     <section class="view" id="view-operacoes">
+      <div class="page-head">
+        <div>
+          <h1>Operações</h1>
+          <p>Todas as operações criadas na mesa.</p>
+        </div>
+        <div class="ph-actions">
+          <!-- Só aparece quando já existe pelo menos uma operação (senão o CTA fica no centro) -->
+          <button class="btn btn-primary" id="opsNewTop" type="button" data-goto="operacao" style="display:none"><svg viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg>Criar operação</button>
+        </div>
+      </div>
+      <section class="card" id="opsListCard" style="display:none">
+        <div class="card-h"><div class="t"><svg viewBox="0 0 24 24" style="width:17px;height:17px;stroke:var(--blue);fill:none;stroke-width:2;vertical-align:-3px;margin-right:6px"><rect x="4" y="4" width="16" height="16" rx="2"/><path d="M8 9h8M8 13h5"/></svg>Operações da mesa</div><span class="badge info" id="opsListCount">0</span></div>
+        <div class="op-deal-list" id="opsList"></div>
+      </section>
+      <div id="opsEmpty" style="display:flex;flex-direction:column;align-items:center;justify-content:center;gap:16px;padding:90px 20px;text-align:center">
+        <div style="color:var(--ink-3);font-size:13.5px">Nenhuma operação criada ainda.</div>
+        <button class="btn btn-primary" id="opsNewCenter" type="button" data-goto="operacao" style="height:52px;font-size:15px;padding:0 30px"><svg viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg>Criar operação</button>
+      </div>
+    </section>
+
+    <!-- ===================== VIEW: OPERAÇÃO (Negociação OTC) ===================== -->
+    <section class="view" id="view-operacao">
       <div class="op-head">
-        <div class="back" data-goto="dashboard"><svg viewBox="0 0 24 24" style="width:20px;height:20px;stroke:currentColor;fill:none;stroke-width:2"><path d="M15 18l-6-6 6-6"/></svg></div>
+        <div class="back" data-goto="operacoes"><svg viewBox="0 0 24 24" style="width:20px;height:20px;stroke:currentColor;fill:none;stroke-width:2"><path d="M15 18l-6-6 6-6"/></svg></div>
         <div class="titw"><h1>Negociação OTC</h1><p>Confirme os detalhes da operação e revise antes de assinar.</p></div>
         <div class="op-status">
           <span class="op-badge run"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 8v4l2 2"/></svg>Em andamento</span>
@@ -824,7 +851,7 @@ img,svg,canvas,video{max-width:100%}
           <!-- Você Entrega / Você Recebe -->
           <div class="op-flow">
             <section class="op-side op-deliver">
-              <div class="sh"><div class="op-ic"><svg viewBox="0 0 24 24"><path d="M12 3v18M17 8l-5-5-5 5"/></svg></div><div><div class="st">Você Entrega</div><div class="ss">Toque no token para trocar o ativo</div></div><div class="tokfield" id="opDelField" style="margin-left:auto"></div></div>
+              <div class="sh"><div class="op-ic"><svg viewBox="0 0 24 24"><path d="M12 3v18M17 8l-5-5-5 5"/></svg></div><div><div class="st">Comprador</div><div class="ss">Toque no token para trocar o ativo</div></div><div class="tokfield" id="opDelField" style="margin-left:auto"></div></div>
               <div class="op-assetbox"><div class="op-coin" id="opDelIcon" style="background:var(--btc)">₿</div><div><div class="nm" id="opDelSym">BTC</div><div class="usd" style="font-size:12px;color:var(--ink-3)" id="opDelName">Bitcoin</div></div><div class="amt" style="flex:1"><input class="op-amt-in" id="opDelAmt" value="500" inputmode="decimal" spellcheck="false"><div class="sub" id="opDelUsd">≈ $0.00</div></div></div>
               <div id="opDelAvail" style="display:flex;justify-content:space-between;align-items:center;font-size:11.5px;color:var(--ink-3);margin:-6px 0 12px"><span id="opDelAvailTxt">Disponível: —</span><button type="button" id="opDelMax" class="op-tag" style="border:1px solid var(--line-2);cursor:pointer;background:var(--panel-3)">Máx</button></div>
               <div class="op-rows" id="opDelRows">
@@ -835,7 +862,7 @@ img,svg,canvas,video{max-width:100%}
             </section>
             <div class="op-swap" id="opSwap" title="Inverter entrega e recebimento"><svg viewBox="0 0 24 24"><path d="M7 10l-3 3 3 3M4 13h11M17 14l3-3-3-3M20 11H9"/></svg></div>
             <section class="op-side op-receive">
-              <div class="sh"><div class="op-ic"><svg viewBox="0 0 24 24"><circle cx="9" cy="8" r="3"/><path d="M3.5 19a5.5 5.5 0 0111 0M17 7a2.5 2.5 0 010 5"/></svg></div><div><div class="st">Você Recebe</div><div class="ss">Toque no token para trocar o ativo</div></div><div class="tokfield" id="opRecvField" style="margin-left:auto"></div></div>
+              <div class="sh"><div class="op-ic"><svg viewBox="0 0 24 24"><circle cx="9" cy="8" r="3"/><path d="M3.5 19a5.5 5.5 0 0111 0M17 7a2.5 2.5 0 010 5"/></svg></div><div><div class="st">Vendedor</div><div class="ss">Toque no token para trocar o ativo</div></div><div class="tokfield" id="opRecvField" style="margin-left:auto"></div></div>
               <div class="op-assetbox"><div class="op-coin" id="opRecvIcon" style="background:var(--usdt)">₮</div><div><div class="nm" id="opRecvSym">USDT</div><div class="usd" style="font-size:12px;color:var(--ink-3)" id="opRecvName">Tether (Solana)</div></div><div class="amt" style="flex:1"><div class="big" id="opRecvAmt">0,00 USDT</div><div class="sub" id="opRecvUsd">≈ $0.00</div></div></div>
               <div class="op-rows" id="opRecvRows">
                 <div class="row" id="opNetRow"><span class="k">Rede</span><span class="v"><select class="op-sel" id="opRecvNet"></select></span></div>
@@ -918,12 +945,20 @@ img,svg,canvas,video{max-width:100%}
           </section>
 
           <section class="card">
-            <div class="card-h"><div class="t">Informações da Negociação</div></div>
+            <div class="card-h"><div class="t">Informações da Negociação</div><span class="badge wait" id="opInfoMode">Simulação</span></div>
             <div class="kv">
-              <div class="r"><span class="k">Data de expiração</span><span class="v">12/05/2025 14:32:00</span></div>
-              <div class="r"><span class="k">ID da negociação</span><span class="v mono">OTC-0004587</span></div>
-              <div class="r"><span class="k">Rede</span><span class="v" id="opInfoNet">Solana (SOL)</span></div>
+              <div class="r"><span class="k">Código da operação</span><span class="v mono" id="opInfoCode">—</span></div>
+              <div class="r"><span class="k">Status</span><span class="v" id="opInfoState">—</span></div>
+              <div class="r"><span class="k">Criada em</span><span class="v" id="opInfoCreated">—</span></div>
+              <div class="r"><span class="k">Expiração</span><span class="v" id="opInfoExp">—</span></div>
+              <div class="r"><span class="k">Rede de liquidação</span><span class="v" id="opInfoNet">—</span></div>
+              <div class="r"><span class="k">Comissão</span><span class="v" id="opInfoComm">—</span></div>
+              <div class="r"><span class="k">Deságio</span><span class="v" id="opInfoDesc">—</span></div>
+              <div class="r"><span class="k">Slippage máximo</span><span class="v" id="opInfoSlip">—</span></div>
+              <div class="r"><span class="k">Carteiras da mesa</span><span class="v" id="opInfoWallets">—</span></div>
+              <div class="r"><span class="k">Ordem de assinatura</span><span class="v" style="font-size:11px">Vendedor → PM 1 → PM 2 → Comprador</span></div>
             </div>
+            <p id="opInfoSimNote" style="font-size:11px;color:var(--ink-3);margin:10px 0 0">Valores simulados a partir do rascunho — nada foi enviado à mesa. Ao clicar em "Iniciar operação" estes dados criam a operação real.</p>
             <button class="btn btn-primary btn-block" style="margin-top:16px;height:46px" data-toast="Abrindo assinatura…"><svg viewBox="0 0 24 24"><path d="M4 20h4l10-10-4-4L4 16v4z"/><path d="M13.5 6.5l4 4"/></svg>Revisar e Assinar</button>
             <button class="btn btn-block" style="margin-top:10px;height:44px" data-toast="Negociação cancelada">Cancelar Negociação</button>
           </section>
@@ -1067,9 +1102,13 @@ img,svg,canvas,video{max-width:100%}
     if(!target) return;
     $$('.view').forEach(v=>v.classList.remove('active'));
     target.classList.add('active');
-    $$('.nav a').forEach(x=>x.classList.toggle('active', x.dataset.view===view));
+    // A página de operação (detalhe) pertence à aba "Operações" no menu.
+    const navKey = view==='operacao' ? 'operacoes' : view;
+    $$('.nav a').forEach(x=>x.classList.toggle('active', x.dataset.view===navKey));
     const main=document.querySelector('.content .page'); if(main) main.scrollTop=0;
     window.scrollTo(0,0);
+    if(view==='operacoes'){ try{ updateDraft(); refreshMesaDeals(); renderDealList(opDealsCache,opDeal&&opDeal.id); }catch(e){} }
+    if(view==='operacao'){ try{ opRenderInfo(); }catch(e){} }
   }
   // ── Sidebar responsiva (mobile): gaveta aberta pelo hambúrguer ──────────────
   function setNav(open){
@@ -1705,6 +1744,27 @@ img,svg,canvas,video{max-width:100%}
     $('#opInfoNet').textContent=(rc.displayName||'')+' ('+(rc.nativeSymbol||'')+')';
     const seller=opSlot('SELLER'); const dest=opAddrFor(seller,settleNet);
     const destEl=$('#opRecvDest'); if(destEl){ destEl.textContent=dest?(shortAddr(dest)+' ⧉'):'—'; destEl.dataset.copy=dest||''; }
+    opRenderInfo();
+  }
+  // Informações da Negociação: simulação completa da criação da operação (código gerado,
+  // datas, taxas, carteiras). Vira dados reais quando a deal é criada na mesa.
+  function opRenderInfo(){
+    const d=opDeal, sim=!d;
+    const dr=sim?loadDrafts().find(x=>x.id===opDraftId):null;
+    const fdt=t=>t?new Date(t).toLocaleString('pt-BR',{day:'2-digit',month:'2-digit',year:'2-digit',hour:'2-digit',minute:'2-digit'}):'—';
+    const mode=$('#opInfoMode'); if(mode){ mode.className='badge '+(sim?'wait':'ok'); mode.textContent=sim?'Simulação':'Mesa real'; }
+    if($('#opInfoCode')) $('#opInfoCode').textContent=d?d.id:(dr?dr.id:(opDraftId||'— (crie na aba Operações)'));
+    const stEl=$('#opInfoState'); if(stEl) stEl.innerHTML=sim?'<span class="badge wait">Rascunho</span>':opStateBadge(d.state);
+    const created=d&&d.createdAt?d.createdAt:(dr?dr.createdAt:null);
+    if($('#opInfoCreated')) $('#opInfoCreated').textContent=fdt(created);
+    const exp=$('#opInfoExp');
+    if(exp) exp.textContent=sim?(created?('simulada: '+fdt(created+45*60000)+' (45 min)'):'45 min após iniciar'):(d.turnExpiresAt?('turno atual: '+fmtCountdown(d.turnExpiresAt)):'—');
+    if($('#opInfoComm')) $('#opInfoComm').textContent=opNum(opFees.commissionPct,2)+'% · '+(($('#opFeeSplitBadge')&&$('#opFeeSplitBadge').textContent)||'—');
+    if($('#opInfoDesc')) $('#opInfoDesc').textContent=opNum(opFees.discountPct,2)+'% ('+(opFees.discountFrom==='receive'?'ativo de recebimento':'ativo de entrega')+')';
+    if($('#opInfoSlip')) $('#opInfoSlip').textContent=opNum(opFees.maxSlippagePct,2)+'%';
+    const on=OP_ROLES.filter(r=>{ const s=opSlot(r.role); return s&&s.wallet&&s.status==='confirmed'; }).length;
+    if($('#opInfoWallets')) $('#opInfoWallets').textContent=on+'/4 conectadas';
+    const note=$('#opInfoSimNote'); if(note) note.style.display=sim?'':'none';
   }
   // Atualiza o teto (saldo real do Vendedor na rede do ativo entregue) — só nativo.
   async function opUpdateSellerCap(){
@@ -1745,6 +1805,7 @@ img,svg,canvas,video{max-width:100%}
     const sbtn=$('#opSignTurn'); if(sbtn) sbtn.style.display = (awaiting&&d.turnRole)?'':'none';
     const nbtn=$('#opNewDeal'); if(nbtn) nbtn.style.display = awaiting?'':'none'; // com deal em andamento, permite abandonar e criar outra
     startTurnCountdown();
+    opRenderInfo();
   }
   // Base58 (Bitcoin/Solana) — sem dependência externa (CSP bloqueia CDN).
   const B58='123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz';
@@ -1782,14 +1843,61 @@ img,svg,canvas,video{max-width:100%}
   function startTurnCountdown(){ if(opTurnTimer) clearInterval(opTurnTimer); opTurnTimer=setInterval(()=>{ const el=$('#opSteps .op-turn-chip'); if(!el){ clearInterval(opTurnTimer); return; } const cd=el.querySelector('.op-turn-cd'); if(cd) cd.textContent=fmtCountdown(Number(el.dataset.turnExp)); },1000); }
   async function refreshMesaDeal(){ if(!getTok()) return; refreshMesaDeals(); try{ const r=await pmApi('/v1/portal/mesa/deal'); if(r&&r.deal){ opDeal=r.deal; renderEsteira(r.deal); if(!opDealTimer) startDealPolling(); } }catch(e){} }
   function startDealPolling(){ if(opDealTimer) clearInterval(opDealTimer); opDealTimer=setInterval(refreshMesaDeal,5000); }
+  /* ---------- Rascunhos locais: criar operação já salva na lista, sem backend ---------- */
+  const DRAFTS_KEY='verum_op_drafts';
+  let opDraftId=null; // rascunho aberto na página de operação
+  function loadDrafts(){ try{ return JSON.parse(localStorage.getItem(DRAFTS_KEY)||'[]')||[]; }catch(e){ return []; } }
+  function saveDrafts(l){ try{ localStorage.setItem(DRAFTS_KEY,JSON.stringify(l)); }catch(e){} }
+  function draftSnapshot(){
+    const del=$('#opDelSym'), rec=$('#opRecvSym'), amt=$('#opDelAmt');
+    return { pair:((del&&del.textContent)||'—')+' → '+((rec&&rec.textContent)||'—'), amount:(amt&&amt.value)||'' };
+  }
+  function createDraft(){
+    const d=Object.assign({ id:'OP-'+Date.now().toString(36).toUpperCase(), createdAt:Date.now() },draftSnapshot());
+    const l=loadDrafts(); l.unshift(d); saveDrafts(l); opDraftId=d.id;
+    renderDealList(opDealsCache,opDeal&&opDeal.id);
+    try{ opRenderInfo(); }catch(e){}
+  }
+  function updateDraft(){ if(!opDraftId) return; const l=loadDrafts(); const d=l.find(x=>x.id===opDraftId); if(d){ Object.assign(d,draftSnapshot()); saveDrafts(l); } }
+  function removeDraft(id){ if(!id) return; saveDrafts(loadDrafts().filter(x=>x.id!==id)); if(opDraftId===id) opDraftId=null; }
+  ['#opsNewTop','#opsNewCenter'].forEach(sel=>{ const b=$(sel); if(b) b.addEventListener('click',createDraft); });
+  function draftCardsHtml(){
+    return loadDrafts().map(d=>{
+      const dt=d.createdAt?new Date(d.createdAt).toLocaleString('pt-BR',{day:'2-digit',month:'2-digit',hour:'2-digit',minute:'2-digit'}):'';
+      return '<div class="op-deal-card'+(d.id===opDraftId?' active':'')+'" data-draft="'+esc(d.id)+'" role="button" tabindex="0">'
+        +'<div><div class="dpair">'+(d.amount?esc(d.amount)+' ':'')+esc(d.pair||'—')+'</div><div class="did">'+esc(d.id)+'</div><div class="dmeta">'+esc(dt)+' · ainda não iniciada na mesa</div></div>'
+        +'<div class="dright"><span class="badge wait">Rascunho</span></div></div>';
+    }).join('');
+  }
   /* ---------- Lista de operações da mesa (histórico; card clicável abre na esteira) ---------- */
   let opDealsCache=[];
   function opStateBadge(s){ const M={AWAITING_SIGNATURES:['wait','Aguardando assinaturas'],FULLY_SIGNED:['info','Assinada'],SETTLEMENT_VALIDATION:['info','Validando liquidação'],SETTLING:['info','Liquidando'],SETTLED:['ok','Liquidada'],EXPIRED:['err','Expirada'],CANCELLED:['err','Cancelada'],BLOCKED:['err','Bloqueada'],REFUNDING:['err','Reembolsando'],REFUNDED:['err','Reembolsada']}; const e2=M[s]||['info',s]; return '<span class="badge '+e2[0]+'">'+esc(e2[1])+'</span>'; }
   function renderDealList(list,activeId){
-    const box=$('#opDealList'); if(!box) return;
-    if($('#opListCount')) $('#opListCount').textContent=String(list.length);
-    if(!list.length){ box.innerHTML='<p style="color:var(--ink-3);font-size:12.5px;margin:0">Nenhuma operação criada ainda. Use "Iniciar operação" abaixo.</p>'; return; }
-    box.innerHTML=list.map(d=>{
+    // Rascunhos locais (criados só com o clique em "Criar operação") + deals reais da mesa
+    const html=draftCardsHtml()+(list.length?dealCardsHtml(list,activeId):'');
+    const total=loadDrafts().length+list.length;
+    // Card "Operações da mesa" dentro da página de operação
+    const box=$('#opDealList');
+    if(box) box.innerHTML=html||'<p style="color:var(--ink-3);font-size:12.5px;margin:0">Nenhuma operação criada ainda. Use "Iniciar operação" abaixo.</p>';
+    if($('#opListCount')) $('#opListCount').textContent=String(total);
+    // Aba "Operações" (lista): vazio → CTA grande no centro; com itens → lista + botão no topo
+    const lbox=$('#opsList'); if(lbox) lbox.innerHTML=html;
+    if($('#opsListCount')) $('#opsListCount').textContent=String(total);
+    const has=total>0;
+    const lc=$('#opsListCard'); if(lc) lc.style.display=has?'':'none';
+    const oe=$('#opsEmpty'); if(oe) oe.style.display=has?'none':'flex';
+    const nt=$('#opsNewTop'); if(nt) nt.style.display=has?'':'none';
+    $$('#opDealList .op-deal-card, #opsList .op-deal-card').forEach(c=>{
+      const open=()=>{
+        if(c.dataset.draft){ opDraftId=c.dataset.draft; showView('operacao'); renderDealList(opDealsCache,opDeal&&opDeal.id); return; }
+        if(c.closest('#view-operacoes')) showView('operacao');
+        openMesaDeal(c.dataset.deal);
+      };
+      c.addEventListener('click',open); c.addEventListener('keydown',e=>{ if(e.key==='Enter'||e.key===' '){ e.preventDefault(); open(); } });
+    });
+  }
+  function dealCardsHtml(list,activeId){
+    return list.map(d=>{
       const sol=d.amountInBase?Number(BigInt(d.amountInBase)/1000000n)/1000:null; // base 9 casas → até 3 decimais
       const dt=d.createdAt?new Date(d.createdAt).toLocaleString('pt-BR',{day:'2-digit',month:'2-digit',hour:'2-digit',minute:'2-digit'}):'';
       const turn=(d.state==='AWAITING_SIGNATURES'&&d.turnRole)?(' · vez: '+(OP_STEP_LABEL[d.turnRole]||d.turnRole)):'';
@@ -1797,7 +1905,6 @@ img,svg,canvas,video{max-width:100%}
         +'<div><div class="dpair">'+(sol!=null?opNum(sol)+' ':'')+'SOL → USDC</div><div class="did">'+esc(d.id)+'</div><div class="dmeta">'+esc(dt)+' · '+d.validSignatures+'/'+d.requiredSignatures+' assinaturas'+esc(turn)+'</div></div>'
         +'<div class="dright">'+opStateBadge(d.state)+(d.id===activeId?'<span style="font-size:10.5px;color:var(--blue);font-weight:700">Aberta na esteira</span>':'')+'</div></div>';
     }).join('');
-    $$('#opDealList .op-deal-card').forEach(c=>{ const open=()=>openMesaDeal(c.dataset.deal); c.addEventListener('click',open); c.addEventListener('keydown',e=>{ if(e.key==='Enter'||e.key===' '){ e.preventDefault(); open(); } }); });
   }
   async function refreshMesaDeals(){ if(!getTok()) return; try{ const r=await pmApi('/v1/portal/mesa/deals'); if(r&&Array.isArray(r.deals)){ opDealsCache=r.deals; renderDealList(r.deals,r.activeId); } }catch(e){} }
   async function openMesaDeal(id){
@@ -1825,7 +1932,7 @@ img,svg,canvas,video{max-width:100%}
         if(e&&e.code==='TWO_FACTOR_REQUIRED'){ secState.twoFactor={enabled:true}; reflectSecurity(); const code=await ask2FACode(); if(!code) throw new Error('Operação cancelada'); body.twoFactorCode=code; d=await pmApi('/v1/portal/mesa/deal',{method:'POST',body}); }
         else throw e;
       }
-      opDeal=d; renderEsteira(d); startDealPolling(); toast('Operação criada na mesa · turno do Vendedor','ok'); refreshAlerts();
+      opDeal=d; removeDraft(opDraftId); renderEsteira(d); startDealPolling(); refreshMesaDeals(); toast('Operação criada na mesa · turno do Vendedor','ok'); refreshAlerts();
     }catch(e){ toast(e.message||'Falha ao criar operação','err'); }
     finally{ const b=$('#opStartDeal'); if(b){ b.disabled=false; b.textContent='Iniciar operação'; } }
   }
@@ -1854,8 +1961,25 @@ img,svg,canvas,video{max-width:100%}
       const usdEl=box.querySelector('[data-opusd="'+r.role+'"]'); if(usdEl&&usdEl.isConnected&&amt!=null&&price) usdEl.textContent='≈ '+opMoney(amt*price);
     });
   }
+  // Dashboard: espelha as 4 carteiras da mesa (sem consultar saldo — só papel, rede, endereço e status).
+  function dashRenderMesa(){
+    const box=$('#dashParts'); if(!box||!opMesa) return;
+    const chainName=k=>{ const c=opChains.find(x=>x.chainKey===k); return c?c.nativeSymbol:(k||'').toUpperCase(); };
+    let on=0;
+    box.innerHTML=OP_ROLES.map(r=>{
+      const s=opSlot(r.role); const w=s&&s.wallet;
+      if(!w||s.status!=='confirmed'){
+        const st=s?s.status:'empty'; const txt=st==='pending'?'Aguardando confirmação':'Não conectada';
+        return '<div class="op-part"><div class="ph"><div class="op-coin" style="background:#243357">?</div><div><div class="nm">'+r.label+'</div><div class="addr">'+txt+'</div></div></div><div class="foot"><div></div><span class="op-conn" style="color:var(--ink-3)"><i style="background:var(--ink-3);box-shadow:none"></i>Off</span></div></div>';
+      }
+      on++;
+      const sym=chainName(w.network); const color=OP_COLORS[w.network]||'#3b4a68';
+      return '<div class="op-part"><div class="ph">'+opCoinBadge(sym,color,opChainIcon(w.network),'data-opc="'+w.network+'"')+'<div><div class="nm">'+r.label+' <span class="op-tag">'+esc(sym)+'</span></div><div class="addr">'+esc(shortAddr(w.address))+'</div></div></div><div class="foot"><div></div><span class="op-conn"><i></i>Conectado</span></div></div>';
+    }).join('');
+    const c=$('#dashMesaCount'); if(c) c.textContent=on+'/4 conectadas';
+  }
   // Chamado quando a mesa é (re)carregada.
-  function opOnMesa(){ if(!$('#opParts')) return; opRenderParticipants(); opUpdateSellerCap().then(()=>{ if(typeof opRecalc==='function') opRecalc(); }); }
+  function opOnMesa(){ dashRenderMesa(); if(!$('#opParts')) return; opRenderParticipants(); opUpdateSellerCap().then(()=>{ if(typeof opRecalc==='function') opRecalc(); }); }
 
   /* ---------- Configurações da mesa (persistentes em localStorage) ---------- */
   // A aba Configurações passa a ter estado real: os campos são restaurados ao
