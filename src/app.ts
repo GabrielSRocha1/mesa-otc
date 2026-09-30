@@ -5,7 +5,7 @@
 import { MemoryStore } from './db/memoryStore.js';
 import { SqlStore, createPgliteClient, createPgClient, type SqlClient } from './db/sqlStore.js';
 import type { Store } from './db/repository.js';
-import { AdapterRegistry, type ApprovalVerifier, type SettlementAdapter } from './adapters/types.js';
+import { AdapterRegistry, type ApprovalVerifier, type DealCommitment, type SettlementAdapter } from './adapters/types.js';
 import { createLocalAdapters, type LocalChainAdapter } from './adapters/local.js';
 import { EvmChainAdapter, EvmDevKeyring } from './adapters/evm.js';
 import { evmConfig } from './config.js';
@@ -94,6 +94,27 @@ export async function createApp(config: Config, o: AppOverrides = {}): Promise<A
   deals.events.on('deal', (ev: { dealId: string; type: string; state: string }) => { void (async () => { const d = await store.getDeal(ev.dealId); if (!d?.hash) return; if (['SETTLED', 'REFUNDED', 'CANCELLED', 'BLOCKED', 'EXPIRED'].includes(ev.state)) verifierDealRef.delete(d.hash.dealHash); else verifierDealRef.set(d.hash.dealHash, d); if (verifierDealRef.size > 10_000) verifierDealRef.delete(verifierDealRef.keys().next().value as string); })(); });
   const settlement = new SettlementEngine({ store, adapters, price, router, risk, signature, registry, audit, now, execMarginMs: config.EXEC_MARGIN_MS }, deals.mutator());
   if (o.autoSettle !== false) deals.events.on('settle', (id: string) => { void settlement.settle(id, 'keeper').catch(e => logger.warn({ dealId: id, code: (e as { code?: string }).code, err: (e as Error).message }, 'liquidação automática rejeitada')); });
+  // Serverless (Vercel): o estado do SIMULADOR on-chain é por instância — uma deal criada noutra
+  // instância não existe no simulador desta. Antes de liquidar, re-registra e re-deposita aqui
+  // (idempotente; só roda quando o adapter reporta NONE). Também alimenta o verificador local.
+  const ensureOnChain = async (dealId: string): Promise<void> => {
+    if (!local) return;
+    const deal = await store.getDeal(dealId); const t = deal?.terms; const h = deal?.hash;
+    if (!deal || !t || !h) return;
+    verifierDealRef.set(h.dealHash, deal);
+    const c: DealCommitment = { dealId: deal.id, revision: deal.revision, dealHash: h.dealHash, expiresAt: t.expiresAt, participants: t.participants, legs: t.legs, pricingHash: h.pricingHash, routeHash: h.routeHash, domainHash: h.domainHash, dealNonce: t.dealNonce, feeBps: t.pricing.platformFeeBps, treasury: config.TREASURY_ADDRESS, htlcHash: t.route.htlcHash, terms: t };
+    for (const chain of new Set(t.legs.map(l => l.escrowChain))) {
+      const a = adapters.require(chain); const st = await a.getDealState(deal.id);
+      if (st.status !== 'NONE') continue;
+      await a.registerDeal(c);
+      const sim = chain === 'solana' ? local.solana : chain === 'bitcoin' ? local.bitcoin : local.evm;
+      for (const leg of t.legs.filter(l => l.escrowChain === chain)) {
+        const p = deal.participants.find(x => x.role === leg.from); if (!p || p.funding !== 'FINAL') continue;
+        sim.mint(p.address, leg.asset.contractOrMint, BigInt(leg.amountBase));
+        await a.deposit(deal.id, leg.index, p.address);
+      }
+    }
+  };
   const auth = new WalletAuth(store, adapters, { env: config.OTC_ENV, sessionSecret: config.sessionSecret, sessionTtlMs: config.SESSION_TTL_MS, challengeTtlMs: 5 * 60_000, operators: config.operators, appDomain: config.APP_DOMAIN }, now);
   // Persistência do portal: postgres/Supabase quando há cliente SQL (sessão sobrevive ao serverless);
   // senão arquivo local (dev). Hidrata o estado inicial antes de servir requisições.
@@ -134,7 +155,7 @@ export async function createApp(config: Config, o: AppOverrides = {}): Promise<A
   });
   // Propostas estruturadas de alteração de termos (§5.3/§6) — porta de entrada tipada para o amend.
   const proposals = new ProposalService({ deals, now, audit, notifier: { notify: dealId => logger.info({ dealId }, 'atualização de proposta de termos') } });
-  const api = await buildApi({ deals, settlement, price, liquidity, router, registry, platformFeeBps: config.PLATFORM_FEE_BPS, networkCostUsd: async n => adapters.require(n).estimateCostUsd('settle'), auth, portal, identity, identityDev, rooms, proposals, store, audit, mesaHtmlPath: config.MESA_HTML_PATH, portalHtmlPath: config.PORTAL_HTML_PATH, conviteHtmlPath: config.CONVITE_HTML_PATH, env: config.OTC_ENV, rateLimit: { windowMs: 60_000, max: config.OTC_ENV === 'dev' ? 100_000 : 120 }, dev: local ? { solanaChainId: local.solana.chain.chainId, mint: (a, c, amt) => local!.solana.mint(a, c, amt), demo, evm: evmAdapter && evmKeyring && evmCfg ? { chainId: evmCfg.chainId, escrow: evmCfg.escrow, tbtc: evmCfg.tbtc, tusdt: evmCfg.tusdt, explorerBase: evmCfg.explorerBase, keyring: evmKeyring, mintToken: (t, to, amt) => evmAdapter!.mintToken(t, to, amt) } : undefined } : undefined });
+  const api = await buildApi({ deals, settlement, price, liquidity, router, registry, platformFeeBps: config.PLATFORM_FEE_BPS, networkCostUsd: async n => adapters.require(n).estimateCostUsd('settle'), auth, portal, identity, identityDev, rooms, proposals, store, audit, mesaHtmlPath: config.MESA_HTML_PATH, portalHtmlPath: config.PORTAL_HTML_PATH, conviteHtmlPath: config.CONVITE_HTML_PATH, env: config.OTC_ENV, rateLimit: { windowMs: 60_000, max: config.OTC_ENV === 'dev' ? 100_000 : 120 }, dev: local ? { solanaChainId: local.solana.chain.chainId, mint: (a, c, amt) => local!.solana.mint(a, c, amt), demo, ensureOnChain, evm: evmAdapter && evmKeyring && evmCfg ? { chainId: evmCfg.chainId, escrow: evmCfg.escrow, tbtc: evmCfg.tbtc, tusdt: evmCfg.tusdt, explorerBase: evmCfg.explorerBase, keyring: evmKeyring, mintToken: (t, to, amt) => evmAdapter!.mintToken(t, to, amt) } : undefined } : undefined });
   let timer: NodeJS.Timeout | null = null;
   let ticks = 0;
   const tick = async () => { try { const ids = await deals.expireDue(); if (ids.length) logger.info({ ids }, 'deals expiradas'); if (++ticks % 720 === 0) { const purged = await store.purge(now(), 24 * 3600_000); logger.info(purged, 'retenção'); } metrics.priceBreakerOpen.set(price.breakerState().open ? 1 : 0); for (const s of ['AWAITING_SIGNATURES', 'SETTLING', 'SETTLEMENT_VALIDATION', 'REFUNDING'] as const) metrics.activeDeals.set({ state: s }, (await store.listDeals({ states: [s] })).length); } catch (e) { logger.error({ err: (e as Error).message }, 'scheduler'); } };

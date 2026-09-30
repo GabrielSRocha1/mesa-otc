@@ -39,7 +39,7 @@ import { getIconMap } from '../chains/icons.js';
 const MAX_STREAMS_PER_SESSION = 8; const streams = new Map<string, number>();
 
 /** Simulador local usado só em dev para dar saldo ao Vendedor ao criar a Deal-demo da mesa. */
-export interface DevMint { solanaChainId: string; mint: (address: string, contract: string | null, amount: bigint) => unknown; evm?: DevEvm; demo?: DevDemo }
+export interface DevMint { solanaChainId: string; mint: (address: string, contract: string | null, amount: bigint) => unknown; evm?: DevEvm; demo?: DevDemo; ensureOnChain?: (dealId: string) => Promise<void> }
 /** Conta demo (apresentações): keyring das 4 carteiras falsas + set de todos os endereços fake. */
 export interface DevDemo { keyring: import('../portal/demo.js').DemoMesaKeyring; addresses: Set<string> }
 /** Modo EVM dev: contrato real (Sepolia/anvil), keyring de EOAs dev e mint dos tokens mock. */
@@ -345,8 +345,13 @@ export async function buildApi(deps: ApiDeps): Promise<FastifyInstance> {
   app.get('/v1/portal/mesa/deal', async req => {
     const id = deps.portal.getMesaDeal(portalToken(req)); if (!id) return { deal: null };
     let d = await deps.deals.get(id).catch(() => null);
-    // Cura deals presas em SETTLEMENT_VALIDATION (liquidação assíncrona cortada no serverless).
-    if (d && d.state === 'SETTLEMENT_VALIDATION') { try { await deps.settlement.settle(id, 'keeper'); } catch { /* idempotente; falha vira BLOCKED */ } d = await deps.deals.get(id).catch(() => d); }
+    // Cura deals presas (liquidação assíncrona cortada no serverless): re-hidrata o simulador
+    // desta instância e liquida/retoma. `recover()` destrava registros EXECUTING órfãos.
+    if (d && (d.state === 'SETTLEMENT_VALIDATION' || d.state === 'SETTLING')) {
+      try { await deps.dev?.ensureOnChain?.(id); } catch { /* melhor esforço */ }
+      try { if (d.state === 'SETTLEMENT_VALIDATION') await deps.settlement.settle(id, 'keeper'); else await deps.settlement.recover(); } catch { /* idempotente; falha vira BLOCKED */ }
+      d = await deps.deals.get(id).catch(() => d);
+    }
     return { deal: d ? await mesaDealView(d) : null };
   });
   // Assinatura da vez pela mesa (modo EVM dev): o backend assina o digest EIP-712 do turno atual com a
@@ -379,9 +384,14 @@ export async function buildApi(deps: ApiDeps): Promise<FastifyInstance> {
     const r = await deps.deals.submitSignature(id, { role, signer: p.address, scheme, signature, nonce: env.payload.nonce }, p.address);
     await deps.audit.append({ actorType: 'user', actorId: p.address, category: 'portal.mesa.deal.signed', dealId: id, payload: { role, count: r.count } });
     // Serverless: o listener assíncrono de auto-liquidação pode ser congelado após a resposta —
-    // liquida INLINE (idempotente) quando a última assinatura destravou a validação.
+    // liquida INLINE (idempotente) quando a última assinatura destravou a validação. Antes,
+    // re-hidrata o simulador desta instância (a deal pode ter sido criada em outra).
     let out = r.deal;
-    if (out.state === 'SETTLEMENT_VALIDATION') { try { await deps.settlement.settle(id, 'keeper'); } catch { /* rejeição vira BLOCKED/EXPIRED; o refetch reflete */ } out = await deps.deals.get(id).catch(() => out); }
+    if (out.state === 'SETTLEMENT_VALIDATION') {
+      try { await deps.dev?.ensureOnChain?.(id); } catch { /* simulador re-hidratado no melhor esforço */ }
+      try { await deps.settlement.settle(id, 'keeper'); } catch { /* rejeição vira BLOCKED/EXPIRED; o refetch reflete */ }
+      out = await deps.deals.get(id).catch(() => out);
+    }
     return mesaDealView(out);
   });
   // Histórico da mesa: todas as operações já criadas (mais recentes primeiro) + qual está ativa na esteira.
