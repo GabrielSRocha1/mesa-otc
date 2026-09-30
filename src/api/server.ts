@@ -405,6 +405,14 @@ export async function buildApi(deps: ApiDeps): Promise<FastifyInstance> {
     const found = (await Promise.all(ids.map(id => deps.deals.get(id).catch(() => null)))).filter((d): d is Deal => d !== null);
     return { deals: await Promise.all(found.map(mesaDealView)), activeId: deps.portal.getMesaDeal(token) };
   });
+  // Limpa o histórico da mesa (apresentações): só em dev ou na conta demo.
+  app.post('/v1/portal/mesa/deals/clear', async req => {
+    const token = portalToken(req);
+    if (deps.env !== 'dev' && !deps.portal.isDemoSession(token)) throw new DomainError('FORBIDDEN', 'Limpeza de histórico disponível apenas em dev ou na conta demo');
+    deps.portal.clearMesaDeals(token);
+    await deps.audit.append({ actorType: 'user', actorId: 'portal', category: 'portal.mesa.deals.cleared', dealId: null, payload: {} });
+    return { ok: true };
+  });
   // Abre (torna ativa) uma operação do histórico — a esteira e a assinatura passam a apontar p/ ela.
   app.post('/v1/portal/mesa/deal/select', async req => {
     const token = portalToken(req);

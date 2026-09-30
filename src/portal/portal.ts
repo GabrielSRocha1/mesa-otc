@@ -474,6 +474,12 @@ export class PortalService {
   getMesaDeal(token: string | undefined): string | null { const s = this.session(token, false); const pm = this.pm(s.payMasterId); return pm.mesaDealId ?? null; }
   /** Ids de todas as deals já criadas nesta mesa (mais recentes primeiro). */
   getMesaDeals(token: string | undefined): string[] { const s = this.session(token, false); const pm = this.pm(s.payMasterId); const ids = [...(pm.mesaDealIds ?? [])]; if (pm.mesaDealId && !ids.includes(pm.mesaDealId)) ids.push(pm.mesaDealId); return ids.reverse(); }
+  /** Limpa o histórico de operações da mesa (demo/dev): a lista recomeça vazia. */
+  clearMesaDeals(token: string | undefined): void {
+    const s = this.session(token); const pm = this.pm(s.payMasterId);
+    pm.mesaDealId = null; pm.mesaDealIds = [];
+    this.write();
+  }
   /** Torna ativa uma deal do histórico (a esteira/assinatura passam a apontar p/ ela). */
   selectMesaDeal(token: string | undefined, dealId: string): void {
     const s = this.session(token); const pm = this.pm(s.payMasterId);
