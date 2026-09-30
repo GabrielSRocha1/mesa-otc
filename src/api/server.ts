@@ -342,7 +342,13 @@ export async function buildApi(deps: ApiDeps): Promise<FastifyInstance> {
     await deps.audit.append({ actorType: 'user', actorId: seller.address, category: 'portal.mesa.deal.created', dealId: created.id, payload: { participants: parts.length } });
     void reply.code(201); return mesaDealView(opened);
   });
-  app.get('/v1/portal/mesa/deal', async req => { const id = deps.portal.getMesaDeal(portalToken(req)); if (!id) return { deal: null }; const d = await deps.deals.get(id).catch(() => null); return { deal: d ? await mesaDealView(d) : null }; });
+  app.get('/v1/portal/mesa/deal', async req => {
+    const id = deps.portal.getMesaDeal(portalToken(req)); if (!id) return { deal: null };
+    let d = await deps.deals.get(id).catch(() => null);
+    // Cura deals presas em SETTLEMENT_VALIDATION (liquidação assíncrona cortada no serverless).
+    if (d && d.state === 'SETTLEMENT_VALIDATION') { try { await deps.settlement.settle(id, 'keeper'); } catch { /* idempotente; falha vira BLOCKED */ } d = await deps.deals.get(id).catch(() => d); }
+    return { deal: d ? await mesaDealView(d) : null };
+  });
   // Assinatura da vez pela mesa (modo EVM dev): o backend assina o digest EIP-712 do turno atual com a
   // EOA dev do papel — todas as validações do Deal Engine (ordem, turno 5 min, nonce, cripto) permanecem.
   app.post('/v1/portal/mesa/deal/sign', async req => {
@@ -372,7 +378,11 @@ export async function buildApi(deps: ApiDeps): Promise<FastifyInstance> {
     }
     const r = await deps.deals.submitSignature(id, { role, signer: p.address, scheme, signature, nonce: env.payload.nonce }, p.address);
     await deps.audit.append({ actorType: 'user', actorId: p.address, category: 'portal.mesa.deal.signed', dealId: id, payload: { role, count: r.count } });
-    return mesaDealView(r.deal);
+    // Serverless: o listener assíncrono de auto-liquidação pode ser congelado após a resposta —
+    // liquida INLINE (idempotente) quando a última assinatura destravou a validação.
+    let out = r.deal;
+    if (out.state === 'SETTLEMENT_VALIDATION') { try { await deps.settlement.settle(id, 'keeper'); } catch { /* rejeição vira BLOCKED/EXPIRED; o refetch reflete */ } out = await deps.deals.get(id).catch(() => out); }
+    return mesaDealView(out);
   });
   // Histórico da mesa: todas as operações já criadas (mais recentes primeiro) + qual está ativa na esteira.
   app.get('/v1/portal/mesa/deals', async req => {
