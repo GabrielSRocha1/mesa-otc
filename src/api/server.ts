@@ -381,6 +381,10 @@ export async function buildApi(deps: ApiDeps): Promise<FastifyInstance> {
     } else {
       throw new DomainError('FORBIDDEN', 'carteira do papel não é gerida pelo keyring dev/demo');
     }
+    // ANTES de submeter: re-hidrata o simulador desta instância. A última assinatura dispara o
+    // listener de auto-liquidação imediatamente — se o simulador ainda não conhece a deal
+    // (criada em outra instância), a validação bloquearia com FUNDING_REQUIRED.
+    try { await deps.dev?.ensureOnChain?.(id); } catch { /* melhor esforço */ }
     const r = await deps.deals.submitSignature(id, { role, signer: p.address, scheme, signature, nonce: env.payload.nonce }, p.address);
     await deps.audit.append({ actorType: 'user', actorId: p.address, category: 'portal.mesa.deal.signed', dealId: id, payload: { role, count: r.count } });
     // Serverless: o listener assíncrono de auto-liquidação pode ser congelado após a resposta —
