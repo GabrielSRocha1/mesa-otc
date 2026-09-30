@@ -21,8 +21,10 @@ import type { AdapterCapabilities, ApprovalSignature, AssetVerification, DealCom
 import type { EvmSettings } from '../config.js';
 
 const art = (name: string) => JSON.parse(readFileSync(new URL(`../../contracts/out/${name}.json`, import.meta.url), 'utf8')) as { abi: Abi };
-const ESCROW_ABI = art('VerumOtcEscrow').abi;
-const ERC20_ABI = art('MockERC20').abi;
+// ABIs carregadas SOB DEMANDA (nunca no import): em deploys sem o modo EVM (ex.: Vercel sem envs
+// EVM_*) os artefatos de contracts/out podem nem existir no bundle — ler aqui derrubaria o boot.
+let _abis: { escrow: Abi; erc20: Abi } | null = null;
+const abis = () => (_abis ??= { escrow: art('VerumOtcEscrow').abi, erc20: art('MockERC20').abi });
 const ZERO_ADDR = '0x0000000000000000000000000000000000000000' as Hex;
 const MIN_GAS_WEI = 5n * 10n ** 15n;  // 0.005 ETH: abaixo disso o keeper pré-financia a EOA dev
 const TOPUP_WEI = 2n * 10n ** 16n;    // 0.02 ETH por recarga
@@ -81,6 +83,7 @@ export class EvmChainAdapter implements SettlementAdapter {
   private readonly keeperWallet: WalletClient;
   private readonly keeper: PrivateKeyAccount;
   private readonly cache = new Map<string, DealCache>();
+  private readonly abi = abis(); // carrega os artefatos só quando o modo EVM realmente instancia o adapter
   constructor(private readonly cfg: EvmSettings, private readonly keyring: EvmDevKeyring | null) {
     this.chain = { network: 'ethereum', chainId: cfg.chainId };
     this.viemChain = defineChain({ id: Number(cfg.chainId), name: `evm-${cfg.chainId}`, nativeCurrency: { name: 'ETH', symbol: 'ETH', decimals: 18 }, rpcUrls: { default: { http: [cfg.rpcUrl] } } });
@@ -98,12 +101,12 @@ export class EvmChainAdapter implements SettlementAdapter {
   }
   private async write(fn: string, args: unknown[], account: Account = this.keeper, value?: bigint): Promise<string> {
     const wallet = account === this.keeper ? this.keeperWallet : createWalletClient({ chain: this.viemChain, transport: http(this.cfg.rpcUrl), account });
-    const hash = await wallet.writeContract({ address: this.cfg.escrow, abi: ESCROW_ABI, functionName: fn, args, account, chain: this.viemChain, ...(value !== undefined ? { value } : {}) });
+    const hash = await wallet.writeContract({ address: this.cfg.escrow, abi: this.abi.escrow, functionName: fn, args, account, chain: this.viemChain, ...(value !== undefined ? { value } : {}) });
     const rc = await this.pub.waitForTransactionReceipt({ hash, confirmations: this.cfg.confirmations });
     if (rc.status !== 'success') throw new Error(`tx ${fn} revertida (${hash})`);
     return hash;
   }
-  private view<T>(fn: string, args: unknown[]): Promise<T> { return this.pub.readContract({ address: this.cfg.escrow, abi: ESCROW_ABI, functionName: fn, args }) as Promise<T>; }
+  private view<T>(fn: string, args: unknown[]): Promise<T> { return this.pub.readContract({ address: this.cfg.escrow, abi: this.abi.escrow, functionName: fn, args }) as Promise<T>; }
   /** Garante gás na EOA dev (keeper pré-financia) — só quando o keyring existe (dev). */
   private async ensureGas(address: Hex): Promise<void> {
     if (!this.keyring) return;
@@ -124,7 +127,7 @@ export class EvmChainAdapter implements SettlementAdapter {
   /** Mint dev (MockERC20.mint é permissionless; o keeper paga o gás). */
   async mintToken(token: Hex, to: string, amount: bigint): Promise<void> {
     try {
-      const hash = await this.keeperWallet.writeContract({ address: token, abi: ERC20_ABI, functionName: 'mint', args: [to, amount], account: this.keeper, chain: this.viemChain });
+      const hash = await this.keeperWallet.writeContract({ address: token, abi: this.abi.erc20, functionName: 'mint', args: [to, amount], account: this.keeper, chain: this.viemChain });
       await this.pub.waitForTransactionReceipt({ hash });
     } catch (e) { this.fail('mint', e); }
   }
@@ -138,8 +141,8 @@ export class EvmChainAdapter implements SettlementAdapter {
       const code = await this.pub.getCode({ address: addr });
       if (!code || code === '0x') return { ok: false, reasons: ['contrato inexistente na rede'], observed: { exists: false }, checkedAt };
       const [decimals, symbol] = await Promise.all([
-        this.pub.readContract({ address: addr, abi: ERC20_ABI, functionName: 'decimals' }) as Promise<number>,
-        this.pub.readContract({ address: addr, abi: ERC20_ABI, functionName: 'symbol' }) as Promise<string>
+        this.pub.readContract({ address: addr, abi: this.abi.erc20, functionName: 'decimals' }) as Promise<number>,
+        this.pub.readContract({ address: addr, abi: this.abi.erc20, functionName: 'symbol' }) as Promise<string>
       ]);
       if (Number(decimals) !== asset.decimals) reasons.push(`decimals divergente (on-chain ${decimals}, registro ${asset.decimals})`);
       if (asset.tokenStandard !== 'ERC-20') reasons.push(`padrão divergente (esperado ERC-20, registro ${asset.tokenStandard})`);
@@ -149,7 +152,7 @@ export class EvmChainAdapter implements SettlementAdapter {
   async getBalance(address: string, asset: CanonicalAsset): Promise<bigint> {
     try {
       if (asset.contractOrMint === null) return await this.pub.getBalance({ address: address as Hex });
-      return await this.pub.readContract({ address: asset.contractOrMint as Hex, abi: ERC20_ABI, functionName: 'balanceOf', args: [address] }) as bigint;
+      return await this.pub.readContract({ address: asset.contractOrMint as Hex, abi: this.abi.erc20, functionName: 'balanceOf', args: [address] }) as bigint;
     } catch (e) { this.fail('getBalance', e); }
   }
   async estimateCostUsd(op: 'deposit' | 'register' | 'settle' | 'refund'): Promise<string> { return op === 'settle' ? '3.50' : '1.20'; }
@@ -183,7 +186,7 @@ export class EvmChainAdapter implements SettlementAdapter {
       await this.ensureGas(acc.address);
       if (leg.token !== ZERO_ADDR) {
         const wallet = createWalletClient({ chain: this.viemChain, transport: http(this.cfg.rpcUrl), account: acc });
-        const ah = await wallet.writeContract({ address: leg.token, abi: ERC20_ABI, functionName: 'approve', args: [this.cfg.escrow, due], account: acc, chain: this.viemChain });
+        const ah = await wallet.writeContract({ address: leg.token, abi: this.abi.erc20, functionName: 'approve', args: [this.cfg.escrow, due], account: acc, chain: this.viemChain });
         await this.pub.waitForTransactionReceipt({ hash: ah });
       }
       const tx = await this.write('deposit', [dealId, legIndex], acc, leg.token === ZERO_ADDR ? due : 0n);

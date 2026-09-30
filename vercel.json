@@ -1,11 +1,11 @@
 {
   "$schema": "https://openapi.vercel.sh/vercel.json",
   "framework": null,
-  "buildCommand": "npm run build",
+  "buildCommand": "npm run build && npm run contracts:compile",
   "outputDirectory": "public",
   "functions": {
     "api/index.js": {
-      "includeFiles": "{web/**,db/migrations/**}",
+      "includeFiles": "{web/**,db/migrations/**,contracts/out/*.json}",
       "maxDuration": 30
     }
   },
