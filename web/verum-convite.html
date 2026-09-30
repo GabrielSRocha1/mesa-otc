@@ -115,6 +115,18 @@ h1{font-size:22px;margin-bottom:8px}
   const shortAddr = a => a && a.length>12 ? a.slice(0,6)+'…'+a.slice(-4) : a;
   function hexAddr(){ let h='0x'; const c='0123456789abcdef'; for(let i=0;i<40;i++) h+=c[Math.floor(Math.random()*16)]; return h; }
 
+  // ── Mobile sem extensão: abrir ESTE convite dentro do navegador dApp da Verum ──
+  // No celular não existe extensão/window.verum; igual ao portal, redirecionamos para o
+  // navegador dApp da Verum já carregando o PRÓPRIO link do convite (token preservado no
+  // caminho/query) — lá dentro window.verum existe e a conexão/assinatura funciona.
+  const IS_MOBILE=/android|iphone|ipad|ipod|mobile/i.test(navigator.userAgent||'');
+  function hasInjectedWallet(){ const w=window; return !!(w.verum||w.solana||w.ethereum); }
+  const VERUM_DAPP_BROWSER='https://www.verumcrypto.com/dapp-browser';
+  function openInVerumBrowser(){
+    const url=VERUM_DAPP_BROWSER+'?url='+encodeURIComponent(location.origin+location.pathname+location.search)+'&name='+encodeURIComponent('VERUM OTC');
+    window.location.href=url; // leva o usuário à Verum com o convite aberto no navegador dela
+  }
+
   /* ---------- carteira injetada (EVM / Phantom / Unisat) ---------- */
   const B58='123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz';
   function bs58encode(bytes){ const b=bytes instanceof Uint8Array?bytes:new Uint8Array(bytes); let n=0n; for(const x of b) n=n*256n+BigInt(x); let out=''; while(n>0n){ out=B58[Number(n%58n)]+out; n/=58n; } for(const x of b){ if(x!==0) break; out='1'+out; } return out; }
@@ -242,6 +254,8 @@ h1{font-size:22px;margin-bottom:8px}
     // A rede escolhida (invite.network) pode ser 'multichain' ou qualquer das 18;
     // a PROVA de posse usa a rede de auth suportada (Verum = Solana por baixo).
     const net=authNetFor(invite.network);
+    // Celular sem carteira injetada → abre este convite dentro do navegador da Verum Wallet.
+    if(IS_MOBILE && !hasInjectedWallet()){ toast('Abrindo no navegador da Verum Wallet…'); openInVerumBrowser(); return; }
     try{
       busy(true,'Conectando carteira…');
       const w=await connectWallet(net);
