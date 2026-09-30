@@ -1181,6 +1181,11 @@ img,svg,canvas,video{max-width:100%}
     }catch(e){ return; }
     if(!st||!st.payMaster){ goToRegister(); return; }
     const pm=st.payMaster, org=pm.org||'';
+    // Conta demo: badge discreto no topo (dados/carteiras simulados p/ apresentação).
+    if(pm.demo && !$('#demoBadge')){
+      const tb=document.querySelector('.topbar');
+      if(tb){ const b=document.createElement('span'); b.id='demoBadge'; b.className='badge info'; b.textContent='DEMO'; b.title='Ambiente de demonstração — carteiras e saldos simulados'; b.style.cssText='margin-left:4px;letter-spacing:.08em'; tb.insertBefore(b, tb.children[1]||null); }
+    }
     // participante Pay Master 1
     const pm1Part=document.querySelectorAll('.part')[2];
     if(pm1Part){ pm1Part.querySelector('.pr').textContent=org||(pm.name||'').split(' ')[0]; }
@@ -1864,8 +1869,8 @@ img,svg,canvas,video{max-width:100%}
     const turn=(d.participants||[]).find(p=>p.role===d.turnRole);
     const btn=$('#opSignTurn'); if(btn){ btn.disabled=true; btn.textContent='Assinando…'; }
     try{
-      // Modo EVM: o backend assina o digest EIP-712 do turno com a EOA dev do papel (contrato real).
-      if(d.settlementMode==='evm'){
+      // Modo EVM (contrato real) ou conta DEMO (keypairs no servidor): o backend assina o turno.
+      if(d.settlementMode==='evm'||d.demo){
         const body={};
         if(is2FAOn()){ const code=await ask2FACode(); if(!code) throw new Error('Assinatura cancelada'); body.twoFactorCode=code; }
         let out;

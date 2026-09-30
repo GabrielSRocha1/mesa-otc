@@ -39,7 +39,9 @@ import { getIconMap } from '../chains/icons.js';
 const MAX_STREAMS_PER_SESSION = 8; const streams = new Map<string, number>();
 
 /** Simulador local usado só em dev para dar saldo ao Vendedor ao criar a Deal-demo da mesa. */
-export interface DevMint { solanaChainId: string; mint: (address: string, contract: string | null, amount: bigint) => unknown; evm?: DevEvm }
+export interface DevMint { solanaChainId: string; mint: (address: string, contract: string | null, amount: bigint) => unknown; evm?: DevEvm; demo?: DevDemo }
+/** Conta demo (apresentações): keyring das 4 carteiras falsas + set de todos os endereços fake. */
+export interface DevDemo { keyring: import('../portal/demo.js').DemoMesaKeyring; addresses: Set<string> }
 /** Modo EVM dev: contrato real (Sepolia/anvil), keyring de EOAs dev e mint dos tokens mock. */
 export interface DevEvm { chainId: string; escrow: string; tbtc: `0x${string}`; tusdt: `0x${string}`; explorerBase: string | null; keyring: import('../adapters/evm.js').EvmDevKeyring; mintToken: (token: `0x${string}`, to: string, amount: bigint) => Promise<void> }
 export interface ApiDeps { deals: DealEngine; settlement: SettlementEngine; price: PriceEngine; liquidity: LiquidityEngine; router: RouterEngine; registry: AssetRegistry; platformFeeBps: number; networkCostUsd: (n: Network) => Promise<string>; auth: WalletAuth; portal: PortalService; identity: IdentityService; identityDev?: { email: FakeEmailChannel; sms: FakeSmsChannel }; rooms: RoomService; proposals: ProposalService; store: Store; audit: AuditLog; mesaHtmlPath?: string; portalHtmlPath?: string; conviteHtmlPath?: string; env: string; rateLimit?: { windowMs: number; max: number }; dev?: DevMint }
@@ -292,6 +294,7 @@ export async function buildApi(deps: ApiDeps): Promise<FastifyInstance> {
       signed: d.signatures.filter(s => s.status === 'valid' && s.revision === d.revision).map(s => s.role),
       participants: d.participants.map(p => ({ role: p.role, address: p.address })),
       settlementMode: ev ? 'evm' as const : 'local' as const,
+      demo: !!(deps.dev?.demo && d.participants.some(p => deps.dev!.demo!.addresses.has(p.address))),
       escrowContract: legs[0]?.escrowContract ?? null, escrowChainId: ev?.chainId ?? null, explorerBase: ev?.explorerBase ?? null,
       pair: { in: { code: d.draft.assetIn.code, decimals: d.draft.assetIn.decimals, amountBase: d.draft.amountInBase }, out: { code: d.draft.assetOut.code, decimals: d.draft.assetOut.decimals, amountBase: legs[1]?.amountBase ?? null } },
       settlement: rec ? { status: rec.status, legs: rec.legs.map(l => ({ index: l.index, label: legLabel(l.index), txRef: l.txRef, step: l.step, confirmations: l.confirmations })) } : null
@@ -344,18 +347,30 @@ export async function buildApi(deps: ApiDeps): Promise<FastifyInstance> {
   // EOA dev do papel — todas as validações do Deal Engine (ordem, turno 5 min, nonce, cripto) permanecem.
   app.post('/v1/portal/mesa/deal/sign', async req => {
     const token = portalToken(req);
-    const ev = deps.dev?.evm; if (!ev) throw new DomainError('SETTLEMENT_NOT_ALLOWED', 'Assinatura pela mesa disponível apenas no modo EVM (dev)');
+    const ev = deps.dev?.evm; const demo = deps.dev?.demo;
+    if (!ev && !demo) throw new DomainError('SETTLEMENT_NOT_ALLOWED', 'Assinatura pela mesa disponível apenas nos modos EVM/demo (dev)');
     const b = parse(z.object({ twoFactorCode: z.string().max(12).optional() }), req.body ?? {});
     deps.portal.require2FA(token, b.twoFactorCode);
     const id = deps.portal.getMesaDeal(token); if (!id) throw new DomainError('INVALID_INPUT', 'Nenhuma operação ativa na mesa');
     const d = await deps.deals.get(id);
     const role = d.turnRole; if (!role) throw new DomainError('SETTLEMENT_NOT_ALLOWED', 'Nenhum turno de assinatura em aberto');
     const p = d.participants.find(x => x.role === role); if (!p) throw new DomainError('NOT_PARTICIPANT', 'papel da vez sem participante');
-    const acc = ev.keyring.accountByAddress(p.address); if (!acc) throw new DomainError('FORBIDDEN', 'carteira do papel não é gerida pelo keyring dev');
     const env = await deps.deals.envelope(id, role, p.address);
-    if (!env.typedData) throw new DomainError('SETTLEMENT_NOT_ALLOWED', 'envelope EIP-712 ausente (participante não é EVM)');
-    const signature = await acc.signTypedData({ domain: env.typedData.domain, types: env.typedData.types, primaryType: 'DealApproval', message: env.typedData.message });
-    const r = await deps.deals.submitSignature(id, { role, signer: p.address, scheme: 'secp256k1', signature, nonce: env.payload.nonce }, p.address);
+    let signature: string; let scheme: 'secp256k1' | 'ed25519';
+    const evAcc = ev?.keyring.accountByAddress(p.address);
+    const demoRole = demo?.keyring.roleOf(p.address);
+    if (evAcc && env.typedData) {
+      // Modo EVM: backend assina o digest EIP-712 com a EOA dev do papel.
+      signature = await evAcc.signTypedData({ domain: env.typedData.domain, types: env.typedData.types, primaryType: 'DealApproval', message: env.typedData.message });
+      scheme = 'secp256k1';
+    } else if (demoRole && demoRole.network === 'solana') {
+      // Conta DEMO: keypair Ed25519 do papel assina a mensagem do envelope (igual à Verum Wallet).
+      signature = demo!.keyring.signMessage(demoRole.role, env.message);
+      scheme = 'ed25519';
+    } else {
+      throw new DomainError('FORBIDDEN', 'carteira do papel não é gerida pelo keyring dev/demo');
+    }
+    const r = await deps.deals.submitSignature(id, { role, signer: p.address, scheme, signature, nonce: env.payload.nonce }, p.address);
     await deps.audit.append({ actorType: 'user', actorId: p.address, category: 'portal.mesa.deal.signed', dealId: id, payload: { role, count: r.count } });
     return mesaDealView(r.deal);
   });
@@ -444,7 +459,16 @@ export async function buildApi(deps: ApiDeps): Promise<FastifyInstance> {
     } catch { void reply.code(502); return reply.send('error'); }
   });
   // Preços dos ativos nativos via API pública de mercado (cache 60s). Público.
-  app.get('/v1/chains/prices', async () => ({ prices: await getPrices() }));
+  // Fora de produção, redes sem cotação (CoinGecko fora/limitado) caem na tabela estática
+  // da demo — a apresentação nunca fica com preços vazios.
+  app.get('/v1/chains/prices', async () => {
+    const prices = await getPrices();
+    if (deps.dev?.demo) {
+      const { DEMO_PRICES_USD, DEMO_BRL_RATE } = await import('../portal/demo.js');
+      for (const [k, v] of Object.entries(prices)) if (v.usd == null && DEMO_PRICES_USD[k] != null) prices[k] = { usd: DEMO_PRICES_USD[k], brl: DEMO_PRICES_USD[k] * DEMO_BRL_RATE };
+    }
+    return { prices };
+  });
   // Redes que têm USDT/USDC + ícones reais dos stablecoins. Público.
   app.get('/v1/chains/stablecoins', async () => { const icons = await getIconMap().catch(() => ({} as Record<string, string>)); return { networks: stablecoinNetworks(), icons: { USDT: icons['tether'] ? '/v1/chains/icon/tether' : null, USDC: icons['usd-coin'] ? '/v1/chains/icon/usd-coin' : null } }; });
   // Saldo NATIVO por endereço em cada rede + valor em USD/BRL. Leitura pura;
@@ -457,6 +481,13 @@ export async function buildApi(deps: ApiDeps): Promise<FastifyInstance> {
         address: z.string().min(8).max(120),
       })).min(1).max(30),
     }), req.body);
+
+    // Carteiras da mesa DEMO → saldos canned (nunca toca RPC nem CoinGecko).
+    const demo = deps.dev?.demo;
+    if (demo && body.addresses.some(a => demo.addresses.has(a.address))) {
+      const { demoBalancesResponse } = await import('../portal/demo.js');
+      return demoBalancesResponse(demo.keyring, body.addresses);
+    }
 
     const [byId, icons] = await Promise.all([
       getPricesById().catch(() => ({} as Awaited<ReturnType<typeof getPricesById>>)),

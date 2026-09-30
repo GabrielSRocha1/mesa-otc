@@ -40,6 +40,9 @@ const Schema = z.object({
   EVM_TUSDT: z.string().regex(/^0x[0-9a-fA-F]{40}$/).optional(),
   EVM_CONFIRMATIONS: z.coerce.number().int().min(1).max(64).default(1),
   EVM_EXPLORER_BASE: z.string().optional(),
+  // Conta DEMO do portal (apresentações): semeada no boot fora de produção.
+  DEMO_EMAIL: z.string().default('demo@verumotc.com'),
+  DEMO_PASSWORD: z.string().min(8).default('VerumDemo2026'),
   LOG_LEVEL: z.string().default('info')
 });
 export type Config = z.infer<typeof Schema> & { sessionSecret: string; operators: Set<string>; identityMasterSecret: string };

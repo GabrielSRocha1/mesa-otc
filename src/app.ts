@@ -20,6 +20,7 @@ import { SettlementEngine } from './engines/settlement.js';
 import { AuditLog } from './audit/audit.js';
 import { WalletAuth } from './wallet/auth.js';
 import { PortalService } from './portal/portal.js';
+import { DemoMesaKeyring } from './portal/demo.js';
 import { PostgresPortalPersistence } from './portal/pgPortal.js';
 import { FieldCrypto, deriveDevKeys } from './identity/crypto.js';
 import { OtpManager, FakeEmailChannel, FakeSmsChannel, type OtpChannel } from './identity/otp.js';
@@ -99,6 +100,15 @@ export async function createApp(config: Config, o: AppOverrides = {}): Promise<A
   const portalPersistence = sqlClient ? new PostgresPortalPersistence(sqlClient, now) : undefined;
   const portal = new PortalService({ file: config.PORTAL_DATA_FILE, sessionTtlMs: 24 * 3600_000, now, persistence: portalPersistence });
   if (portalPersistence) await portal.hydrate();
+  // Conta DEMO (apresentações): mesa 4/4 com carteiras falsas do keyring; nunca em produção.
+  let demo: { keyring: DemoMesaKeyring; addresses: Set<string> } | undefined;
+  if (config.OTC_ENV !== 'prod') {
+    const kr = new DemoMesaKeyring(config.identityMasterSecret);
+    const wallets = Object.fromEntries((['PAYMASTER_1', 'SELLER', 'BUYER', 'PAYMASTER_2'] as const).map(r => [r, { address: kr.addressFor(r), addresses: kr.addressesFor(r) }]));
+    portal.seedDemo({ email: config.DEMO_EMAIL, password: config.DEMO_PASSWORD, wallets: wallets as Parameters<PortalService['seedDemo']>[0]['wallets'] });
+    demo = { keyring: kr, addresses: kr.allAddresses() };
+    logger.info({ email: config.DEMO_EMAIL }, 'conta demo da mesa semeada');
+  }
   // Identidade mínima (§2). Canais de OTP: fakes locais em dev/teste; adaptadores reais (SES/SNS/Twilio)
   // entram por injeção em produção. O `devOutbox` só é exposto quando OTC_ENV=dev.
   const identityCrypto = new FieldCrypto(deriveDevKeys(config.identityMasterSecret));
@@ -124,7 +134,7 @@ export async function createApp(config: Config, o: AppOverrides = {}): Promise<A
   });
   // Propostas estruturadas de alteração de termos (§5.3/§6) — porta de entrada tipada para o amend.
   const proposals = new ProposalService({ deals, now, audit, notifier: { notify: dealId => logger.info({ dealId }, 'atualização de proposta de termos') } });
-  const api = await buildApi({ deals, settlement, price, liquidity, router, registry, platformFeeBps: config.PLATFORM_FEE_BPS, networkCostUsd: async n => adapters.require(n).estimateCostUsd('settle'), auth, portal, identity, identityDev, rooms, proposals, store, audit, mesaHtmlPath: config.MESA_HTML_PATH, portalHtmlPath: config.PORTAL_HTML_PATH, conviteHtmlPath: config.CONVITE_HTML_PATH, env: config.OTC_ENV, rateLimit: { windowMs: 60_000, max: config.OTC_ENV === 'dev' ? 100_000 : 120 }, dev: local ? { solanaChainId: local.solana.chain.chainId, mint: (a, c, amt) => local!.solana.mint(a, c, amt), evm: evmAdapter && evmKeyring && evmCfg ? { chainId: evmCfg.chainId, escrow: evmCfg.escrow, tbtc: evmCfg.tbtc, tusdt: evmCfg.tusdt, explorerBase: evmCfg.explorerBase, keyring: evmKeyring, mintToken: (t, to, amt) => evmAdapter!.mintToken(t, to, amt) } : undefined } : undefined });
+  const api = await buildApi({ deals, settlement, price, liquidity, router, registry, platformFeeBps: config.PLATFORM_FEE_BPS, networkCostUsd: async n => adapters.require(n).estimateCostUsd('settle'), auth, portal, identity, identityDev, rooms, proposals, store, audit, mesaHtmlPath: config.MESA_HTML_PATH, portalHtmlPath: config.PORTAL_HTML_PATH, conviteHtmlPath: config.CONVITE_HTML_PATH, env: config.OTC_ENV, rateLimit: { windowMs: 60_000, max: config.OTC_ENV === 'dev' ? 100_000 : 120 }, dev: local ? { solanaChainId: local.solana.chain.chainId, mint: (a, c, amt) => local!.solana.mint(a, c, amt), demo, evm: evmAdapter && evmKeyring && evmCfg ? { chainId: evmCfg.chainId, escrow: evmCfg.escrow, tbtc: evmCfg.tbtc, tusdt: evmCfg.tusdt, explorerBase: evmCfg.explorerBase, keyring: evmKeyring, mintToken: (t, to, amt) => evmAdapter!.mintToken(t, to, amt) } : undefined } : undefined });
   let timer: NodeJS.Timeout | null = null;
   let ticks = 0;
   const tick = async () => { try { const ids = await deals.expireDue(); if (ids.length) logger.info({ ids }, 'deals expiradas'); if (++ticks % 720 === 0) { const purged = await store.purge(now(), 24 * 3600_000); logger.info(purged, 'retenção'); } metrics.priceBreakerOpen.set(price.breakerState().open ? 1 : 0); for (const s of ['AWAITING_SIGNATURES', 'SETTLING', 'SETTLEMENT_VALIDATION', 'REFUNDING'] as const) metrics.activeDeals.set({ state: s }, (await store.listDeals({ states: [s] })).length); } catch (e) { logger.error({ err: (e as Error).message }, 'scheduler'); } };

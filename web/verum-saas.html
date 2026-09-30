@@ -628,6 +628,13 @@ img,svg{max-width:100%}
     me = payload;
     const p = me.payMaster || {};
     $('#chipName').textContent=p.name||'Pay Master';
+    // Conta demo: marca discreta ao lado do nome (carteiras/saldos simulados p/ apresentação).
+    if(p.demo && !document.getElementById('demoTag')){
+      const t=document.createElement('span'); t.id='demoTag'; t.textContent='DEMO';
+      t.title='Ambiente de demonstração — carteiras e saldos simulados';
+      t.style.cssText='margin-left:7px;font-size:10px;font-weight:800;letter-spacing:.09em;color:var(--blue);background:var(--blue-soft);border:1px solid rgba(79,155,255,.3);padding:2px 7px;border-radius:999px;vertical-align:middle';
+      $('#chipName').appendChild(t);
+    }
     $('#chipAv').textContent=initials(p.name);
     $('#wAv').textContent=initials(p.name);
     $('#wName').textContent=(p.name||'Pay Master').split(' ')[0];

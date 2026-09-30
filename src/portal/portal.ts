@@ -31,7 +31,7 @@ export interface DeskSecurity {
 }
 export type SecurityAlertType = 'new_wallet' | '2fa_enabled' | '2fa_disabled' | 'idle_logout';
 export interface SecurityAlert { id: string; type: SecurityAlertType; at: number; message: string; read: boolean }
-export interface PayMaster { id: string; name: string; email: string; org: string; salt: string; passHash: string; createdAt: number; wallet: WalletLink | null; mesaDealId?: string | null; mesaDealIds?: string[]; security?: DeskSecurity; knownWallets?: string[]; alerts?: SecurityAlert[] }
+export interface PayMaster { id: string; name: string; email: string; org: string; salt: string; passHash: string; createdAt: number; wallet: WalletLink | null; mesaDealId?: string | null; mesaDealIds?: string[]; security?: DeskSecurity; knownWallets?: string[]; alerts?: SecurityAlert[]; demo?: boolean }
 export interface PortalSession { token: string; payMasterId: string; createdAt: number; expiresAt: number; lastSeenAt: number }
 export interface MesaCode { code: string; uid: string; payMasterId: string; createdAt: number; expiresAt: number }
 
@@ -55,7 +55,7 @@ export interface PortalPersistence {
   flush(): Promise<void>;                // aguarda a última escrita pendente (no-op no file)
 }
 
-export interface SafePayMaster { id: string; name: string; email: string; org: string; role: 'Pay Master 1'; createdAt: number }
+export interface SafePayMaster { id: string; name: string; email: string; org: string; role: 'Pay Master 1'; createdAt: number; demo?: boolean }
 /** Visão de segurança exposta ao painel (nunca inclui o segredo TOTP). */
 export interface PublicSecurity { twoFactor: { enabled: boolean; enabledAt?: number }; idleLock: { enabled: boolean; timeoutMs: number }; newWalletAlert: { enabled: boolean } }
 /** Dados de enrollment do 2FA (mostrados uma única vez ao ativar). */
@@ -111,7 +111,7 @@ export class PortalService {
   }
 
   private hash(password: string, salt: string): string { return scryptSync(password, salt, 32).toString('hex'); }
-  private safe(pm: PayMaster): SafePayMaster { return { id: pm.id, name: pm.name, email: pm.email, org: pm.org, role: 'Pay Master 1', createdAt: pm.createdAt }; }
+  private safe(pm: PayMaster): SafePayMaster { return { id: pm.id, name: pm.name, email: pm.email, org: pm.org, role: 'Pay Master 1', createdAt: pm.createdAt, ...(pm.demo ? { demo: true } : {}) }; }
   private publicCode(c: MesaCode): PublicCode { return { code: c.code, uid: c.uid, createdAt: c.createdAt, expiresAt: c.expiresAt, ttlMs: Math.max(0, c.expiresAt - this.now()) }; }
 
   private newSession(payMasterId: string): PortalSession {
@@ -505,6 +505,41 @@ export class PortalService {
     if (owner) this.noteWallet(owner, inv.wallet, inv.role);
     this.write();
     return this.publicInvite(inv);
+  }
+
+  /** Sessão pertence à conta demo? (leitura; nunca lança — usado por rotas públicas). */
+  isDemoSession(token: string | undefined): boolean {
+    try { const s = this.session(token, false); return !!this.pm(s.payMasterId).demo; } catch { return false; }
+  }
+
+  /**
+   * Semeia a conta DEMO (apresentações; nunca em produção): cria o Pay Master com e-mail/senha fixos
+   * e deixa a mesa 4/4 conectada com as carteiras falsas do keyring demo. Idempotente — no serverless
+   * cada instância re-semeia no boot e só completa o que faltar.
+   */
+  seedDemo(input: { email: string; password: string; wallets: Record<SlotRole, { address: string; addresses: WalletAddress[] }> }): void {
+    const email = input.email.trim().toLowerCase();
+    let pm = Object.values(this.data.payMasters).find(p => p.email === email);
+    let changed = false;
+    if (!pm) {
+      const salt = randomBytes(16).toString('hex');
+      pm = { id: 'pm_demo', name: 'Mesa Demonstração', email, org: 'VERUM OTC — Demo', salt, passHash: this.hash(input.password, salt), createdAt: this.now(), wallet: null, demo: true };
+      this.data.payMasters[pm.id] = pm; changed = true;
+    }
+    if (!pm.demo) { pm.demo = true; changed = true; }
+    const link = (w: { address: string; addresses: WalletAddress[] }) => this.walletLink(w.address, 'solana', w.addresses);
+    if (!pm.wallet) { pm.wallet = link(input.wallets.PAYMASTER_1); changed = true; }
+    // knownWallets pré-populado: sem alertas de "nova carteira" durante a apresentação.
+    pm.knownWallets = Array.from(new Set([...(pm.knownWallets ?? []), ...Object.values(input.wallets).map(w => w.address)]));
+    const LABELS: Record<MesaRole, string> = { SELLER: 'Vendedor (demo)', BUYER: 'Comprador (demo)', PAYMASTER_2: 'Pay Master 2 (demo)' };
+    for (const role of ['SELLER', 'BUYER', 'PAYMASTER_2'] as MesaRole[]) {
+      const existing = Object.values(this.data.invites).find(i => i.payMasterId === pm.id && i.role === role);
+      if (existing && existing.status === 'confirmed') continue;
+      const token = 'demo_' + role.toLowerCase();
+      this.data.invites[token] = { token, payMasterId: pm.id, role, network: 'multichain', label: LABELS[role], status: 'confirmed', wallet: link(input.wallets[role]), createdAt: this.now(), expiresAt: this.now() + 10 * 365 * 24 * HOUR };
+      changed = true;
+    }
+    if (changed) this.write();
   }
 
   /** PM revoga/remove um convite (por papel ou por token). */
