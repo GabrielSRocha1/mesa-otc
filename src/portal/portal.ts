@@ -528,14 +528,17 @@ export class PortalService {
     }
     if (!pm.demo) { pm.demo = true; changed = true; }
     const link = (w: { address: string; addresses: WalletAddress[] }) => this.walletLink(w.address, 'solana', w.addresses);
-    if (!pm.wallet) { pm.wallet = link(input.wallets.PAYMASTER_1); changed = true; }
+    // Re-sincroniza endereços divergentes: um seed antigo (outra instância/segredo) pode ter
+    // persistido endereços que o keyring atual não controla — corrige para os atuais.
+    if (!pm.wallet || pm.wallet.address !== input.wallets.PAYMASTER_1.address) { pm.wallet = link(input.wallets.PAYMASTER_1); changed = true; }
     // knownWallets pré-populado: sem alertas de "nova carteira" durante a apresentação.
     pm.knownWallets = Array.from(new Set([...(pm.knownWallets ?? []), ...Object.values(input.wallets).map(w => w.address)]));
     const LABELS: Record<MesaRole, string> = { SELLER: 'Vendedor (demo)', BUYER: 'Comprador (demo)', PAYMASTER_2: 'Pay Master 2 (demo)' };
     for (const role of ['SELLER', 'BUYER', 'PAYMASTER_2'] as MesaRole[]) {
       const existing = Object.values(this.data.invites).find(i => i.payMasterId === pm.id && i.role === role);
-      if (existing && existing.status === 'confirmed') continue;
+      if (existing && existing.status === 'confirmed' && existing.wallet?.address === input.wallets[role].address) continue;
       const token = 'demo_' + role.toLowerCase();
+      if (existing && existing.token !== token) delete this.data.invites[existing.token];
       this.data.invites[token] = { token, payMasterId: pm.id, role, network: 'multichain', label: LABELS[role], status: 'confirmed', wallet: link(input.wallets[role]), createdAt: this.now(), expiresAt: this.now() + 10 * 365 * 24 * HOUR };
       changed = true;
     }

@@ -20,7 +20,7 @@ import { SettlementEngine } from './engines/settlement.js';
 import { AuditLog } from './audit/audit.js';
 import { WalletAuth } from './wallet/auth.js';
 import { PortalService } from './portal/portal.js';
-import { DemoMesaKeyring } from './portal/demo.js';
+import { DemoMesaKeyring, demoSecret } from './portal/demo.js';
 import { PostgresPortalPersistence } from './portal/pgPortal.js';
 import { FieldCrypto, deriveDevKeys } from './identity/crypto.js';
 import { OtpManager, FakeEmailChannel, FakeSmsChannel, type OtpChannel } from './identity/otp.js';
@@ -103,7 +103,7 @@ export async function createApp(config: Config, o: AppOverrides = {}): Promise<A
   // Conta DEMO (apresentações): mesa 4/4 com carteiras falsas do keyring; nunca em produção.
   let demo: { keyring: DemoMesaKeyring; addresses: Set<string> } | undefined;
   if (config.OTC_ENV !== 'prod') {
-    const kr = new DemoMesaKeyring(config.identityMasterSecret);
+    const kr = new DemoMesaKeyring(demoSecret(config.DEMO_EMAIL, config.DEMO_PASSWORD));
     const wallets = Object.fromEntries((['PAYMASTER_1', 'SELLER', 'BUYER', 'PAYMASTER_2'] as const).map(r => [r, { address: kr.addressFor(r), addresses: kr.addressesFor(r) }]));
     portal.seedDemo({ email: config.DEMO_EMAIL, password: config.DEMO_PASSWORD, wallets: wallets as Parameters<PortalService['seedDemo']>[0]['wallets'] });
     demo = { keyring: kr, addresses: kr.allAddresses() };

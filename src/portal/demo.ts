@@ -15,6 +15,16 @@ import { getChain } from '../chains/registry.js';
 export type DemoRole = 'PAYMASTER_1' | 'SELLER' | 'BUYER' | 'PAYMASTER_2';
 export const DEMO_ROLES: DemoRole[] = ['PAYMASTER_1', 'SELLER', 'BUYER', 'PAYMASTER_2'];
 
+/**
+ * Seed ESTÁVEL do keyring demo, derivado das credenciais demo — NUNCA do identityMasterSecret:
+ * no serverless cada instância tem um masterSecret aleatório, e o portal (Postgres) é compartilhado;
+ * com seed por instância, os endereços semeados por uma instância não bateriam com o keyring das
+ * outras (assinatura FORBIDDEN). São chaves de brincadeira: quem tem as credenciais já loga na demo.
+ */
+export function demoSecret(email: string, password: string): string {
+  return bytesToHex(sha256(utf8ToBytes('verum-demo-mesa|' + email.toLowerCase() + '|' + password)));
+}
+
 /** Preços estáticos (USD) p/ demo — a apresentação não depende do CoinGecko. BRL = USD × 5.4. */
 export const DEMO_PRICES_USD: Record<string, number> = {
   bitcoin: 64_230.5, ethereum: 2_418.75, solana: 151.2, bsc: 565.4, polygon: 0.52, tron: 0.16,
