@@ -25,8 +25,9 @@ import type { VerumEvmDevKeyring } from './keyring.js';
 import type { VerumEvmSettings } from '../../config.js';
 
 type Hex = `0x${string}`;
-const MIN_GAS_WEI = 5n * 10n ** 15n;
-const TOPUP_WEI = 2n * 10n ** 16n;
+// Dimensionado p/ testnets de gás barato (Sepolia ~1 gwei): cada passo on-chain custa ~0,0005 ETH.
+const MIN_GAS_WEI = 1n * 10n ** 15n;  // 0,001 ETH: abaixo disso o keeper pré-financia a EOA dev
+const TOPUP_WEI = 4n * 10n ** 15n;    // 0,004 ETH por recarga
 const SIGN_FN: Record<OnchainRole, 'sellerSign' | 'paymaster01Sign' | 'paymaster02Sign' | 'buyerSign'> = {
   [OnchainRole.SELLER]: 'sellerSign', [OnchainRole.PAYMASTER_01]: 'paymaster01Sign', [OnchainRole.PAYMASTER_02]: 'paymaster02Sign', [OnchainRole.BUYER]: 'buyerSign',
 };

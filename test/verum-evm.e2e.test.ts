@@ -34,6 +34,11 @@ describe.skipIf(!ready)('e2e — escrow canônico VerumOTCEscrowEVM (anvil)', ()
       const amountIn = 50_000_000_000n; // 50.000 tUSDT (6 dec)
       await app.verumEvm!.mintToken(tusdt, addr('SELLER'), amountIn * 2n);
       await app.verumEvm!.mintToken(tbtc, addr('BUYER'), 200_000_000n); // 2 tBTC (8 dec)
+      // Saldos ANTES (asserções por delta: em testnet pública as EOAs acumulam entre execuções)
+      const usdtAsset = { network: 'ethereum', chainId, contractOrMint: tusdt } as Parameters<NonNullable<App['verumEvm']>['getBalance']>[1];
+      const tbtcAsset = { network: 'ethereum', chainId, contractOrMint: tbtc } as Parameters<NonNullable<App['verumEvm']>['getBalance']>[1];
+      const buyerUsdtBefore = await app.verumEvm!.getBalance(addr('BUYER'), usdtAsset);
+      const sellerTbtcBefore = await app.verumEvm!.getBalance(addr('SELLER'), tbtcAsset);
 
       // create → connect → verify (congela termos e REGISTRA on-chain: createTrade real do PM1)
       let deal = await app.deals.create({
@@ -70,13 +75,11 @@ describe.skipIf(!ready)('e2e — escrow canônico VerumOTCEscrowEVM (anvil)', ()
       const post = await app.verumEvm!.getDealState(deal.id);
       expect(post.status).toBe('SETTLED');
 
-      // conservação: comprador recebeu os 50.000 tUSDT; vendedor recebeu os tBTC do comprador
-      const usdtAsset = { network: 'ethereum', chainId, contractOrMint: tusdt } as Parameters<NonNullable<App['verumEvm']>['getBalance']>[1];
-      const tbtcAsset = { network: 'ethereum', chainId, contractOrMint: tbtc } as Parameters<NonNullable<App['verumEvm']>['getBalance']>[1];
-      expect(await app.verumEvm!.getBalance(addr('BUYER'), usdtAsset)).toBe(amountIn);
-      expect(await app.verumEvm!.getBalance(addr('SELLER'), tbtcAsset)).toBeGreaterThan(0n);
+      // conservação (por delta): comprador recebeu os 50.000 tUSDT; vendedor recebeu os tBTC
+      expect(await app.verumEvm!.getBalance(addr('BUYER'), usdtAsset) - buyerUsdtBefore).toBe(amountIn);
+      expect(await app.verumEvm!.getBalance(addr('SELLER'), tbtcAsset) - sellerTbtcBefore).toBeGreaterThan(0n);
     } finally { await app.close(); }
-  }, 180_000);
+  }, 900_000); // Sepolia: ~12 tx sequenciais com bloco de ~12 s
 
   it('expiração on-chain: refund antes dos 40 min fica pendente (SETTLEMENT_NOT_ALLOWED)', async () => {
     const env = Object.fromEntries(VARS.map(k => [k, process.env[k] as string]));
