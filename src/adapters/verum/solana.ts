@@ -53,7 +53,7 @@ export class VerumSolanaAdapter implements SettlementAdapter, ParticipantStepPro
     const msg = e instanceof Error ? e.message : String(e);
     if (/fetch|network|ECONN|503|429|timeout/i.test(msg)) throw new DomainError('ADAPTER_UNAVAILABLE', `RPC Solana indisponível (${op})`);
     if (/Expired/i.test(msg)) throw new DomainError('DEAL_EXPIRED', `expirada on-chain (${op})`);
-    throw new DomainError('SETTLEMENT_FAILED', `${op} on-chain falhou: ${msg.split('\n')[0]}`);
+    throw new DomainError('SETTLEMENT_FAILED', `${op} on-chain falhou: ${msg.replace(/\s*\n\s*/g, ' · ').slice(0, 600)}`);
   }
   private ref(tx: string): TxRef { return { chain: 'solana', ref: tx, submittedAt: Date.now() }; }
   private keypairOf(address: string): Keypair {
@@ -70,7 +70,12 @@ export class VerumSolanaAdapter implements SettlementAdapter, ParticipantStepPro
     tx.feePayer = feePayer;
     tx.recentBlockhash = (await this.conn.getLatestBlockhash('confirmed')).blockhash;
     tx.sign(...signers);
-    const sig = await this.conn.sendRawTransaction(tx.serialize(), { skipPreflight: false, preflightCommitment: 'confirmed' });
+    let sig: string;
+    try { sig = await this.conn.sendRawTransaction(tx.serialize(), { skipPreflight: false, preflightCommitment: 'confirmed' }); }
+    catch (e) {
+      const logs = (e as { logs?: string[] }).logs ?? [];
+      throw new Error(`${(e as Error).message} | logs: ${logs.slice(-6).join(' ;; ')}`, { cause: e });
+    }
     const conf = await this.inner.waitForConfirmation(sig, 90_000);
     if (conf.status !== 'CONFIRMED') throw new Error(`tx não confirmada (${conf.status}): ${conf.reason ?? sig}`);
     return sig;
