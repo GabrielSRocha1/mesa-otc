@@ -75,12 +75,13 @@ export const ROLE_ALREADY_ADVANCED: Record<OnchainRole, TradeState[]> = {
 
 export interface VerumAdapterDeps {
   /** Acesso ao Deal persistido (stateless/serverless: tudo re-derivável de terms + meta + RPC). */
-  getDeal(dealId: string): Promise<{ hash: { dealHash: string } | null; onChain: Record<string, { meta?: Record<string, string | number> }> } | null>;
+  getDeal(dealId: string): Promise<{ hash: { dealHash: string } | null; onChain: Record<string, { revision?: number; meta?: Record<string, string | number> }> } | null>;
 }
 
-export async function bindingOf(deps: VerumAdapterDeps, dealId: string, network: string): Promise<{ meta: VerumMeta; dealHash: string } | null> {
+export async function bindingOf(deps: VerumAdapterDeps, dealId: string, network: string): Promise<{ meta: VerumMeta; dealHash: string; revision: number } | null> {
   const deal = await deps.getDeal(dealId);
-  const meta = deal?.onChain[network]?.meta as VerumMeta | undefined;
+  const entry = deal?.onChain[network];
+  const meta = entry?.meta as VerumMeta | undefined;
   if (!deal || !meta?.tradeId) return null;
-  return { meta, dealHash: deal.hash?.dealHash ?? '' };
+  return { meta, dealHash: deal.hash?.dealHash ?? '', revision: entry?.revision ?? 1 };
 }

@@ -230,7 +230,7 @@ export class VerumTronAdapter implements SettlementAdapter, ParticipantStepProvi
       const terms = await this.termsOf(dealId, bound.meta);
       const settledLegs: Record<number, string> = t.state === TradeState.SETTLED ? { 0: 'onchain-settled', 1: 'onchain-settled' } : {};
       return {
-        status: statusFromTradeState(t.state, t.sellerDeposited, t.buyerDeposited), revision: 0,
+        status: statusFromTradeState(t.state, t.sellerDeposited, t.buyerDeposited), revision: bound.revision,
         deposits: depositsOf(t.sellerDeposited, t.buyerDeposited, terms.sellerAmount, terms.buyerAmount), settledLegs,
         dealHash: bound.dealHash || undefined, expiresAt: t.expiresAt, tradeId: bound.meta.tradeId,
       };

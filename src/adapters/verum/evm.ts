@@ -227,7 +227,7 @@ export class VerumEvmAdapter implements SettlementAdapter, ParticipantStepProvid
       const status = statusFromTradeState(state, t.sellerDeposited, t.buyerDeposited);
       const settledLegs: Record<number, string> = state === TradeState.SETTLED ? { 0: 'onchain-settled', 1: 'onchain-settled' } : {};
       return {
-        status, revision: 0, deposits: depositsOf(t.sellerDeposited, t.buyerDeposited, t.terms.sellerAmount, t.terms.buyerAmount), settledLegs,
+        status, revision: bound.revision, deposits: depositsOf(t.sellerDeposited, t.buyerDeposited, t.terms.sellerAmount, t.terms.buyerAmount), settledLegs,
         dealHash: bound.dealHash || undefined, expiresAt: Number(t.terms.expiresAt), tradeId: bound.meta.tradeId,
       };
     } catch (e) { this.fail('getDealState', e); }
