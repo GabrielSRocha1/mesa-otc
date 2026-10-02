@@ -29,7 +29,8 @@ export const EIP712_TYPES = {
 export interface DealApprovalMessage { dealHash: `0x${string}`; termsHash: `0x${string}`; dealId: string; revision: number; role: number; signer: `0x${string}`; nonce: string; expiresAt: bigint; assetIn: string; amountIn: bigint; assetOut: string; amountOut: bigint; counterparty: string }
 const ROLE_CODE: Record<Role, number> = { SELLER: 0, BUYER: 1, PAYMASTER_1: 2, PAYMASTER_2: 3 };
 
-/* ---------- Termos EVM (espelho exato de VerumOtcEscrow.RegisterInput / _termsHash) ---------- */
+/* ---------- Termos EVM do envelope mesa (DealApproval) — funções puras, usadas só no typedData
+   do envelope de auditoria da mesa; o escrow canônico Verum assina Approval próprio on-chain. ---------- */
 export type Hex = `0x${string}`;
 export interface EvmDealTerms {
   dealId: string; revision: number; dealHash: Hex; expiresAtMs: bigint; participants: Hex[]; assetInHash: Hex; assetOutHash: Hex; amountIn: bigint; amountOut: bigint; minAmountOut: bigint; referencePrice: bigint;

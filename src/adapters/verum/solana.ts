@@ -13,8 +13,8 @@ import { DomainError } from '../../domain/errors.js';
 import { TradeState, Role as OnchainRole, type ChainId, type Terms as VerumTerms, type Signature as VerumSignature } from '../../onchain/types.js';
 import { computeFee } from '../../onchain/core/index.js';
 import { SolanaChainAdapter, anchorDiscriminator, findPda, associatedTokenAddress } from '../../onchain/router/adapters/solana.js';
-import type { AdapterCapabilities, ApprovalSignature, AssetVerification, DealCommitment, OnChainDealState, RegisterResult, SettlementAdapter, TxRef, TxStatus } from '../types.js';
-import { buildVerumTerms, statusFromTradeState, depositsOf, bindingOf, ROLE_TO_ONCHAIN, type VerumAdapterDeps, type VerumMeta } from './common.js';
+import type { AdapterCapabilities, ApprovalSignature, AssetVerification, DealCommitment, OnChainDealState, ParticipantStepProvider, RegisterResult, SettlementAdapter, TxRef, TxStatus } from '../types.js';
+import { buildVerumTerms, statusFromTradeState, depositsOf, bindingOf, ROLE_TO_ONCHAIN, ROLE_ALREADY_ADVANCED, type VerumAdapterDeps, type VerumMeta } from './common.js';
 import type { SolanaSettings } from '../../config.js';
 
 const SOLANA_CLUSTER: Record<string, string> = { '101': 'mainnet-beta', '102': 'testnet', '103': 'devnet' };
@@ -27,7 +27,7 @@ export function parseKeypair(raw: string): Keypair {
   return Keypair.fromSecretKey(Uint8Array.from(Buffer.from(trimmed, 'base64')));
 }
 
-export class VerumSolanaAdapter implements SettlementAdapter {
+export class VerumSolanaAdapter implements SettlementAdapter, ParticipantStepProvider {
   readonly chain: ChainRef;
   private readonly inner: SolanaChainAdapter;
   private readonly conn: Connection;
@@ -276,5 +276,33 @@ export class VerumSolanaAdapter implements SettlementAdapter {
     const b = await bindingOf(this.deps, dealId, 'solana');
     if (!b) throw new DomainError('SETTLEMENT_NOT_ALLOWED', `deal ${dealId} sem registro on-chain (meta ausente)`);
     return b;
+  }
+
+  /* ---------- fluxo de carteira real (/v1/deals/:id/onchain-tx) ---------- */
+  /** Na Solana o papel assina a PRÓPRIA transação: devolve a tx base64 fresca para a Verum Wallet assinar. */
+  async buildParticipantStep(dealId: string, role: Role, signer: string): Promise<Record<string, unknown>> {
+    const b = await this.binding(dealId);
+    const onRole = ROLE_TO_ONCHAIN[role];
+    const trade = await this.inner.getTrade(b.meta.tradeId);
+    if (!trade) throw new DomainError('SETTLEMENT_NOT_ALLOWED', 'trade inexistente on-chain');
+    if (ROLE_ALREADY_ADVANCED[onRole].includes(trade.state)) return { kind: 'done', tradeId: b.meta.tradeId, state: trade.state };
+    const terms = await this.verumTermsOf(dealId, null, b.meta);
+    const now = await this.inner.now();
+    const deadline = Math.min(now + 300, terms.expiresAt);
+    const unsigned = await this.inner.buildSign(terms, b.meta.tradeId, { role: onRole, signer, tradeId: b.meta.tradeId, termsHash: b.meta.termsHash, deadline, signature: '' });
+    const p = unsigned.payload as { transactionBase64: string; recentBlockhash: string; lastValidBlockHeight: number };
+    return { kind: 'solana', tradeId: b.meta.tradeId, deadline, transactionBase64: p.transactionBase64, recentBlockhash: p.recentBlockhash, lastValidBlockHeight: p.lastValidBlockHeight };
+  }
+  /** Recebe a transação assinada pela carteira e faz o broadcast + confirmação. */
+  async submitParticipantStep(_dealId: string, _role: Role, _signer: string, body: Record<string, unknown>): Promise<Record<string, unknown>> {
+    const b64 = String(body.signedTransactionBase64 ?? '');
+    if (!b64) throw new DomainError('INVALID_INPUT', 'esperado { signedTransactionBase64 }');
+    try {
+      const raw = Buffer.from(b64, 'base64');
+      const sig = await this.conn.sendRawTransaction(raw, { skipPreflight: false, preflightCommitment: 'confirmed' });
+      const conf = await this.inner.waitForConfirmation(sig, 90_000);
+      if (conf.status !== 'CONFIRMED') throw new Error(`tx não confirmada (${conf.status}): ${conf.reason ?? sig}`);
+      return { kind: 'broadcast', txHash: sig };
+    } catch (e) { this.fail('participantStep', e); }
   }
 }

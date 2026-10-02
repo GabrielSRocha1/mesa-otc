@@ -7,8 +7,7 @@ import { SqlStore, createPgliteClient, createPgClient, type SqlClient } from './
 import type { Store } from './db/repository.js';
 import { AdapterRegistry, type ApprovalVerifier, type DealCommitment, type SettlementAdapter } from './adapters/types.js';
 import { createLocalAdapters, LocalChainAdapter } from './adapters/local.js';
-import { EvmChainAdapter, EvmDevKeyring } from './adapters/evm.js';
-import { evmConfig, verumEvmConfig, solanaConfig, tronConfig } from './config.js';
+import { verumEvmConfig, solanaConfig, tronConfig } from './config.js';
 import { VerumEvmAdapter } from './adapters/verum/evm.js';
 import { VerumSolanaAdapter } from './adapters/verum/solana.js';
 import { VerumTronAdapter } from './adapters/verum/tron.js';
@@ -40,7 +39,7 @@ import type { Deal, Participant } from './domain/types.js';
 import type { ApprovalSignature } from './adapters/types.js';
 
 export interface AppOverrides { autoSettle?: boolean; store?: Store; adapters?: SettlementAdapter[]; priceSources?: PriceSource[]; liquiditySources?: LiquiditySource[]; screening?: WalletScreening; now?: () => number; denylist?: string[] }
-export interface App { config: Config; store: Store; adapters: AdapterRegistry; local?: { evm: LocalChainAdapter; solana: LocalChainAdapter; bitcoin: LocalChainAdapter; tron?: LocalChainAdapter }; evm?: EvmChainAdapter; verumEvm?: VerumEvmAdapter; verumSolana?: VerumSolanaAdapter; verumTron?: VerumTronAdapter; registry: AssetRegistry; price: PriceEngine; liquidity: LiquidityEngine; router: RouterEngine; signature: SignatureEngine; risk: RiskEngine; audit: AuditLog; deals: DealEngine; settlement: SettlementEngine; auth: WalletAuth; identity: IdentityService; rooms: RoomService; proposals: ProposalService; api: Awaited<ReturnType<typeof buildApi>>; sources: { price: StaticPriceSource[]; liquidity: StaticLiquiditySource[] }; startScheduler(): void; stopScheduler(): void; close(): Promise<void> }
+export interface App { config: Config; store: Store; adapters: AdapterRegistry; local?: { evm: LocalChainAdapter; solana: LocalChainAdapter; bitcoin: LocalChainAdapter; tron?: LocalChainAdapter }; verumEvm?: VerumEvmAdapter; verumSolana?: VerumSolanaAdapter; verumTron?: VerumTronAdapter; registry: AssetRegistry; price: PriceEngine; liquidity: LiquidityEngine; router: RouterEngine; signature: SignatureEngine; risk: RiskEngine; audit: AuditLog; deals: DealEngine; settlement: SettlementEngine; auth: WalletAuth; identity: IdentityService; rooms: RoomService; proposals: ProposalService; api: Awaited<ReturnType<typeof buildApi>>; sources: { price: StaticPriceSource[]; liquidity: StaticLiquiditySource[] }; startScheduler(): void; stopScheduler(): void; close(): Promise<void> }
 
 export const LOCAL_TOKENS = { usdtEth: '0x0000000000000000000000000000000000000001', usdcEth: '0x0000000000000000000000000000000000000002', usdtSol: 'USDT1111111111111111111111111111111111111111', usdcSol: 'USDC1111111111111111111111111111111111111111', usdtTron: 'TUsdtDemo1111111111111111111111111', btcTron: 'TBtcDemo11111111111111111111111111' };
 export const LOCAL_CODE_HASHES = { usdtEth: 'codehash-usdt-v1', usdcEth: 'codehash-usdc-v1' };
@@ -79,10 +78,8 @@ export async function createApp(config: Config, o: AppOverrides = {}): Promise<A
   const verumEvmCfg = o.adapters ? null : verumEvmConfig(config);
   const solCfg = o.adapters ? null : solanaConfig(config);
   const tronCfg = o.adapters ? null : tronConfig(config);
-  const evmCfg = o.adapters || verumEvmCfg ? null : evmConfig(config);
   const dealDeps = { getDeal: (id: string) => store.getDeal(id) };
   let demoKeyringRef: DemoMesaKeyring | null = null; // preenchido quando a conta demo é semeada (assina txs Solana dev)
-  let evmAdapter: EvmChainAdapter | undefined; let evmKeyring: EvmDevKeyring | undefined;
   let verumEvm: VerumEvmAdapter | undefined; let verumEvmKeyring: VerumEvmDevKeyring | undefined;
   let verumSolana: VerumSolanaAdapter | undefined; let verumTron: VerumTronAdapter | undefined; let tronKeyring: TronDevKeyring | undefined;
   if (o.adapters) o.adapters.forEach(a => adapters.register(a));
@@ -94,7 +91,6 @@ export async function createApp(config: Config, o: AppOverrides = {}): Promise<A
     tronLocal.now = now;
     tronLocal.addToken({ contract: LOCAL_TOKENS.usdtTron, symbol: 'USDT', decimals: 6, standard: 'TRC-20', codeHash: 'trc20-usdt' }).addToken({ contract: LOCAL_TOKENS.btcTron, symbol: 'tBTC', decimals: 8, standard: 'TRC-20', codeHash: 'trc20-tbtc' });
     local.tron = tronLocal; adapters.register(tronLocal);
-    if (evmCfg) { evmKeyring = config.OTC_ENV === 'prod' ? undefined : new EvmDevKeyring(config.identityMasterSecret); evmAdapter = new EvmChainAdapter(evmCfg, evmKeyring ?? null); adapters.register(evmAdapter); logger.info({ chainId: evmCfg.chainId, escrow: evmCfg.escrow }, 'modo EVM ativo: liquidação via VerumOtcEscrow real (legado)'); }
     if (verumEvmCfg) {
       verumEvmKeyring = config.OTC_ENV === 'prod' ? undefined : new VerumEvmDevKeyring(config.identityMasterSecret);
       verumEvm = new VerumEvmAdapter(verumEvmCfg, verumEvmKeyring ?? null, dealDeps); adapters.register(verumEvm);
@@ -110,9 +106,8 @@ export async function createApp(config: Config, o: AppOverrides = {}): Promise<A
       logger.info({ chainId: tronCfg.chainId, escrow: tronCfg.escrow }, 'modo TRON ativo: escrow VerumOTCEscrowTron real');
     }
   }
-  const tokens = verumEvmCfg ? { ...LOCAL_TOKENS, usdtEth: verumEvmCfg.tusdt } : evmCfg ? { ...LOCAL_TOKENS, usdtEth: evmCfg.tusdt } : LOCAL_TOKENS;
+  const tokens = verumEvmCfg ? { ...LOCAL_TOKENS, usdtEth: verumEvmCfg.tusdt } : LOCAL_TOKENS;
   const registry = defaultRegistry({ ethereum: adapters.require('ethereum').chain.chainId, solana: adapters.require('solana').chain.chainId, bitcoin: adapters.require('bitcoin').chain.chainId }, tokens, LOCAL_CODE_HASHES, { usdtSol: null, usdcSol: null });
-  if (evmCfg) registry.add({ code: 'BTC', network: 'ethereum', chainId: evmCfg.chainId, contractOrMint: evmCfg.tbtc, assetId: `eip155:${evmCfg.chainId}/erc20:${evmCfg.tbtc.toLowerCase()}`, decimals: 8, tokenStandard: 'ERC-20', issuer: 'Verum tBTC (mock)', status: 'active' });
   if (verumEvmCfg) registry.add({ code: 'BTC', network: 'ethereum', chainId: String(verumEvmCfg.chainId), contractOrMint: verumEvmCfg.tbtc, assetId: `eip155:${verumEvmCfg.chainId}/erc20:${verumEvmCfg.tbtc.toLowerCase()}`, decimals: 8, tokenStandard: 'ERC-20', issuer: 'Verum tBTC (mock)', status: 'active' });
   // Ativos TRC-20 (simulado ou Nile real) — um deal Tron↔Tron usa USDT e tBTC na mesma rede.
   const tronChainId = adapters.require('tron').chain.chainId;
@@ -128,7 +123,6 @@ export async function createApp(config: Config, o: AppOverrides = {}): Promise<A
   }
   // Preços/profundidade dev: assetIds reais das testnets entram na fonte estática.
   const prices: Record<string, number> = { ...LOCAL_PRICES };
-  if (evmCfg) { prices[`eip155:${evmCfg.chainId}/erc20:${evmCfg.tbtc.toLowerCase()}`] = 64_230.5; prices[`eip155:${evmCfg.chainId}/erc20:${evmCfg.tusdt.toLowerCase()}`] = 1.0002; prices[`eip155:${evmCfg.chainId}/slip44:60`] = 2_418.75; }
   if (verumEvmCfg) { prices[`eip155:${verumEvmCfg.chainId}/erc20:${verumEvmCfg.tbtc.toLowerCase()}`] = 64_230.5; prices[`eip155:${verumEvmCfg.chainId}/erc20:${verumEvmCfg.tusdt.toLowerCase()}`] = 1.0002; prices[`eip155:${verumEvmCfg.chainId}/slip44:60`] = 2_418.75; }
   prices[`tron:${tronChainId}/trc20:${tronUsdt}`] = 1.0001; prices[`tron:${tronChainId}/trc20:${tronTbtc}`] = 64_230.5;
   if (solCfg) { const solChainId = adapters.require('solana').chain.chainId; prices[`solana:${solChainId}/token:${solCfg.tusdtMint}`] = 1.0001; prices[`solana:${solChainId}/token:${solCfg.tbtcMint}`] = 64_230.5; }
@@ -208,11 +202,11 @@ export async function createApp(config: Config, o: AppOverrides = {}): Promise<A
   });
   // Propostas estruturadas de alteração de termos (§5.3/§6) — porta de entrada tipada para o amend.
   const proposals = new ProposalService({ deals, now, audit, notifier: { notify: dealId => logger.info({ dealId }, 'atualização de proposta de termos') } });
-  const api = await buildApi({ deals, settlement, price, liquidity, router, registry, platformFeeBps: config.PLATFORM_FEE_BPS, networkCostUsd: async n => adapters.require(n).estimateCostUsd('settle'), auth, portal, identity, identityDev, rooms, proposals, store, audit, mesaHtmlPath: config.MESA_HTML_PATH, portalHtmlPath: config.PORTAL_HTML_PATH, conviteHtmlPath: config.CONVITE_HTML_PATH, env: config.OTC_ENV, rateLimit: { windowMs: 60_000, max: config.OTC_ENV === 'dev' ? 100_000 : 120 }, dev: local ? { solanaChainId: local.solana.chain.chainId, mint: (a, c, amt) => local!.solana.mint(a, c, amt), demo, ensureOnChain, evm: verumEvm && verumEvmKeyring && verumEvmCfg ? { chainId: String(verumEvmCfg.chainId), escrow: verumEvmCfg.escrow, tbtc: verumEvmCfg.tbtc, tusdt: verumEvmCfg.tusdt, explorerBase: verumEvmCfg.explorerBase, keyring: verumEvmKeyring, mintToken: (t, to, amt) => verumEvm!.mintToken(t, to, amt) } : evmAdapter && evmKeyring && evmCfg ? { chainId: evmCfg.chainId, escrow: evmCfg.escrow, tbtc: evmCfg.tbtc, tusdt: evmCfg.tusdt, explorerBase: evmCfg.explorerBase, keyring: evmKeyring, mintToken: (t, to, amt) => evmAdapter!.mintToken(t, to, amt) } : undefined } : undefined });
+  const api = await buildApi({ deals, settlement, price, liquidity, router, registry, adapters, platformFeeBps: config.PLATFORM_FEE_BPS, networkCostUsd: async n => adapters.require(n).estimateCostUsd('settle'), auth, portal, identity, identityDev, rooms, proposals, store, audit, mesaHtmlPath: config.MESA_HTML_PATH, portalHtmlPath: config.PORTAL_HTML_PATH, conviteHtmlPath: config.CONVITE_HTML_PATH, env: config.OTC_ENV, rateLimit: { windowMs: 60_000, max: config.OTC_ENV === 'dev' ? 100_000 : 120 }, dev: local ? { solanaChainId: local.solana.chain.chainId, mint: (a, c, amt) => local!.solana.mint(a, c, amt), demo, ensureOnChain, evm: verumEvm && verumEvmKeyring && verumEvmCfg ? { chainId: String(verumEvmCfg.chainId), escrow: verumEvmCfg.escrow, tbtc: verumEvmCfg.tbtc, tusdt: verumEvmCfg.tusdt, explorerBase: verumEvmCfg.explorerBase, keyring: verumEvmKeyring, mintToken: (t, to, amt) => verumEvm!.mintToken(t, to, amt) } : undefined } : undefined });
   let timer: NodeJS.Timeout | null = null;
   let ticks = 0;
   const tick = async () => { try { const ids = await deals.expireDue(); if (ids.length) logger.info({ ids }, 'deals expiradas'); if (++ticks % 720 === 0) { const purged = await store.purge(now(), 24 * 3600_000); logger.info(purged, 'retenção'); } metrics.priceBreakerOpen.set(price.breakerState().open ? 1 : 0); for (const s of ['AWAITING_SIGNATURES', 'SETTLING', 'SETTLEMENT_VALIDATION', 'REFUNDING'] as const) metrics.activeDeals.set({ state: s }, (await store.listDeals({ states: [s] })).length); } catch (e) { logger.error({ err: (e as Error).message }, 'scheduler'); } };
-  return { config, store, adapters, local, evm: evmAdapter, verumEvm, verumSolana, verumTron, registry, price, liquidity, router, signature, risk, audit, deals, settlement, auth, identity, rooms, proposals, api, sources: { price: priceSources, liquidity: liquiditySources },
+  return { config, store, adapters, local, verumEvm, verumSolana, verumTron, registry, price, liquidity, router, signature, risk, audit, deals, settlement, auth, identity, rooms, proposals, api, sources: { price: priceSources, liquidity: liquiditySources },
     startScheduler() { if (!timer) timer = setInterval(() => { void tick(); }, config.EXPIRY_SCAN_MS); }, stopScheduler() { if (timer) clearInterval(timer); timer = null; },
     async close() { if (timer) clearInterval(timer); timer = null; await api.close(); await store.close(); } };
 }

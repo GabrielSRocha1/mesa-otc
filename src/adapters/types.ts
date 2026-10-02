@@ -46,6 +46,19 @@ export interface SettlementAdapter {
   revealedPreimage(dealId: string): Promise<string | null>;
 }
 
+/**
+ * Fluxo de CARTEIRA REAL (sem keyring dev): o participante assina/envia o próprio passo on-chain.
+ * GET /v1/deals/:id/onchain-tx → buildParticipantStep (o que assinar/enviar agora);
+ * POST → submitParticipantStep (relay de PMs / broadcast Solana / calldata p/ seller-buyer).
+ */
+export interface ParticipantStepProvider {
+  buildParticipantStep(dealId: string, role: Role, signer: string): Promise<Record<string, unknown>>;
+  submitParticipantStep(dealId: string, role: Role, signer: string, body: Record<string, unknown>): Promise<Record<string, unknown>>;
+}
+export function hasParticipantSteps(a: SettlementAdapter): a is SettlementAdapter & ParticipantStepProvider {
+  return typeof (a as Partial<ParticipantStepProvider>).buildParticipantStep === 'function';
+}
+
 export class AdapterRegistry {
   private map = new Map<Network, SettlementAdapter>();
   register(a: SettlementAdapter): this { this.map.set(a.chain.network, a); return this; }

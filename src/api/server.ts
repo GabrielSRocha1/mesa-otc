@@ -27,6 +27,7 @@ import { identityOpenApi } from './identityOpenapi.js';
 import { MANIFEST_JSON, SW_JS, ICON_SVG, ICON_MASKABLE_SVG, OFFLINE_HTML, injectPwa } from './pwa.js';
 import type { Store } from '../db/repository.js';
 import { AuditLog } from '../audit/audit.js';
+import { hasParticipantSteps, type AdapterRegistry } from '../adapters/types.js';
 import { registry as metricsRegistry, logger, metrics } from '../monitoring/metrics.js';
 import { randomUUID } from 'node:crypto';
 import { allChains, getChain, chainIconId } from '../chains/registry.js';
@@ -45,7 +46,7 @@ export interface DevDemo { keyring: import('../portal/demo.js').DemoMesaKeyring;
 /** Modo EVM dev: contrato real (Sepolia/anvil), keyring de EOAs dev e mint dos tokens mock. */
 export interface DevEvmKeyring { addressFor(owner: string): string; accountByAddress(address: string): import('viem/accounts').PrivateKeyAccount | null }
 export interface DevEvm { chainId: string; escrow: string; tbtc: `0x${string}`; tusdt: `0x${string}`; explorerBase: string | null; keyring: DevEvmKeyring; mintToken: (token: `0x${string}`, to: string, amount: bigint) => Promise<void> }
-export interface ApiDeps { deals: DealEngine; settlement: SettlementEngine; price: PriceEngine; liquidity: LiquidityEngine; router: RouterEngine; registry: AssetRegistry; platformFeeBps: number; networkCostUsd: (n: Network) => Promise<string>; auth: WalletAuth; portal: PortalService; identity: IdentityService; identityDev?: { email: FakeEmailChannel; sms: FakeSmsChannel }; rooms: RoomService; proposals: ProposalService; store: Store; audit: AuditLog; mesaHtmlPath?: string; portalHtmlPath?: string; conviteHtmlPath?: string; env: string; rateLimit?: { windowMs: number; max: number }; dev?: DevMint }
+export interface ApiDeps { deals: DealEngine; settlement: SettlementEngine; price: PriceEngine; liquidity: LiquidityEngine; router: RouterEngine; registry: AssetRegistry; adapters?: AdapterRegistry; platformFeeBps: number; networkCostUsd: (n: Network) => Promise<string>; auth: WalletAuth; portal: PortalService; identity: IdentityService; identityDev?: { email: FakeEmailChannel; sms: FakeSmsChannel }; rooms: RoomService; proposals: ProposalService; store: Store; audit: AuditLog; mesaHtmlPath?: string; portalHtmlPath?: string; conviteHtmlPath?: string; env: string; rateLimit?: { windowMs: number; max: number }; dev?: DevMint }
 declare module 'fastify' { interface FastifyRequest { session: Session | null } }
 
 const NetworkZ = z.enum(['bitcoin', 'ethereum', 'solana', 'zcash', 'tron']); const RoleZ = z.enum(['SELLER', 'BUYER', 'PAYMASTER_1', 'PAYMASTER_2']);
@@ -218,6 +219,34 @@ export async function buildApi(deps: ApiDeps): Promise<FastifyInstance> {
   app.post('/v1/deals/:id/proposals/:pid/reject', async req => { const s = requireSession(req); const { id, pid } = req.params as { id: string; pid: string }; return deps.proposals.reject(id, pid, s.address); });
   app.get('/v1/deals/:id/approval-envelope', async req => { const s = requireSession(req); const { id } = req.params as { id: string }; const d = await deps.deals.get(id); const me = d.participants.find(p => p.address.toLowerCase() === s.address.toLowerCase()); if (!me) throw new DomainError('NOT_PARTICIPANT', 'não é participante'); const env = await deps.deals.envelope(id, me.role, s.address); return { scheme: env.scheme, network: env.network, payload: env.payload, message: env.message, typedData: env.typedData ? { ...env.typedData, message: Object.fromEntries(Object.entries(env.typedData.message).map(([k, v]) => [k, typeof v === 'bigint' ? v.toString() : v])) } : undefined }; });
   app.post('/v1/deals/:id/approvals', async (req, reply) => { const s = requireSession(req); const { id } = req.params as { id: string }; const b = parse(z.object({ role: RoleZ, signature: z.string().min(20), nonce: z.string().min(8) }), req.body); return idempotent(req, reply, async () => { const r = await deps.deals.submitSignature(id, { role: b.role, signer: s.address, scheme: s.keyScheme, signature: b.signature, nonce: b.nonce }, s.address); return { count: r.count, required: r.deal.requiredSignatures, state: r.deal.state }; }); });
+  /**
+   * Fluxo de CARTEIRA REAL (escrow canônico Verum): o passo on-chain da vez do participante.
+   * GET devolve o que assinar/enviar (EVM/Tron: approve pendente + typedData Approval; Solana: tx base64).
+   * POST devolve o relay (PMs), o txRequest/params p/ a carteira enviar (seller/buyer) ou faz o
+   * broadcast da tx Solana assinada. Em modo simulado/dev-keyring o endpoint responde 400.
+   */
+  app.get('/v1/deals/:id/onchain-tx', async req => {
+    const s = requireSession(req); const { id } = req.params as { id: string };
+    const d = await deps.deals.get(id);
+    const me = d.participants.find(p => p.address.toLowerCase() === s.address.toLowerCase());
+    if (!me) throw new DomainError('NOT_PARTICIPANT', 'não é participante');
+    const leg = d.terms?.legs[0]; if (!leg) throw new DomainError('SETTLEMENT_NOT_ALLOWED', 'termos não congelados');
+    const a = deps.adapters?.get(leg.escrowChain);
+    if (!a || !hasParticipantSteps(a)) throw new DomainError('SETTLEMENT_NOT_ALLOWED', 'rede em modo simulado — o passo on-chain é automático');
+    return a.buildParticipantStep(id, me.role, s.address);
+  });
+  app.post('/v1/deals/:id/onchain-tx', async (req, reply) => {
+    const s = requireSession(req); const { id } = req.params as { id: string };
+    const b = parse(z.object({ signature: z.string().optional(), deadline: z.number().int().optional(), signedTransactionBase64: z.string().optional() }), req.body);
+    const d = await deps.deals.get(id);
+    const me = d.participants.find(p => p.address.toLowerCase() === s.address.toLowerCase());
+    if (!me) throw new DomainError('NOT_PARTICIPANT', 'não é participante');
+    const leg = d.terms?.legs[0]; if (!leg) throw new DomainError('SETTLEMENT_NOT_ALLOWED', 'termos não congelados');
+    const a = deps.adapters?.get(leg.escrowChain);
+    if (!a || !hasParticipantSteps(a)) throw new DomainError('SETTLEMENT_NOT_ALLOWED', 'rede em modo simulado — o passo on-chain é automático');
+    return idempotent(req, reply, async () => a.submitParticipantStep(id, me.role, s.address, b as Record<string, unknown>));
+  });
+
   app.post('/v1/deals/:id/cancel', async (req, reply) => { const s = requireSession(req); const { id } = req.params as { id: string }; return idempotent(req, reply, async () => deps.deals.view(await deps.deals.cancel(id, s.address), s.address)); });
   app.get('/v1/deals/:id/settlement', async req => { const s = requireSession(req); const { id } = req.params as { id: string }; const d = await deps.deals.get(id); deps.deals.view(d, s.address, s.role === 'operator'); return deps.store.getSettlement(id); });
   /** Permissionless: qualquer participante pode pedir que o keeper relaye o settle (o contrato decide). */

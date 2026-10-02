@@ -65,6 +65,14 @@ export function depositsOf(sellerDeposited: boolean, buyerDeposited: boolean, se
   return d;
 }
 
+/** Estados em que o passo on-chain do papel JÁ aconteceu (idempotência de reprocesso serverless). */
+export const ROLE_ALREADY_ADVANCED: Record<OnchainRole, TradeState[]> = {
+  [OnchainRole.SELLER]: [TradeState.SELLER_SIGNED, TradeState.PAYMASTER_01_SIGNED, TradeState.PAYMASTER_02_SIGNED, TradeState.READY_TO_SETTLE, TradeState.SETTLED],
+  [OnchainRole.PAYMASTER_01]: [TradeState.PAYMASTER_01_SIGNED, TradeState.PAYMASTER_02_SIGNED, TradeState.READY_TO_SETTLE, TradeState.SETTLED],
+  [OnchainRole.PAYMASTER_02]: [TradeState.PAYMASTER_02_SIGNED, TradeState.READY_TO_SETTLE, TradeState.SETTLED],
+  [OnchainRole.BUYER]: [TradeState.READY_TO_SETTLE, TradeState.SETTLED],
+};
+
 export interface VerumAdapterDeps {
   /** Acesso ao Deal persistido (stateless/serverless: tudo re-derivável de terms + meta + RPC). */
   getDeal(dealId: string): Promise<{ hash: { dealHash: string } | null; onChain: Record<string, { meta?: Record<string, string | number> }> } | null>;

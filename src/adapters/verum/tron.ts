@@ -11,8 +11,10 @@ import { TradeState, Role as OnchainRole, type ChainId, type WalletAttestation }
 import { computeFee } from '../../onchain/core/index.js';
 import { signApprovalEvm, signWalletAttestationEvm, evmToTronAddress } from '../../onchain/crypto/index.js';
 import { TronChainAdapter, TRON_ESCROW_ABI, tronAddrToHex20, type TronWebLike } from '../../onchain/router/adapters/tron.js';
-import type { AdapterCapabilities, ApprovalSignature, AssetVerification, DealCommitment, OnChainDealState, RegisterResult, SettlementAdapter, TxRef, TxStatus } from '../types.js';
-import { buildVerumTerms, statusFromTradeState, depositsOf, bindingOf, ROLE_TO_ONCHAIN, type VerumAdapterDeps, type VerumMeta } from './common.js';
+import type { AdapterCapabilities, ApprovalSignature, AssetVerification, DealCommitment, OnChainDealState, ParticipantStepProvider, RegisterResult, SettlementAdapter, TxRef, TxStatus } from '../types.js';
+import { buildVerumTerms, statusFromTradeState, depositsOf, bindingOf, ROLE_TO_ONCHAIN, ROLE_ALREADY_ADVANCED, type VerumAdapterDeps, type VerumMeta } from './common.js';
+import { evmDomain, APPROVAL_TYPES } from '../../onchain/crypto/index.js';
+import type { Role } from '../../domain/types.js';
 import type { TronDevKeyring } from './keyring.js';
 import type { TronSettings } from '../../config.js';
 
@@ -21,7 +23,7 @@ const FEE_LIMIT_SUN = 150_000_000;
 
 interface TronRuntime { tw: TronWebLike & { address: { fromPrivateKey(k: string): string } }; inner: TronChainAdapter; executorAddress: string }
 
-export class VerumTronAdapter implements SettlementAdapter {
+export class VerumTronAdapter implements SettlementAdapter, ParticipantStepProvider {
   readonly chain: ChainRef;
   private runtime: Promise<TronRuntime> | null = null;
   constructor(private readonly cfg: TronSettings, private readonly keyring: TronDevKeyring | null, private readonly deps: VerumAdapterDeps) {
@@ -257,6 +259,56 @@ export class VerumTronAdapter implements SettlementAdapter {
     const b = await bindingOf(this.deps, dealId, 'tron');
     if (!b) throw new DomainError('SETTLEMENT_NOT_ALLOWED', `deal ${dealId} sem registro on-chain (meta ausente)`);
     return b;
+  }
+
+  /* ---------- fluxo de carteira real (/v1/deals/:id/onchain-tx) ---------- */
+  /** TypedData Approval (domínio TIP-712: chainId Tron + escrow hex20) + approve TRC-20 pendente. */
+  async buildParticipantStep(dealId: string, role: Role, signer: string): Promise<Record<string, unknown>> {
+    const b = await this.binding(dealId);
+    const onRole = ROLE_TO_ONCHAIN[role];
+    const { inner, tw } = await this.rt();
+    const trade = await inner.getTrade(b.meta.tradeId);
+    if (!trade) throw new DomainError('SETTLEMENT_NOT_ALLOWED', 'trade inexistente on-chain');
+    if (ROLE_ALREADY_ADVANCED[onRole].includes(trade.state)) return { kind: 'done', tradeId: b.meta.tradeId, state: trade.state };
+    const terms = await this.termsOf(dealId, b.meta);
+    const now = await inner.now();
+    const deadline = Math.min(now + 300, terms.expiresAt);
+    let approve: Record<string, string> | null = null;
+    if (onRole === OnchainRole.SELLER || onRole === OnchainRole.BUYER) {
+      const seller = onRole === OnchainRole.SELLER;
+      const token = seller ? terms.sellerAsset : terms.buyerAsset;
+      const due = seller ? terms.sellerAmount + computeFee(terms.sellerAmount, terms.platformFeeBps) : terms.buyerAmount;
+      const c = tw.contract([{ type: 'function', name: 'allowance', stateMutability: 'view', inputs: [{ name: 'o', type: 'address' }, { name: 's', type: 'address' }], outputs: [{ type: 'uint256' }] }], token);
+      const allowance = BigInt(((await c.allowance!(signer, this.cfg.escrow).call()) as { toString(): string }).toString());
+      if (allowance < due) approve = { token, spender: this.cfg.escrow, amount: due.toString() };
+    }
+    const fnName = (['sellerSign', 'paymaster01Sign', 'paymaster02Sign', 'buyerSign'] as const)[onRole];
+    return {
+      kind: 'tron', chainId: this.cfg.chainId, escrow: this.cfg.escrow, escrowHex: tronAddrToHex20(this.cfg.escrow), fn: fnName, deadline, approve,
+      typedData: { domain: { ...evmDomain(this.cfg.chainId, tronAddrToHex20(this.cfg.escrow)), chainId: this.cfg.chainId }, types: APPROVAL_TYPES, primaryType: 'Approval', message: { tradeId: b.meta.tradeId, termsHash: b.meta.termsHash, role: onRole, deadline: String(deadline) } },
+      relayable: onRole === OnchainRole.PAYMASTER_01 || onRole === OnchainRole.PAYMASTER_02,
+    };
+  }
+  /** PMs: relaya pelo executor. Seller/Buyer: devolve os parâmetros do triggerSmartContract p/ a carteira enviar. */
+  async submitParticipantStep(dealId: string, role: Role, signer: string, body: Record<string, unknown>): Promise<Record<string, unknown>> {
+    const b = await this.binding(dealId);
+    const onRole = ROLE_TO_ONCHAIN[role];
+    const signature = String(body.signature ?? '');
+    const deadline = Number(body.deadline ?? 0);
+    if (!/^0x[0-9a-fA-F]{130}$/.test(signature) || !deadline) throw new DomainError('INVALID_INPUT', 'esperado { signature (65 bytes hex), deadline }');
+    const { inner } = await this.rt();
+    const terms = await this.termsOf(dealId, b.meta);
+    const unsigned = await inner.buildSign(terms, b.meta.tradeId, { role: onRole, signer, tradeId: b.meta.tradeId, termsHash: b.meta.termsHash, deadline, signature });
+    const p = unsigned.payload as { functionSelector: string; parameters: { type: string; value: unknown }[]; feeLimit: number };
+    if (onRole === OnchainRole.PAYMASTER_01 || onRole === OnchainRole.PAYMASTER_02) {
+      try {
+        const r = await inner.submitAsExecutor(unsigned);
+        const conf = await inner.waitForConfirmation(r.txHash, 120_000);
+        if (conf.status !== 'CONFIRMED') throw new Error(`${p.functionSelector} não confirmada (${conf.status})`);
+        return { kind: 'relayed', txHash: r.txHash };
+      } catch (e) { this.fail(`participantStep:${role}`, e); }
+    }
+    return { kind: 'tronTx', contract: this.cfg.escrow, functionSelector: p.functionSelector, parameters: p.parameters, feeLimit: p.feeLimit, callValue: 0 };
   }
 }
 export { evmToTronAddress };

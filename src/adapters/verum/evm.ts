@@ -16,10 +16,11 @@ import type { CanonicalAsset, ChainRef } from '../../domain/types.js';
 import { DomainError } from '../../domain/errors.js';
 import { TradeState, Role as OnchainRole, type ChainId, type WalletAttestation } from '../../onchain/types.js';
 import { computeFee } from '../../onchain/core/index.js';
-import { hashTermsEvm, computeTradeIdEvm, signApprovalEvm, signWalletAttestationEvm } from '../../onchain/crypto/index.js';
-import { ESCROW_ABI, toEvmTermsTuple, toEvmAttestationTuples, type EvmTermsTuple } from '../../onchain/router/adapters/evm.js';
-import type { AdapterCapabilities, ApprovalSignature, AssetVerification, DealCommitment, OnChainDealState, RegisterResult, SettlementAdapter, TxRef, TxStatus } from '../types.js';
-import { buildVerumTerms, statusFromTradeState, depositsOf, bindingOf, ROLE_TO_ONCHAIN, type VerumAdapterDeps, type VerumMeta } from './common.js';
+import { hashTermsEvm, computeTradeIdEvm, signApprovalEvm, signWalletAttestationEvm, evmDomain, APPROVAL_TYPES } from '../../onchain/crypto/index.js';
+import { ESCROW_ABI, EvmCalldata, toEvmTermsTuple, toEvmAttestationTuples, type EvmTermsTuple } from '../../onchain/router/adapters/evm.js';
+import type { AdapterCapabilities, ApprovalSignature, AssetVerification, DealCommitment, OnChainDealState, ParticipantStepProvider, RegisterResult, SettlementAdapter, TxRef, TxStatus } from '../types.js';
+import type { Role } from '../../domain/types.js';
+import { buildVerumTerms, statusFromTradeState, depositsOf, bindingOf, ROLE_TO_ONCHAIN, ROLE_ALREADY_ADVANCED, type VerumAdapterDeps, type VerumMeta } from './common.js';
 import type { VerumEvmDevKeyring } from './keyring.js';
 import type { VerumEvmSettings } from '../../config.js';
 
@@ -40,7 +41,7 @@ const ERC20_ABI = [
 
 interface RawTrade { terms: EvmTermsTuple; termsHash: Hex; state: number; sellerDeposited: boolean; buyerDeposited: boolean; feeCollected: boolean; feeAmount: bigint; settledAt: bigint; expiredAt: bigint }
 
-export class VerumEvmAdapter implements SettlementAdapter {
+export class VerumEvmAdapter implements SettlementAdapter, ParticipantStepProvider {
   readonly chain: ChainRef;
   private readonly viemChain: Chain;
   private readonly pub: PublicClient;
@@ -248,5 +249,44 @@ export class VerumEvmAdapter implements SettlementAdapter {
     const b = await bindingOf(this.deps, dealId, 'ethereum');
     if (!b) throw new DomainError('SETTLEMENT_NOT_ALLOWED', `deal ${dealId} sem registro on-chain (meta ausente)`);
     return b;
+  }
+
+  /* ---------- fluxo de carteira real (/v1/deals/:id/onchain-tx) ---------- */
+  /** O que o participante deve assinar/enviar agora: approve ERC20 pendente + typedData Approval. */
+  async buildParticipantStep(dealId: string, role: Role, signer: string): Promise<Record<string, unknown>> {
+    const b = await this.binding(dealId);
+    const onRole = ROLE_TO_ONCHAIN[role];
+    const t = await this.rawTrade(b.meta.tradeId);
+    const state = Number(t.state) as TradeState;
+    if (ROLE_ALREADY_ADVANCED[onRole].includes(state)) return { kind: 'done', tradeId: b.meta.tradeId, state };
+    const now = await this.chainNow();
+    const deadline = Math.min(now + 300, Number(t.terms.expiresAt));
+    let approve: Record<string, string> | null = null;
+    if (onRole === OnchainRole.SELLER || onRole === OnchainRole.BUYER) {
+      const seller = onRole === OnchainRole.SELLER;
+      const token = seller ? t.terms.sellerAsset : t.terms.buyerAsset;
+      const due = seller ? t.terms.sellerAmount + computeFee(t.terms.sellerAmount, t.terms.platformFeeBps) : t.terms.buyerAmount;
+      const allowance = await this.pub.readContract({ address: token, abi: ERC20_ABI, functionName: 'allowance', args: [signer as Hex, this.cfg.escrow] }) as bigint;
+      if (allowance < due) approve = { token, spender: this.cfg.escrow, amount: due.toString() };
+    }
+    return {
+      kind: 'evm', chainId: this.cfg.chainId, escrow: this.cfg.escrow, fn: SIGN_FN[onRole], deadline, approve,
+      typedData: { domain: { ...evmDomain(this.cfg.chainId, this.cfg.escrow), chainId: this.cfg.chainId }, types: APPROVAL_TYPES, primaryType: 'Approval', message: { tradeId: b.meta.tradeId, termsHash: b.meta.termsHash, role: onRole, deadline: String(deadline) } },
+      relayable: onRole === OnchainRole.PAYMASTER_01 || onRole === OnchainRole.PAYMASTER_02, // PMs: o keeper envia a tx; seller/buyer enviam da própria carteira
+    };
+  }
+  /** PMs: relaya a tx pelo keeper. Seller/Buyer: devolve o txRequest (to/data) para a carteira enviar (msg.sender obrigatório). */
+  async submitParticipantStep(dealId: string, role: Role, _signer: string, body: Record<string, unknown>): Promise<Record<string, unknown>> {
+    const b = await this.binding(dealId);
+    const onRole = ROLE_TO_ONCHAIN[role];
+    const signature = String(body.signature ?? '');
+    const deadline = Number(body.deadline ?? 0);
+    if (!/^0x[0-9a-fA-F]{130}$/.test(signature) || !deadline) throw new DomainError('INVALID_INPUT', 'esperado { signature (65 bytes hex), deadline }');
+    const data = EvmCalldata.sign({ role: onRole, signer: _signer, tradeId: b.meta.tradeId, termsHash: b.meta.termsHash, deadline, signature });
+    if (onRole === OnchainRole.PAYMASTER_01 || onRole === OnchainRole.PAYMASTER_02) {
+      try { const tx = await this.write(SIGN_FN[onRole], [b.meta.tradeId as Hex, BigInt(deadline), signature as Hex]); return { kind: 'relayed', txHash: tx }; }
+      catch (e) { this.fail(`participantStep:${role}`, e); }
+    }
+    return { kind: 'txRequest', txRequest: { to: this.cfg.escrow, data, value: '0', chainId: this.cfg.chainId } };
   }
 }
