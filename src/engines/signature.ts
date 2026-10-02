@@ -8,6 +8,7 @@ import nacl from 'tweetnacl';
 import bs58 from 'bs58';
 import { secp256k1 } from '@noble/curves/secp256k1.js';
 import { sha256 } from '@noble/hashes/sha2.js';
+import { keccak_256 } from '@noble/hashes/sha3.js';
 import { ripemd160 } from '@noble/hashes/legacy.js';
 import { bech32 } from '@scure/base';
 import { utf8ToBytes } from '@noble/hashes/utils.js';
@@ -106,6 +107,30 @@ export function verifyBitcoin(message: string, signatureB64: string, address: st
   } catch { return false; }
 }
 
+/* ---------- Tron (TIP-191, equivalente ao signMessageV2 do TronWeb/TronLink) ---------- */
+export function tronMessageHash(message: string): Uint8Array {
+  const msg = utf8ToBytes(message);
+  return keccak_256(new Uint8Array([...utf8ToBytes(`\x19TRON Signed Message:\n${msg.length}`), ...msg]));
+}
+/** Endereço T... = base58check(0x41 ‖ keccak256(pubkey)[12..]). */
+export function tronAddressFromPubkey(pubUncompressed: Uint8Array): string {
+  const h = keccak_256(pubUncompressed.slice(1)).slice(12);
+  const payload = new Uint8Array([0x41, ...h]);
+  const chk = sha256(sha256(payload)).slice(0, 4);
+  return bs58.encode(new Uint8Array([...payload, ...chk]));
+}
+/** Assinatura hex 65 bytes (r‖s‖v, v∈{0,1,27,28}) sobre a mensagem TIP-191. */
+export function verifyTron(message: string, signatureHex: string, addressT: string): boolean {
+  try {
+    const raw = Uint8Array.from(Buffer.from(signatureHex.replace(/^0x/, ''), 'hex'));
+    if (raw.length !== 65) return false;
+    let v = raw[64] as number; if (v >= 27) v -= 27; if (v > 3) return false;
+    const recovered = new Uint8Array([v, ...raw.slice(0, 64)]);
+    const pub = secp256k1.recoverPublicKey(recovered, tronMessageHash(message), { prehash: false });
+    return tronAddressFromPubkey(secp256k1.Point.fromBytes(pub).toBytes(false)) === addressT;
+  } catch { return false; }
+}
+
 export class SignatureEngine {
   constructor(private readonly store: Store, private readonly env: Environment, private readonly escrowByChain: (network: string) => string, private readonly now: () => number = () => Date.now()) {}
 
@@ -125,7 +150,7 @@ export class SignatureEngine {
     if (p.address.toLowerCase() !== sig.signer.toLowerCase()) return { ok: false, reason: 'signatário não é a carteira do papel' };
     if (p.keyScheme !== sig.scheme) return { ok: false, reason: 'esquema de chave incompatível' };
     const envelope = envelopeFor(deal, sig.role, sig.nonce, this.env, this.escrowByChain);
-    const ok = p.network === 'ethereum' ? await verifyEvm(envelope, sig.signature, p.address) : p.network === 'solana' ? verifySolana(envelope.message, sig.signature, p.address) : verifyBitcoin(envelope.message, sig.signature, p.address);
+    const ok = p.network === 'ethereum' ? await verifyEvm(envelope, sig.signature, p.address) : p.network === 'solana' ? verifySolana(envelope.message, sig.signature, p.address) : p.network === 'tron' ? verifyTron(envelope.message, sig.signature, p.address) : verifyBitcoin(envelope.message, sig.signature, p.address);
     return ok ? { ok, envelope } : { ok: false, reason: 'assinatura criptográfica inválida', envelope };
   }
   /** Regras RAS-020: estado, expiração, nonce emitido para (deal, revisão, papel) e não consumido, verificação criptográfica. */
@@ -149,5 +174,10 @@ export const testSigning = {
   bitcoin(hrp: 'bc' | 'bcrt' | 'tb' = 'bcrt'): { address: string; sign: (message: string) => string } {
     const priv = secp256k1.utils.randomSecretKey(); const pub = secp256k1.getPublicKey(priv, true); const h160 = ripemd160(sha256(pub)); const address = bech32.encode(hrp, [0, ...bech32.toWords(h160)]);
     return { address, sign: m => { const s = secp256k1.sign(bitcoinMessageHash(m), priv, { prehash: false, format: 'recovered' }); const header = 27 + (s[0] as number) + 4; return Buffer.from(new Uint8Array([header, ...s.slice(1)])).toString('base64'); } };
+  },
+  tron(): { address: string; sign: (message: string) => string } {
+    const priv = secp256k1.utils.randomSecretKey(); const pub = secp256k1.getPublicKey(priv, false);
+    const address = tronAddressFromPubkey(pub);
+    return { address, sign: m => { const s = secp256k1.sign(tronMessageHash(m), priv, { prehash: false, format: 'recovered' }); return '0x' + Buffer.from(new Uint8Array([...s.slice(1), (s[0] as number) + 27])).toString('hex'); } };
   }
 };

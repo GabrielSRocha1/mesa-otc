@@ -15,7 +15,7 @@ export interface LocalFaults { rpcDown?: boolean; settleReverts?: boolean; reorg
 interface StoredDeal { commit: DealCommitment; status: OnChainDealState['status']; deposits: Record<number, string>; depositTx: Record<number, string>; settledLegs: Record<number, string>; settledTx?: string; refundedTx?: string; usedNonces: Set<string>; preimage?: string; htlc?: { hash: string; timelock: number; locked: boolean } }
 
 const ADDR_RULES: Record<Network, RegExp> = {
-  ethereum: /^0x[0-9a-fA-F]{40}$/, solana: /^[1-9A-HJ-NP-Za-km-z]{32,44}$/, bitcoin: /^(bc1[0-9a-z]{25,62}|bcrt1[0-9a-z]{25,62}|tb1[0-9a-z]{25,62}|[13][a-km-zA-HJ-NP-Z1-9]{25,34})$/, zcash: /^t1[a-km-zA-HJ-NP-Z1-9]{33}$/
+  ethereum: /^0x[0-9a-fA-F]{40}$/, solana: /^[1-9A-HJ-NP-Za-km-z]{32,44}$/, bitcoin: /^(bc1[0-9a-z]{25,62}|bcrt1[0-9a-z]{25,62}|tb1[0-9a-z]{25,62}|[13][a-km-zA-HJ-NP-Z1-9]{25,34})$/, zcash: /^t1[a-km-zA-HJ-NP-Z1-9]{33}$/, tron: /^T[1-9A-HJ-NP-Za-km-z]{33}$/
 };
 
 export class LocalChainAdapter implements SettlementAdapter {
@@ -55,7 +55,7 @@ export class LocalChainAdapter implements SettlementAdapter {
     return { ok: reasons.length === 0, reasons, observed: { exists: true, decimals: t.decimals, symbol: t.symbol, codeHash: t.codeHash, mintAuthority: t.mintAuthority ?? null, standard: t.standard }, checkedAt };
   }
   async getBalance(address: string, asset: CanonicalAsset): Promise<bigint> { this.rpc(); return this.balanceOf(address, asset.contractOrMint); }
-  async estimateCostUsd(op: 'deposit' | 'register' | 'settle' | 'refund'): Promise<string> { this.rpc(); const base: Record<Network, number> = { ethereum: 6.8, bitcoin: 4.2, solana: 0.01, zcash: 0.05 }; return (base[this.chain.network] * (op === 'settle' ? 1.5 : 1)).toFixed(2); }
+  async estimateCostUsd(op: 'deposit' | 'register' | 'settle' | 'refund'): Promise<string> { this.rpc(); const base: Record<Network, number> = { ethereum: 6.8, bitcoin: 4.2, solana: 0.01, zcash: 0.05, tron: 1.4 }; return (base[this.chain.network] * (op === 'settle' ? 1.5 : 1)).toFixed(2); }
 
   async registerDeal(c: DealCommitment): Promise<TxRef> {
     this.rpc(); const cur = this.deals.get(c.dealId);

@@ -59,6 +59,10 @@ export class DemoMesaKeyring {
   addressFor(role: DemoRole): string { return bs58.encode(this.kp(role).publicKey); }
   /** Assinatura Ed25519 (base58) da mensagem do envelope — igual à Verum Wallet. */
   signMessage(role: DemoRole, message: string): string { return bs58.encode(nacl.sign.detached(utf8ToBytes(message), this.kp(role).secretKey)); }
+  /** Secret key ed25519 (64 bytes) do papel — p/ assinar TRANSAÇÕES Solana reais no modo on-chain (dev/demo). */
+  secretKeyFor(role: DemoRole): Uint8Array { return this.kp(role).secretKey; }
+  /** Idem, por endereço Solana (null se não pertencer ao keyring). */
+  secretKeyByAddress(address: string): Uint8Array | null { const who = this.index.get(address); return who && who.network === 'solana' ? this.kp(who.role).secretKey : null; }
   /** Endereços multichain de exibição (solana real + ETH/BTC derivados, só cosméticos). */
   addressesFor(role: DemoRole): { network: string; address: string }[] {
     const h = bytesToHex(sha256(utf8ToBytes('demo-addr|' + role + '|' + this.addressFor(role))));

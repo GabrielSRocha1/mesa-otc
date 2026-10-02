@@ -19,7 +19,8 @@
     "dashboard": "node scripts/dashboard.mjs",
     "verify": "npm run lint && npm run typecheck && npm run build && npm test && npm run contracts:compile",
     "contracts:forge": "forge test",
-    "contracts:lint": "forge lint contracts/VerumOtcEscrow.sol"
+    "contracts:lint": "forge lint contracts/VerumOtcEscrow.sol",
+    "sync-onchain": "node scripts/sync-onchain.mjs"
   },
   "dependencies": {
     "@electric-sql/pglite": "^0.5.8",
@@ -28,11 +29,13 @@
     "@noble/curves": "^2.4.0",
     "@noble/hashes": "^2.4.0",
     "@scure/base": "^2.4.0",
+    "@solana/web3.js": "^1.99.0",
     "bs58": "^6.0.0",
     "fastify": "^5.12.5",
     "pg": "^8.23.0",
     "pino": "^10.3.1",
     "prom-client": "^15.1.3",
+    "tronweb": "^6.5.1",
     "tweetnacl": "^1.0.3",
     "viem": "^2.56.8",
     "zod": "^4.6.5"

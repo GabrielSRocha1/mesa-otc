@@ -11,6 +11,7 @@ export class Clock { t = Date.parse('2026-09-24T12:00:00Z'); now = () => this.t;
 export function evmWallet(): Wallet { const acct = privateKeyToAccount(generatePrivateKey()); return { network: 'ethereum', chainId: '31337', address: acct.address, async sign(env) { if (!env.typedData) throw new Error('sem typedData'); return acct.signTypedData({ domain: env.typedData.domain, types: env.typedData.types, primaryType: 'DealApproval', message: env.typedData.message }); }, async signMessage(m) { return acct.signMessage({ message: m }); } }; }
 export function solWallet(): Wallet { const k = testSigning.solana(); return { network: 'solana', chainId: 'localnet', address: k.address, async sign(env) { return k.sign(env.message); }, async signMessage(m) { return k.sign(m); } }; }
 export function btcWallet(): Wallet { const k = testSigning.bitcoin('bcrt'); return { network: 'bitcoin', chainId: 'regtest', address: k.address, async sign(env) { return k.sign(env.message); }, async signMessage(m) { return k.sign(m); } }; }
+export function tronWallet(): Wallet { const k = testSigning.tron(); return { network: 'tron', chainId: 'nile', address: k.address, async sign(env) { return k.sign(env.message); }, async signMessage(m) { return k.sign(m); } }; }
 
 export async function makeApp(over: AppOverrides & { env?: Record<string, string> } = {}): Promise<{ app: App; clock: Clock }> {
   const clock = new Clock(); const { env, ...rest } = over;
@@ -24,7 +25,9 @@ export const ASSETS = {
   ETH: { network: 'ethereum' as const, chainId: '31337', contractOrMint: null },
   USDT_ETH: { network: 'ethereum' as const, chainId: '31337', contractOrMint: LOCAL_TOKENS.usdtEth },
   USDC_ETH: { network: 'ethereum' as const, chainId: '31337', contractOrMint: LOCAL_TOKENS.usdcEth },
-  BTC: { network: 'bitcoin' as const, chainId: 'regtest', contractOrMint: null }
+  BTC: { network: 'bitcoin' as const, chainId: 'regtest', contractOrMint: null },
+  USDT_TRON: { network: 'tron' as const, chainId: 'nile', contractOrMint: LOCAL_TOKENS.usdtTron },
+  BTC_TRON: { network: 'tron' as const, chainId: 'nile', contractOrMint: LOCAL_TOKENS.btcTron }
 };
 export type AssetRef = { network: Network; chainId: string; contractOrMint: string | null };
 export type Parts = Partial<Record<Role, Wallet>> & { SELLER: Wallet; BUYER: Wallet; PAYMASTER_1: Wallet };
@@ -33,7 +36,7 @@ export const participantsOf = (p: Parts) => (Object.entries(p) as [Role, Wallet]
 /** Cria e prepara a Deal até LIQUIDITY_VERIFIED (todas as carteiras conectadas, verificações feitas). */
 export async function prepareDeal(app: App, parts: Parts, opts: { assetIn?: AssetRef; assetOut?: AssetRef; amountInBase?: string; discountBps?: number; expiresInSec?: number; skipConnect?: Role[] } = {}): Promise<Deal> {
   const assetIn = opts.assetIn ?? ASSETS.SOL; const assetOut = opts.assetOut ?? ASSETS.USDC_SOL; const amount = opts.amountInBase ?? '250000000000'; // 250 SOL ≈ US$ 37,8k (abaixo do limite de risco)
-  const local = app.local!; const chainOf = (n: Network) => n === 'ethereum' ? local.evm : n === 'solana' ? local.solana : local.bitcoin;
+  const local = app.local!; const chainOf = (n: Network) => n === 'ethereum' ? local.evm : n === 'solana' ? local.solana : n === 'tron' ? local.tron! : local.bitcoin;
   chainOf(assetIn.network).mint(parts.SELLER.address, assetIn.contractOrMint, BigInt(amount) * 2n);
   chainOf(assetOut.network).mint(parts.BUYER.address, assetOut.contractOrMint, 10n ** 15n);
   let deal = await app.deals.create({ assetIn, assetOut, amountInBase: amount, discountBps: opts.discountBps ?? 150, maxSlippageBps: 50, maxPriceDriftBps: 100, expiresInSec: opts.expiresInSec ?? 3600, participants: participantsOf(parts) }, parts.SELLER.address);

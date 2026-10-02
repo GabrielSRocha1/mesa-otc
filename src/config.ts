@@ -40,6 +40,35 @@ const Schema = z.object({
   EVM_TUSDT: z.string().regex(/^0x[0-9a-fA-F]{40}$/).optional(),
   EVM_CONFIRMATIONS: z.coerce.number().int().min(1).max(64).default(1),
   EVM_EXPLORER_BASE: z.string().optional(),
+  // ---- Escrow canônico Verum (contratos verum-otc-onchain) — grupos all-or-nothing por rede ----
+  // EVM (VerumOTCEscrowEVM em anvil/Sepolia). Tem precedência sobre o modo EVM_* legado.
+  VERUM_EVM_RPC_URL: z.string().optional(),
+  VERUM_EVM_CHAIN_ID: z.string().optional(),
+  VERUM_EVM_ESCROW_ADDRESS: z.string().regex(/^0x[0-9a-fA-F]{40}$/).optional(),
+  VERUM_EVM_KEEPER_KEY: z.string().regex(/^0x[0-9a-fA-F]{64}$/).optional(),
+  VERUM_EVM_ATTESTOR_KEY: z.string().regex(/^0x[0-9a-fA-F]{64}$/).optional(),
+  VERUM_EVM_TBTC: z.string().regex(/^0x[0-9a-fA-F]{40}$/).optional(),
+  VERUM_EVM_TUSDT: z.string().regex(/^0x[0-9a-fA-F]{40}$/).optional(),
+  VERUM_EVM_CONFIRMATIONS: z.coerce.number().int().min(1).max(64).default(1),
+  VERUM_EVM_EXPLORER_BASE: z.string().optional(),
+  // Solana (programa verum_otc em devnet/localnet). Keypairs = JSON array de 64 bytes.
+  SOLANA_RPC_URL: z.string().optional(),
+  SOLANA_CHAIN_ID: z.enum(['101', '102', '103']).optional(),
+  SOLANA_PROGRAM_ID: z.string().optional(),
+  SOLANA_EXECUTOR_KEYPAIR: z.string().optional(),
+  SOLANA_ATTESTOR_KEYPAIR: z.string().optional(),
+  SOLANA_TUSDT_MINT: z.string().optional(),
+  SOLANA_TBTC_MINT: z.string().optional(),
+  SOLANA_CONFIRMATIONS: z.coerce.number().int().min(1).max(64).default(1),
+  // Tron (VerumOTCEscrowTron na Nile). CHAIN_ID decimal (nile = 3448148188).
+  TRON_FULL_HOST: z.string().optional(),
+  TRON_CHAIN_ID: z.string().optional(),
+  TRON_ESCROW_ADDRESS: z.string().regex(/^T[1-9A-HJ-NP-Za-km-z]{33}$/).optional(),
+  TRON_EXECUTOR_KEY: z.string().regex(/^(0x)?[0-9a-fA-F]{64}$/).optional(),
+  TRON_ATTESTOR_KEY: z.string().regex(/^(0x)?[0-9a-fA-F]{64}$/).optional(),
+  TRON_TUSDT: z.string().regex(/^T[1-9A-HJ-NP-Za-km-z]{33}$/).optional(),
+  TRON_TBTC: z.string().regex(/^T[1-9A-HJ-NP-Za-km-z]{33}$/).optional(),
+  TRON_CONFIRMATIONS: z.coerce.number().int().min(1).max(64).default(19),
   // Conta DEMO do portal (apresentações): semeada no boot fora de produção.
   DEMO_EMAIL: z.string().default('demo@verumotc.com'),
   DEMO_PASSWORD: z.string().min(8).default('VerumDemo2026'),
@@ -64,7 +93,39 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
   const evmKeys = [c.EVM_RPC_URL, c.EVM_CHAIN_ID, c.EVM_ESCROW_ADDRESS, c.EVM_KEEPER_KEY, c.EVM_TBTC, c.EVM_TUSDT];
   const evmSet = evmKeys.filter(Boolean).length;
   if (evmSet > 0 && evmSet < evmKeys.length) throw new Error('Modo EVM exige TODAS as envs: EVM_RPC_URL, EVM_CHAIN_ID, EVM_ESCROW_ADDRESS, EVM_KEEPER_KEY, EVM_TBTC, EVM_TUSDT (rode npm run contracts:deploy)');
+  // Grupos do escrow canônico Verum: ou completos, ou vazios (meia-configuração = erro de boot).
+  const groups: [string, (string | undefined)[]][] = [
+    ['VERUM_EVM', [c.VERUM_EVM_RPC_URL, c.VERUM_EVM_CHAIN_ID, c.VERUM_EVM_ESCROW_ADDRESS, c.VERUM_EVM_KEEPER_KEY, c.VERUM_EVM_ATTESTOR_KEY, c.VERUM_EVM_TBTC, c.VERUM_EVM_TUSDT]],
+    ['SOLANA', [c.SOLANA_RPC_URL, c.SOLANA_CHAIN_ID, c.SOLANA_PROGRAM_ID, c.SOLANA_EXECUTOR_KEYPAIR, c.SOLANA_ATTESTOR_KEYPAIR, c.SOLANA_TUSDT_MINT, c.SOLANA_TBTC_MINT]],
+    ['TRON', [c.TRON_FULL_HOST, c.TRON_CHAIN_ID, c.TRON_ESCROW_ADDRESS, c.TRON_EXECUTOR_KEY, c.TRON_ATTESTOR_KEY, c.TRON_TUSDT, c.TRON_TBTC]],
+  ];
+  for (const [name, keys] of groups) {
+    const set = keys.filter(Boolean).length;
+    if (set > 0 && set < keys.length) throw new Error(`Modo ${name} exige o grupo de envs ${name}_* COMPLETO (${set}/${keys.length} definidas)`);
+  }
   return { ...c, sessionSecret, identityMasterSecret, operators: new Set(c.OPERATOR_ADDRESSES.split(',').map(s => s.trim().toLowerCase()).filter(Boolean)) };
+}
+
+/** Escrow canônico Verum — EVM. null = grupo ausente (modo simulado ou EVM_* legado). */
+export interface VerumEvmSettings { rpcUrl: string; chainId: number; escrow: `0x${string}`; keeperKey: `0x${string}`; attestorKey: `0x${string}`; tbtc: `0x${string}`; tusdt: `0x${string}`; confirmations: number; explorerBase: string | null }
+export function verumEvmConfig(c: Config): VerumEvmSettings | null {
+  if (!c.VERUM_EVM_RPC_URL || !c.VERUM_EVM_CHAIN_ID || !c.VERUM_EVM_ESCROW_ADDRESS || !c.VERUM_EVM_KEEPER_KEY || !c.VERUM_EVM_ATTESTOR_KEY || !c.VERUM_EVM_TBTC || !c.VERUM_EVM_TUSDT) return null;
+  return { rpcUrl: c.VERUM_EVM_RPC_URL, chainId: Number(c.VERUM_EVM_CHAIN_ID), escrow: c.VERUM_EVM_ESCROW_ADDRESS as `0x${string}`, keeperKey: c.VERUM_EVM_KEEPER_KEY as `0x${string}`, attestorKey: c.VERUM_EVM_ATTESTOR_KEY as `0x${string}`, tbtc: c.VERUM_EVM_TBTC as `0x${string}`, tusdt: c.VERUM_EVM_TUSDT as `0x${string}`, confirmations: c.VERUM_EVM_CONFIRMATIONS, explorerBase: c.VERUM_EVM_EXPLORER_BASE?.replace(/\/$/, '') ?? null };
+}
+
+/** Escrow canônico Verum — Solana (programa verum_otc). null = grupo ausente. */
+export interface SolanaSettings { rpcUrl: string; chainId: '101' | '102' | '103'; programId: string; executorKeypair: string; attestorKeypair: string; tusdtMint: string; tbtcMint: string; confirmations: number }
+export function solanaConfig(c: Config): SolanaSettings | null {
+  if (!c.SOLANA_RPC_URL || !c.SOLANA_CHAIN_ID || !c.SOLANA_PROGRAM_ID || !c.SOLANA_EXECUTOR_KEYPAIR || !c.SOLANA_ATTESTOR_KEYPAIR || !c.SOLANA_TUSDT_MINT || !c.SOLANA_TBTC_MINT) return null;
+  return { rpcUrl: c.SOLANA_RPC_URL, chainId: c.SOLANA_CHAIN_ID, programId: c.SOLANA_PROGRAM_ID, executorKeypair: c.SOLANA_EXECUTOR_KEYPAIR, attestorKeypair: c.SOLANA_ATTESTOR_KEYPAIR, tusdtMint: c.SOLANA_TUSDT_MINT, tbtcMint: c.SOLANA_TBTC_MINT, confirmations: c.SOLANA_CONFIRMATIONS };
+}
+
+/** Escrow canônico Verum — Tron (Nile). null = grupo ausente. */
+export interface TronSettings { fullHost: string; chainId: number; escrow: string; executorKey: string; attestorKey: `0x${string}`; tusdt: string; tbtc: string; confirmations: number }
+export function tronConfig(c: Config): TronSettings | null {
+  if (!c.TRON_FULL_HOST || !c.TRON_CHAIN_ID || !c.TRON_ESCROW_ADDRESS || !c.TRON_EXECUTOR_KEY || !c.TRON_ATTESTOR_KEY || !c.TRON_TUSDT || !c.TRON_TBTC) return null;
+  const hex = (k: string) => (k.startsWith('0x') ? k : '0x' + k) as `0x${string}`;
+  return { fullHost: c.TRON_FULL_HOST, chainId: Number(c.TRON_CHAIN_ID), escrow: c.TRON_ESCROW_ADDRESS, executorKey: c.TRON_EXECUTOR_KEY.replace(/^0x/, ''), attestorKey: hex(c.TRON_ATTESTOR_KEY), tusdt: c.TRON_TUSDT, tbtc: c.TRON_TBTC, confirmations: c.TRON_CONFIRMATIONS };
 }
 
 /** Configuração do modo EVM (contrato real). null = modo simulado. */

@@ -1,0 +1,220 @@
+// GERADO por scripts/sync-onchain.mjs a partir de verum-otc-onchain/packages/registry/src/registry.json
+// NÃO EDITAR À MÃO — alterações devem ser feitas no repo de origem e re-sincronizadas.
+export default {
+  "version": 1,
+  "updatedAt": "2026-10-01",
+  "_aviso": "Endereços oficiais conhecidos. verifiedAgainstIssuer=false até conferência humana nas fontes oficiais (tether.to, circle.com, wbtc.network, coinbase cbBTC). XMR (Monero) NÃO possui representação tokenizada confiável e NÃO é suportado na v1. BTC só como representação explicitamente autorizada.",
+  "tokens": [
+    {
+      "chainId": 1,
+      "address": "0xdAC17F958D2ee523a2206206994597C13D831ec7",
+      "decimals": 6,
+      "symbol": "USDT",
+      "status": "ACTIVE",
+      "registryVersion": 1,
+      "activatedAt": 1790000000,
+      "updatedAt": 1790000000,
+      "verifiedAgainstIssuer": false
+    },
+    {
+      "chainId": 1,
+      "address": "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48",
+      "decimals": 6,
+      "symbol": "USDC",
+      "status": "ACTIVE",
+      "registryVersion": 1,
+      "activatedAt": 1790000000,
+      "updatedAt": 1790000000,
+      "verifiedAgainstIssuer": false
+    },
+    {
+      "chainId": 1,
+      "address": "0x2260FAC5E5542a773Aa44fBCfeDf7C193bc2C599",
+      "decimals": 8,
+      "symbol": "WBTC",
+      "status": "ACTIVE",
+      "registryVersion": 1,
+      "activatedAt": 1790000000,
+      "updatedAt": 1790000000,
+      "representationOf": "BTC (WBTC - BitGo)",
+      "verifiedAgainstIssuer": false
+    },
+    {
+      "chainId": 56,
+      "address": "0x55d398326f99059fF775485246999027B3197955",
+      "decimals": 18,
+      "symbol": "USDT",
+      "status": "ACTIVE",
+      "registryVersion": 1,
+      "activatedAt": 1790000000,
+      "updatedAt": 1790000000,
+      "verifiedAgainstIssuer": false
+    },
+    {
+      "chainId": 56,
+      "address": "0x8AC76a51cc950d9822D68b83fE1Ad97B32Cd580d",
+      "decimals": 18,
+      "symbol": "USDC",
+      "status": "ACTIVE",
+      "registryVersion": 1,
+      "activatedAt": 1790000000,
+      "updatedAt": 1790000000,
+      "verifiedAgainstIssuer": false
+    },
+    {
+      "chainId": 56,
+      "address": "0x7130d2A12B9BCbFAe4f2634d864A1Ee1Ce3Ead9c",
+      "decimals": 18,
+      "symbol": "BTCB",
+      "status": "ACTIVE",
+      "registryVersion": 1,
+      "activatedAt": 1790000000,
+      "updatedAt": 1790000000,
+      "representationOf": "BTC (BTCB - Binance)",
+      "verifiedAgainstIssuer": false
+    },
+    {
+      "chainId": 137,
+      "address": "0xc2132D05D31c914a87C6611C10748AEb04B58e8F",
+      "decimals": 6,
+      "symbol": "USDT",
+      "status": "ACTIVE",
+      "registryVersion": 1,
+      "activatedAt": 1790000000,
+      "updatedAt": 1790000000,
+      "verifiedAgainstIssuer": false
+    },
+    {
+      "chainId": 137,
+      "address": "0x3c499c542cEF5E3811e1192ce70d8cC03d5c3359",
+      "decimals": 6,
+      "symbol": "USDC",
+      "status": "ACTIVE",
+      "registryVersion": 1,
+      "activatedAt": 1790000000,
+      "updatedAt": 1790000000,
+      "verifiedAgainstIssuer": false
+    },
+    {
+      "chainId": 137,
+      "address": "0x1BFD67037B42Cf73acF2047067bd4F2C47D9BfD6",
+      "decimals": 8,
+      "symbol": "WBTC",
+      "status": "ACTIVE",
+      "registryVersion": 1,
+      "activatedAt": 1790000000,
+      "updatedAt": 1790000000,
+      "representationOf": "BTC (WBTC - PoS bridge)",
+      "verifiedAgainstIssuer": false
+    },
+    {
+      "chainId": 42161,
+      "address": "0xFd086bC7CD5C481DCC9C85ebE478A1C0b69FCbb9",
+      "decimals": 6,
+      "symbol": "USDT",
+      "status": "ACTIVE",
+      "registryVersion": 1,
+      "activatedAt": 1790000000,
+      "updatedAt": 1790000000,
+      "verifiedAgainstIssuer": false
+    },
+    {
+      "chainId": 42161,
+      "address": "0xaf88d065e77c8cC2239327C5EDb3A432268e5831",
+      "decimals": 6,
+      "symbol": "USDC",
+      "status": "ACTIVE",
+      "registryVersion": 1,
+      "activatedAt": 1790000000,
+      "updatedAt": 1790000000,
+      "verifiedAgainstIssuer": false
+    },
+    {
+      "chainId": 42161,
+      "address": "0x2f2a2543B76A4166549F7aaB2e75Bef0aefC5B0f",
+      "decimals": 8,
+      "symbol": "WBTC",
+      "status": "ACTIVE",
+      "registryVersion": 1,
+      "activatedAt": 1790000000,
+      "updatedAt": 1790000000,
+      "representationOf": "BTC (WBTC - Arbitrum bridge)",
+      "verifiedAgainstIssuer": false
+    },
+    {
+      "chainId": 101,
+      "address": "Es9vMFrzaCERmJfrF4H2FYD4KCoNkY11McCe8BenwNYB",
+      "tokenProgram": "TOKEN",
+      "decimals": 6,
+      "symbol": "USDT",
+      "status": "ACTIVE",
+      "registryVersion": 1,
+      "activatedAt": 1790000000,
+      "updatedAt": 1790000000,
+      "allowFreezeAuthority": true,
+      "verifiedAgainstIssuer": false
+    },
+    {
+      "chainId": 101,
+      "address": "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",
+      "tokenProgram": "TOKEN",
+      "decimals": 6,
+      "symbol": "USDC",
+      "status": "ACTIVE",
+      "registryVersion": 1,
+      "activatedAt": 1790000000,
+      "updatedAt": 1790000000,
+      "allowFreezeAuthority": true,
+      "verifiedAgainstIssuer": false
+    },
+    {
+      "chainId": 101,
+      "address": "cbbtcf3aa214zXHbiAZQwf4122FBYbraNdFqgw4iMij",
+      "tokenProgram": "TOKEN",
+      "decimals": 8,
+      "symbol": "cbBTC",
+      "status": "ACTIVE",
+      "registryVersion": 1,
+      "activatedAt": 1790000000,
+      "updatedAt": 1790000000,
+      "representationOf": "BTC (cbBTC - Coinbase)",
+      "allowFreezeAuthority": true,
+      "verifiedAgainstIssuer": false
+    },
+    {
+      "chainId": 101,
+      "address": "3NZ9JMVBmGAqocybic2c7LQCJScmgsAZ6vQqTDzcqmJh",
+      "tokenProgram": "TOKEN",
+      "decimals": 8,
+      "symbol": "WBTC",
+      "status": "SUSPENDED",
+      "registryVersion": 1,
+      "activatedAt": 1790000000,
+      "updatedAt": 1790000000,
+      "representationOf": "BTC (WBTC - Wormhole/Portal)",
+      "verifiedAgainstIssuer": false
+    },
+    {
+      "chainId": 728126428,
+      "address": "TR7NHqjeKQxGTCi8q8ZY4pL8otSzgjLj6t",
+      "decimals": 6,
+      "symbol": "USDT",
+      "status": "ACTIVE",
+      "registryVersion": 1,
+      "activatedAt": 1790000000,
+      "updatedAt": 1790000000,
+      "verifiedAgainstIssuer": false
+    },
+    {
+      "chainId": 728126428,
+      "address": "TEkxiTehnzSmSe2XqrBj4w32RUN966rdz8",
+      "decimals": 6,
+      "symbol": "USDC",
+      "status": "ACTIVE",
+      "registryVersion": 1,
+      "activatedAt": 1790000000,
+      "updatedAt": 1790000000,
+      "verifiedAgainstIssuer": false
+    }
+  ]
+};

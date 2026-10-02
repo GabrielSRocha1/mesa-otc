@@ -29,8 +29,8 @@ import type { DealMutator } from './settlement.js';
 import { metrics, logger } from '../monitoring/metrics.js';
 
 export const CreateDealInput = z.object({
-  assetIn: z.object({ network: z.enum(['bitcoin', 'ethereum', 'solana', 'zcash']), chainId: z.string().min(1), contractOrMint: z.string().nullable() }),
-  assetOut: z.object({ network: z.enum(['bitcoin', 'ethereum', 'solana', 'zcash']), chainId: z.string().min(1), contractOrMint: z.string().nullable() }),
+  assetIn: z.object({ network: z.enum(['bitcoin', 'ethereum', 'solana', 'zcash', 'tron']), chainId: z.string().min(1), contractOrMint: z.string().nullable() }),
+  assetOut: z.object({ network: z.enum(['bitcoin', 'ethereum', 'solana', 'zcash', 'tron']), chainId: z.string().min(1), contractOrMint: z.string().nullable() }),
   amountInBase: z.string().regex(/^[1-9][0-9]*$/, 'inteiro positivo em unidades base'),
   discountBps: z.number().int().min(0).max(2000).default(0),
   commissionBps: z.number().int().min(0).max(5000).default(0),
@@ -38,7 +38,7 @@ export const CreateDealInput = z.object({
   maxSlippageBps: z.number().int().min(1).max(1000).default(50),
   maxPriceDriftBps: z.number().int().min(10).max(1000).default(100),
   expiresInSec: z.number().int().min(900).max(10 * 86400).default(3600), // até 10 dias: cobre a assinatura sequencial (Nº participantes × janela de 5 min)
-  participants: z.array(z.object({ role: z.enum(['SELLER', 'BUYER', 'PAYMASTER_1', 'PAYMASTER_2']), network: z.enum(['bitcoin', 'ethereum', 'solana', 'zcash']), chainId: z.string().min(1), address: z.string().min(20).max(120) })).min(3).max(4)
+  participants: z.array(z.object({ role: z.enum(['SELLER', 'BUYER', 'PAYMASTER_1', 'PAYMASTER_2']), network: z.enum(['bitcoin', 'ethereum', 'solana', 'zcash', 'tron']), chainId: z.string().min(1), address: z.string().min(20).max(120) })).min(3).max(4)
 });
 export type CreateDealInputT = z.infer<typeof CreateDealInput>;
 
@@ -173,7 +173,17 @@ export class DealEngine {
   private commitment(deal: Deal): DealCommitment { const t = deal.terms as Terms; const h = deal.hash as NonNullable<Deal['hash']>; return { dealId: deal.id, revision: deal.revision, dealHash: h.dealHash, expiresAt: t.expiresAt, participants: t.participants, legs: t.legs, pricingHash: h.pricingHash, routeHash: h.routeHash, domainHash: h.domainHash, dealNonce: t.dealNonce, feeBps: t.pricing.platformFeeBps, treasury: this.d.config.treasury, htlcHash: t.route.htlcHash, terms: t }; }
   private async registerOnChain(deal: Deal): Promise<void> {
     const c = this.commitment(deal);
-    for (const chain of new Set(c.legs.map(l => l.escrowChain))) { try { const tx = await this.d.adapters.require(chain).registerDeal(c); deal.onChain[chain] = { registered: true, revision: deal.revision }; await this.persist(deal, 'chain.registered', 'keeper', { chain, tx: tx.ref }); } catch (e) { metrics.adapterErrors.inc({ chain, op: 'register' }); throw e; } }
+    for (const chain of new Set(c.legs.map(l => l.escrowChain))) {
+      try {
+        const tx = await this.d.adapters.require(chain).registerDeal(c);
+        deal.onChain[chain] = { registered: true, revision: deal.revision, ...(tx.meta ? { meta: tx.meta } : {}) };
+        // Escrow real tem janela fixa on-chain (40 min a partir do createTrade): o teto da Deal
+        // é clampado a ela (menos a margem de execução) p/ que turnos + liquidação caibam dentro.
+        const onChainExpiresAt = typeof tx.meta?.onChainExpiresAt === 'number' ? tx.meta.onChainExpiresAt : null;
+        if (onChainExpiresAt) deal.expiresAt = Math.min(deal.expiresAt, onChainExpiresAt * 1000 - this.d.config.execMarginMs);
+        await this.persist(deal, 'chain.registered', 'keeper', { chain, tx: tx.ref, ...(tx.meta ? { meta: tx.meta } : {}) });
+      } catch (e) { metrics.adapterErrors.inc({ chain, op: 'register' }); throw e; }
+    }
   }
 
   /* ---------- 7. abertura para assinaturas ---------- */
@@ -213,6 +223,16 @@ export class DealEngine {
       if (this.now() < deal.expiresAt && this.turnExpired(deal)) { metrics.signaturesRejected.inc({ reason: 'turn_expired' }); await this.expireNow(deal, 'system'); throw new DomainError('SIGNATURE_EXPIRED', 'Prazo de 5 minutos desta assinatura expirou'); }
       let envelope: Envelope; try { envelope = await this.d.signature.validateApproval(deal, sig); } catch (e) { metrics.signaturesRejected.inc({ reason: (e as DomainError).code ?? 'invalid' }); if ((e as DomainError).code === 'DEAL_EXPIRED') await this.expireNow(deal, 'system'); throw e; }
       const consumed = await this.d.store.consumeNonce(sig.nonce, this.now()); if (!consumed) throw new DomainError('NONCE_INVALID', 'nonce já utilizado');
+      // Adapters reais submetem o passo on-chain da vez (sellerSign/pmSign/buyerSign) ANTES da
+      // assinatura mesa ser registrada: se a chain rejeitar, a assinatura mesa é abortada — mesa
+      // e chain nunca divergem. O simulador não implementa recordApproval (no-op).
+      for (const chain of new Set((deal.terms as Terms).legs.map(l => l.escrowChain))) {
+        const adapter = this.d.adapters.require(chain);
+        if (adapter.recordApproval) {
+          try { const tx = await adapter.recordApproval(deal.id, sig); if (tx) await this.persist(deal, 'chain.approval', actor, { chain, role: sig.role, tx: tx.ref }); }
+          catch (e) { metrics.adapterErrors.inc({ chain, op: 'recordApproval' }); throw e; }
+        }
+      }
       const existing = deal.signatures.find(s => s.role === sig.role && s.revision === deal.revision && s.status === 'valid');
       if (existing) { await this.d.store.updateSignatureStatus(existing.id, 'replaced'); existing.status = 'replaced'; }
       const rec = { id: newId('SG'), dealId: deal.id, revision: deal.revision, role: sig.role, signer: p.address, scheme: sig.scheme, envelopeHash: sha256Hex(envelope.message), signedHash: envelope.payload.dealHash, signature: sig.signature, nonce: sig.nonce, receivedAt: this.now(), status: 'valid' as const };

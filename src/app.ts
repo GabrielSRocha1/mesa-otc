@@ -6,14 +6,18 @@ import { MemoryStore } from './db/memoryStore.js';
 import { SqlStore, createPgliteClient, createPgClient, type SqlClient } from './db/sqlStore.js';
 import type { Store } from './db/repository.js';
 import { AdapterRegistry, type ApprovalVerifier, type DealCommitment, type SettlementAdapter } from './adapters/types.js';
-import { createLocalAdapters, type LocalChainAdapter } from './adapters/local.js';
+import { createLocalAdapters, LocalChainAdapter } from './adapters/local.js';
 import { EvmChainAdapter, EvmDevKeyring } from './adapters/evm.js';
-import { evmConfig } from './config.js';
+import { evmConfig, verumEvmConfig, solanaConfig, tronConfig } from './config.js';
+import { VerumEvmAdapter } from './adapters/verum/evm.js';
+import { VerumSolanaAdapter } from './adapters/verum/solana.js';
+import { VerumTronAdapter } from './adapters/verum/tron.js';
+import { VerumEvmDevKeyring, TronDevKeyring } from './adapters/verum/keyring.js';
 import { AssetRegistry, defaultRegistry } from './engines/assetRegistry.js';
 import { PriceEngine, StaticPriceSource, type PriceSource } from './engines/price.js';
 import { LiquidityEngine, StaticLiquiditySource, type LiquiditySource } from './engines/liquidity.js';
 import { RouterEngine } from './engines/router.js';
-import { SignatureEngine, envelopeFor, verifyEvm, verifySolana, verifyBitcoin } from './engines/signature.js';
+import { SignatureEngine, envelopeFor, verifyEvm, verifySolana, verifyBitcoin, verifyTron } from './engines/signature.js';
 import { RiskEngine, DenylistScreening, type WalletScreening } from './engines/risk.js';
 import { DealEngine } from './engines/deal.js';
 import { SettlementEngine } from './engines/settlement.js';
@@ -36,9 +40,9 @@ import type { Deal, Participant } from './domain/types.js';
 import type { ApprovalSignature } from './adapters/types.js';
 
 export interface AppOverrides { autoSettle?: boolean; store?: Store; adapters?: SettlementAdapter[]; priceSources?: PriceSource[]; liquiditySources?: LiquiditySource[]; screening?: WalletScreening; now?: () => number; denylist?: string[] }
-export interface App { config: Config; store: Store; adapters: AdapterRegistry; local?: { evm: LocalChainAdapter; solana: LocalChainAdapter; bitcoin: LocalChainAdapter }; evm?: EvmChainAdapter; registry: AssetRegistry; price: PriceEngine; liquidity: LiquidityEngine; router: RouterEngine; signature: SignatureEngine; risk: RiskEngine; audit: AuditLog; deals: DealEngine; settlement: SettlementEngine; auth: WalletAuth; identity: IdentityService; rooms: RoomService; proposals: ProposalService; api: Awaited<ReturnType<typeof buildApi>>; sources: { price: StaticPriceSource[]; liquidity: StaticLiquiditySource[] }; startScheduler(): void; stopScheduler(): void; close(): Promise<void> }
+export interface App { config: Config; store: Store; adapters: AdapterRegistry; local?: { evm: LocalChainAdapter; solana: LocalChainAdapter; bitcoin: LocalChainAdapter; tron?: LocalChainAdapter }; evm?: EvmChainAdapter; verumEvm?: VerumEvmAdapter; verumSolana?: VerumSolanaAdapter; verumTron?: VerumTronAdapter; registry: AssetRegistry; price: PriceEngine; liquidity: LiquidityEngine; router: RouterEngine; signature: SignatureEngine; risk: RiskEngine; audit: AuditLog; deals: DealEngine; settlement: SettlementEngine; auth: WalletAuth; identity: IdentityService; rooms: RoomService; proposals: ProposalService; api: Awaited<ReturnType<typeof buildApi>>; sources: { price: StaticPriceSource[]; liquidity: StaticLiquiditySource[] }; startScheduler(): void; stopScheduler(): void; close(): Promise<void> }
 
-export const LOCAL_TOKENS = { usdtEth: '0x0000000000000000000000000000000000000001', usdcEth: '0x0000000000000000000000000000000000000002', usdtSol: 'USDT1111111111111111111111111111111111111111', usdcSol: 'USDC1111111111111111111111111111111111111111' };
+export const LOCAL_TOKENS = { usdtEth: '0x0000000000000000000000000000000000000001', usdcEth: '0x0000000000000000000000000000000000000002', usdtSol: 'USDT1111111111111111111111111111111111111111', usdcSol: 'USDC1111111111111111111111111111111111111111', usdtTron: 'TUsdtDemo1111111111111111111111111', btcTron: 'TBtcDemo11111111111111111111111111' };
 export const LOCAL_CODE_HASHES = { usdtEth: 'codehash-usdt-v1', usdcEth: 'codehash-usdc-v1' };
 export const LOCAL_PRICES: Record<string, number> = { 'bip122:regtest/slip44:0': 64_230.5, 'eip155:31337/slip44:60': 2_418.75, 'solana:localnet/slip44:501': 151.2, [`eip155:31337/erc20:${LOCAL_TOKENS.usdtEth}`]: 1.0002, [`eip155:31337/erc20:${LOCAL_TOKENS.usdcEth}`]: 0.9999, [`solana:localnet/token:${LOCAL_TOKENS.usdtSol}`]: 1.0001, [`solana:localnet/token:${LOCAL_TOKENS.usdcSol}`]: 1.0 };
 
@@ -63,25 +67,71 @@ export async function createApp(config: Config, o: AppOverrides = {}): Promise<A
     const env = envelopeFor(deal, participant.role, sig.nonce, config.OTC_ENV, escrowByChain);
     if (participant.network === 'ethereum') return verifyEvm(env, sig.signature, participant.address);
     if (participant.network === 'solana') return verifySolana(env.message, sig.signature, participant.address);
+    if (participant.network === 'tron') return verifyTron(env.message, sig.signature, participant.address);
     return verifyBitcoin(env.message, sig.signature, participant.address);
   };
   const verifierDealRef = new Map<string, Deal>();
   let local: App['local'];
   // Modo EVM (contrato real na Sepolia/anvil): o adaptador ethereum real SUBSTITUI o simulador;
   // solana/bitcoin continuam locais. Keyring dev só fora de produção.
-  const evmCfg = o.adapters ? null : evmConfig(config);
+  // Escrow canônico Verum (contratos verum-otc-onchain): grupos por rede têm precedência sobre o
+  // modo EVM_* legado. Deps stateless (serverless-safe): meta em deal.onChain + Deal do store.
+  const verumEvmCfg = o.adapters ? null : verumEvmConfig(config);
+  const solCfg = o.adapters ? null : solanaConfig(config);
+  const tronCfg = o.adapters ? null : tronConfig(config);
+  const evmCfg = o.adapters || verumEvmCfg ? null : evmConfig(config);
+  const dealDeps = { getDeal: (id: string) => store.getDeal(id) };
+  let demoKeyringRef: DemoMesaKeyring | null = null; // preenchido quando a conta demo é semeada (assina txs Solana dev)
   let evmAdapter: EvmChainAdapter | undefined; let evmKeyring: EvmDevKeyring | undefined;
+  let verumEvm: VerumEvmAdapter | undefined; let verumEvmKeyring: VerumEvmDevKeyring | undefined;
+  let verumSolana: VerumSolanaAdapter | undefined; let verumTron: VerumTronAdapter | undefined; let tronKeyring: TronDevKeyring | undefined;
   if (o.adapters) o.adapters.forEach(a => adapters.register(a));
   else { local = createLocalAdapters(verifier, now); adapters.register(local.evm).register(local.solana).register(local.bitcoin);
     local.evm.addToken({ contract: LOCAL_TOKENS.usdtEth, symbol: 'USDT', decimals: 6, standard: 'ERC-20', codeHash: LOCAL_CODE_HASHES.usdtEth }).addToken({ contract: LOCAL_TOKENS.usdcEth, symbol: 'USDC', decimals: 6, standard: 'ERC-20', codeHash: LOCAL_CODE_HASHES.usdcEth });
     local.solana.addToken({ contract: LOCAL_TOKENS.usdtSol, symbol: 'USDT', decimals: 6, standard: 'SPL', codeHash: 'spl', mintAuthority: null }).addToken({ contract: LOCAL_TOKENS.usdcSol, symbol: 'USDC', decimals: 6, standard: 'SPL', codeHash: 'spl', mintAuthority: null });
-    if (evmCfg) { evmKeyring = config.OTC_ENV === 'prod' ? undefined : new EvmDevKeyring(config.identityMasterSecret); evmAdapter = new EvmChainAdapter(evmCfg, evmKeyring ?? null); adapters.register(evmAdapter); logger.info({ chainId: evmCfg.chainId, escrow: evmCfg.escrow }, 'modo EVM ativo: liquidação via VerumOtcEscrow real'); } }
-  const tokens = evmCfg ? { ...LOCAL_TOKENS, usdtEth: evmCfg.tusdt } : LOCAL_TOKENS;
+    // Tron agora é rede de liquidação: simulador local sempre registrado (fallback sem TRON_*).
+    const tronLocal = new LocalChainAdapter('tron', 'nile', 'TVerumEscrowDemo111111111111111111', verifier, { finality: 19, nativeCode: 'TRX', htlc: false, escrowNN: true, verifiable: ['secp256k1'] });
+    tronLocal.now = now;
+    tronLocal.addToken({ contract: LOCAL_TOKENS.usdtTron, symbol: 'USDT', decimals: 6, standard: 'TRC-20', codeHash: 'trc20-usdt' }).addToken({ contract: LOCAL_TOKENS.btcTron, symbol: 'tBTC', decimals: 8, standard: 'TRC-20', codeHash: 'trc20-tbtc' });
+    local.tron = tronLocal; adapters.register(tronLocal);
+    if (evmCfg) { evmKeyring = config.OTC_ENV === 'prod' ? undefined : new EvmDevKeyring(config.identityMasterSecret); evmAdapter = new EvmChainAdapter(evmCfg, evmKeyring ?? null); adapters.register(evmAdapter); logger.info({ chainId: evmCfg.chainId, escrow: evmCfg.escrow }, 'modo EVM ativo: liquidação via VerumOtcEscrow real (legado)'); }
+    if (verumEvmCfg) {
+      verumEvmKeyring = config.OTC_ENV === 'prod' ? undefined : new VerumEvmDevKeyring(config.identityMasterSecret);
+      verumEvm = new VerumEvmAdapter(verumEvmCfg, verumEvmKeyring ?? null, dealDeps); adapters.register(verumEvm);
+      logger.info({ chainId: verumEvmCfg.chainId, escrow: verumEvmCfg.escrow }, 'modo VERUM_EVM ativo: escrow canônico VerumOTCEscrowEVM');
+    }
+    if (solCfg) {
+      verumSolana = new VerumSolanaAdapter(solCfg, addr => demoKeyringRef?.secretKeyByAddress(addr) ?? null, dealDeps); adapters.register(verumSolana);
+      logger.info({ cluster: solCfg.chainId, programId: solCfg.programId }, 'modo SOLANA ativo: programa verum_otc real');
+    }
+    if (tronCfg) {
+      tronKeyring = config.OTC_ENV === 'prod' ? undefined : new TronDevKeyring(config.identityMasterSecret);
+      verumTron = new VerumTronAdapter(tronCfg, tronKeyring ?? null, dealDeps); adapters.register(verumTron);
+      logger.info({ chainId: tronCfg.chainId, escrow: tronCfg.escrow }, 'modo TRON ativo: escrow VerumOTCEscrowTron real');
+    }
+  }
+  const tokens = verumEvmCfg ? { ...LOCAL_TOKENS, usdtEth: verumEvmCfg.tusdt } : evmCfg ? { ...LOCAL_TOKENS, usdtEth: evmCfg.tusdt } : LOCAL_TOKENS;
   const registry = defaultRegistry({ ethereum: adapters.require('ethereum').chain.chainId, solana: adapters.require('solana').chain.chainId, bitcoin: adapters.require('bitcoin').chain.chainId }, tokens, LOCAL_CODE_HASHES, { usdtSol: null, usdcSol: null });
   if (evmCfg) registry.add({ code: 'BTC', network: 'ethereum', chainId: evmCfg.chainId, contractOrMint: evmCfg.tbtc, assetId: `eip155:${evmCfg.chainId}/erc20:${evmCfg.tbtc.toLowerCase()}`, decimals: 8, tokenStandard: 'ERC-20', issuer: 'Verum tBTC (mock)', status: 'active' });
-  // Preços/profundidade dev: no modo EVM os assetIds reais (chainId da testnet) entram na fonte estática.
+  if (verumEvmCfg) registry.add({ code: 'BTC', network: 'ethereum', chainId: String(verumEvmCfg.chainId), contractOrMint: verumEvmCfg.tbtc, assetId: `eip155:${verumEvmCfg.chainId}/erc20:${verumEvmCfg.tbtc.toLowerCase()}`, decimals: 8, tokenStandard: 'ERC-20', issuer: 'Verum tBTC (mock)', status: 'active' });
+  // Ativos TRC-20 (simulado ou Nile real) — um deal Tron↔Tron usa USDT e tBTC na mesma rede.
+  const tronChainId = adapters.require('tron').chain.chainId;
+  const tronUsdt = tronCfg ? tronCfg.tusdt : LOCAL_TOKENS.usdtTron;
+  const tronTbtc = tronCfg ? tronCfg.tbtc : LOCAL_TOKENS.btcTron;
+  registry.add({ code: 'USDT', network: 'tron', chainId: tronChainId, contractOrMint: tronUsdt, assetId: `tron:${tronChainId}/trc20:${tronUsdt}`, decimals: 6, tokenStandard: 'TRC-20', issuer: tronCfg ? 'USDT (Nile faucet)' : 'Tether (demo)', status: 'active' });
+  registry.add({ code: 'BTC', network: 'tron', chainId: tronChainId, contractOrMint: tronTbtc, assetId: `tron:${tronChainId}/trc20:${tronTbtc}`, decimals: 8, tokenStandard: 'TRC-20', issuer: 'Verum tBTC (mock)', status: 'active' });
+  // Mints Solana reais (devnet) quando o modo SOLANA está ativo.
+  if (solCfg) {
+    const solChainId = adapters.require('solana').chain.chainId;
+    registry.add({ code: 'USDT', network: 'solana', chainId: solChainId, contractOrMint: solCfg.tusdtMint, assetId: `solana:${solChainId}/token:${solCfg.tusdtMint}`, decimals: 6, tokenStandard: 'SPL', issuer: 'Verum tUSDT (devnet)', status: 'active' });
+    registry.add({ code: 'BTC', network: 'solana', chainId: solChainId, contractOrMint: solCfg.tbtcMint, assetId: `solana:${solChainId}/token:${solCfg.tbtcMint}`, decimals: 8, tokenStandard: 'SPL', issuer: 'Verum tBTC (devnet)', status: 'active' });
+  }
+  // Preços/profundidade dev: assetIds reais das testnets entram na fonte estática.
   const prices: Record<string, number> = { ...LOCAL_PRICES };
   if (evmCfg) { prices[`eip155:${evmCfg.chainId}/erc20:${evmCfg.tbtc.toLowerCase()}`] = 64_230.5; prices[`eip155:${evmCfg.chainId}/erc20:${evmCfg.tusdt.toLowerCase()}`] = 1.0002; prices[`eip155:${evmCfg.chainId}/slip44:60`] = 2_418.75; }
+  if (verumEvmCfg) { prices[`eip155:${verumEvmCfg.chainId}/erc20:${verumEvmCfg.tbtc.toLowerCase()}`] = 64_230.5; prices[`eip155:${verumEvmCfg.chainId}/erc20:${verumEvmCfg.tusdt.toLowerCase()}`] = 1.0002; prices[`eip155:${verumEvmCfg.chainId}/slip44:60`] = 2_418.75; }
+  prices[`tron:${tronChainId}/trc20:${tronUsdt}`] = 1.0001; prices[`tron:${tronChainId}/trc20:${tronTbtc}`] = 64_230.5;
+  if (solCfg) { const solChainId = adapters.require('solana').chain.chainId; prices[`solana:${solChainId}/token:${solCfg.tusdtMint}`] = 1.0001; prices[`solana:${solChainId}/token:${solCfg.tbtcMint}`] = 64_230.5; }
   const depth: Record<string, number> = Object.fromEntries(Object.keys(prices).map(k => [k, 8_000_000]));
   const priceSources = (o.priceSources as StaticPriceSource[] | undefined) ?? [new StaticPriceSource('Pyth', 1.0, prices), new StaticPriceSource('Chainlink', 1.0, prices), new StaticPriceSource('Coinbase', 0.8, prices), new StaticPriceSource('Kraken', 0.8, prices)];
   const liquiditySources = (o.liquiditySources as StaticLiquiditySource[] | undefined) ?? [new StaticLiquiditySource('Binance', 1.0, depth), new StaticLiquiditySource('Coinbase', 0.9, depth), new StaticLiquiditySource('Jupiter', 0.7, depth)];
@@ -104,10 +154,12 @@ export async function createApp(config: Config, o: AppOverrides = {}): Promise<A
     verifierDealRef.set(h.dealHash, deal);
     const c: DealCommitment = { dealId: deal.id, revision: deal.revision, dealHash: h.dealHash, expiresAt: t.expiresAt, participants: t.participants, legs: t.legs, pricingHash: h.pricingHash, routeHash: h.routeHash, domainHash: h.domainHash, dealNonce: t.dealNonce, feeBps: t.pricing.platformFeeBps, treasury: config.TREASURY_ADDRESS, htlcHash: t.route.htlcHash, terms: t };
     for (const chain of new Set(t.legs.map(l => l.escrowChain))) {
-      const a = adapters.require(chain); const st = await a.getDealState(deal.id);
+      const a = adapters.require(chain);
+      if (!(a instanceof LocalChainAdapter)) continue; // adapters reais são stateless vs RPC — nada a re-hidratar
+      const st = await a.getDealState(deal.id);
       if (st.status !== 'NONE') continue;
       await a.registerDeal(c);
-      const sim = chain === 'solana' ? local.solana : chain === 'bitcoin' ? local.bitcoin : local.evm;
+      const sim = chain === 'solana' ? local.solana : chain === 'bitcoin' ? local.bitcoin : chain === 'tron' ? (local.tron ?? local.evm) : local.evm;
       for (const leg of t.legs.filter(l => l.escrowChain === chain)) {
         const p = deal.participants.find(x => x.role === leg.from); if (!p || p.funding !== 'FINAL') continue;
         sim.mint(p.address, leg.asset.contractOrMint, BigInt(leg.amountBase));
@@ -125,6 +177,7 @@ export async function createApp(config: Config, o: AppOverrides = {}): Promise<A
   let demo: { keyring: DemoMesaKeyring; addresses: Set<string> } | undefined;
   if (config.OTC_ENV !== 'prod') {
     const kr = new DemoMesaKeyring(demoSecret(config.DEMO_EMAIL, config.DEMO_PASSWORD));
+    demoKeyringRef = kr; // o adapter Solana real (devnet) assina as txs dos papéis demo com estas keypairs
     const wallets = Object.fromEntries((['PAYMASTER_1', 'SELLER', 'BUYER', 'PAYMASTER_2'] as const).map(r => [r, { address: kr.addressFor(r), addresses: kr.addressesFor(r) }]));
     portal.seedDemo({ email: config.DEMO_EMAIL, password: config.DEMO_PASSWORD, wallets: wallets as Parameters<PortalService['seedDemo']>[0]['wallets'] });
     demo = { keyring: kr, addresses: kr.allAddresses() };
@@ -155,11 +208,11 @@ export async function createApp(config: Config, o: AppOverrides = {}): Promise<A
   });
   // Propostas estruturadas de alteração de termos (§5.3/§6) — porta de entrada tipada para o amend.
   const proposals = new ProposalService({ deals, now, audit, notifier: { notify: dealId => logger.info({ dealId }, 'atualização de proposta de termos') } });
-  const api = await buildApi({ deals, settlement, price, liquidity, router, registry, platformFeeBps: config.PLATFORM_FEE_BPS, networkCostUsd: async n => adapters.require(n).estimateCostUsd('settle'), auth, portal, identity, identityDev, rooms, proposals, store, audit, mesaHtmlPath: config.MESA_HTML_PATH, portalHtmlPath: config.PORTAL_HTML_PATH, conviteHtmlPath: config.CONVITE_HTML_PATH, env: config.OTC_ENV, rateLimit: { windowMs: 60_000, max: config.OTC_ENV === 'dev' ? 100_000 : 120 }, dev: local ? { solanaChainId: local.solana.chain.chainId, mint: (a, c, amt) => local!.solana.mint(a, c, amt), demo, ensureOnChain, evm: evmAdapter && evmKeyring && evmCfg ? { chainId: evmCfg.chainId, escrow: evmCfg.escrow, tbtc: evmCfg.tbtc, tusdt: evmCfg.tusdt, explorerBase: evmCfg.explorerBase, keyring: evmKeyring, mintToken: (t, to, amt) => evmAdapter!.mintToken(t, to, amt) } : undefined } : undefined });
+  const api = await buildApi({ deals, settlement, price, liquidity, router, registry, platformFeeBps: config.PLATFORM_FEE_BPS, networkCostUsd: async n => adapters.require(n).estimateCostUsd('settle'), auth, portal, identity, identityDev, rooms, proposals, store, audit, mesaHtmlPath: config.MESA_HTML_PATH, portalHtmlPath: config.PORTAL_HTML_PATH, conviteHtmlPath: config.CONVITE_HTML_PATH, env: config.OTC_ENV, rateLimit: { windowMs: 60_000, max: config.OTC_ENV === 'dev' ? 100_000 : 120 }, dev: local ? { solanaChainId: local.solana.chain.chainId, mint: (a, c, amt) => local!.solana.mint(a, c, amt), demo, ensureOnChain, evm: verumEvm && verumEvmKeyring && verumEvmCfg ? { chainId: String(verumEvmCfg.chainId), escrow: verumEvmCfg.escrow, tbtc: verumEvmCfg.tbtc, tusdt: verumEvmCfg.tusdt, explorerBase: verumEvmCfg.explorerBase, keyring: verumEvmKeyring, mintToken: (t, to, amt) => verumEvm!.mintToken(t, to, amt) } : evmAdapter && evmKeyring && evmCfg ? { chainId: evmCfg.chainId, escrow: evmCfg.escrow, tbtc: evmCfg.tbtc, tusdt: evmCfg.tusdt, explorerBase: evmCfg.explorerBase, keyring: evmKeyring, mintToken: (t, to, amt) => evmAdapter!.mintToken(t, to, amt) } : undefined } : undefined });
   let timer: NodeJS.Timeout | null = null;
   let ticks = 0;
   const tick = async () => { try { const ids = await deals.expireDue(); if (ids.length) logger.info({ ids }, 'deals expiradas'); if (++ticks % 720 === 0) { const purged = await store.purge(now(), 24 * 3600_000); logger.info(purged, 'retenção'); } metrics.priceBreakerOpen.set(price.breakerState().open ? 1 : 0); for (const s of ['AWAITING_SIGNATURES', 'SETTLING', 'SETTLEMENT_VALIDATION', 'REFUNDING'] as const) metrics.activeDeals.set({ state: s }, (await store.listDeals({ states: [s] })).length); } catch (e) { logger.error({ err: (e as Error).message }, 'scheduler'); } };
-  return { config, store, adapters, local, evm: evmAdapter, registry, price, liquidity, router, signature, risk, audit, deals, settlement, auth, identity, rooms, proposals, api, sources: { price: priceSources, liquidity: liquiditySources },
+  return { config, store, adapters, local, evm: evmAdapter, verumEvm, verumSolana, verumTron, registry, price, liquidity, router, signature, risk, audit, deals, settlement, auth, identity, rooms, proposals, api, sources: { price: priceSources, liquidity: liquiditySources },
     startScheduler() { if (!timer) timer = setInterval(() => { void tick(); }, config.EXPIRY_SCAN_MS); }, stopScheduler() { if (timer) clearInterval(timer); timer = null; },
     async close() { if (timer) clearInterval(timer); timer = null; await api.close(); await store.close(); } };
 }

@@ -8,5 +8,6 @@ export default tseslint.config(
       '@typescript-eslint/no-unused-vars': ['error', { argsIgnorePattern: '^_' }],
       'no-restricted-syntax': ['error', { selector: "Literal[regex=/^(0x)?[0-9a-fA-F]{64}$/]", message: 'Nada de chaves/segredos literais no código.' }]
   } },
-  { ignores: ['dist/**', 'node_modules/**', 'web/**', 'contracts/**', 'scripts/**'] }
+  // src/onchain é código GERADO (scripts/sync-onchain.mjs, repo verum-otc-onchain) — não lintar.
+  { ignores: ['dist/**', 'node_modules/**', 'web/**', 'contracts/**', 'scripts/**', 'src/onchain/**'] }
 );

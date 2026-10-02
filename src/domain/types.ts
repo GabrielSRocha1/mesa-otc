@@ -6,7 +6,7 @@
 import { sha256 } from '@noble/hashes/sha2.js';
 import { bytesToHex, utf8ToBytes } from '@noble/hashes/utils.js';
 
-export type Network = 'bitcoin' | 'ethereum' | 'solana' | 'zcash';
+export type Network = 'bitcoin' | 'ethereum' | 'solana' | 'zcash' | 'tron';
 export type KeyScheme = 'secp256k1' | 'ed25519';
 export type Role = 'SELLER' | 'BUYER' | 'PAYMASTER_1' | 'PAYMASTER_2';
 export type TokenStandard = 'native' | 'ERC-20' | 'SPL' | 'Token-2022' | 'TRC-20';
@@ -28,7 +28,7 @@ export type DealState =
   | 'EXPIRED' | 'REFUNDING' | 'REFUNDED' | 'CANCELLED' | 'BLOCKED';
 
 export interface ChainRef { network: Network; chainId: string }
-export const NETWORK_KEY_SCHEME: Record<Network, KeyScheme> = { bitcoin: 'secp256k1', ethereum: 'secp256k1', solana: 'ed25519', zcash: 'secp256k1' };
+export const NETWORK_KEY_SCHEME: Record<Network, KeyScheme> = { bitcoin: 'secp256k1', ethereum: 'secp256k1', solana: 'ed25519', zcash: 'secp256k1', tron: 'secp256k1' };
 
 /** Identificação canônica de ativo (RA-001). Nunca apenas símbolo. */
 export interface CanonicalAsset {
@@ -149,7 +149,7 @@ export interface Deal {
   /** Prazo (epoch ms) da vez atual — janela rolante por assinante (5 min). Reinicia a cada assinatura. */
   turnExpiresAt?: number | null;
   shareToken: string;
-  onChain: Record<string, { registered: boolean; revision: number }>; // por cadeia de escrow
+  onChain: Record<string, { registered: boolean; revision: number; meta?: Record<string, string | number> }>; // por cadeia de escrow (meta: tradeId/termsHash/janela on-chain dos adapters reais)
 }
 
 export interface DealDraft {

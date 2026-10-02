@@ -9,7 +9,7 @@ import { NETWORK_KEY_SCHEME, type Environment, type KeyScheme, type Network } fr
 import { DomainError } from '../domain/errors.js';
 import type { Store } from '../db/repository.js';
 import type { AdapterRegistry } from '../adapters/types.js';
-import { verifyBitcoin, verifySolana } from '../engines/signature.js';
+import { verifyBitcoin, verifySolana, verifyTron } from '../engines/signature.js';
 
 export interface Session { sub: string; network: Network; chainId: string; address: string; keyScheme: KeyScheme; role: 'participant' | 'operator'; iat: number; exp: number }
 export interface Challenge { message: string; nonce: string; expiresAt: number }
@@ -43,6 +43,7 @@ export class WalletAuth {
     let ok: boolean;
     if (network === 'ethereum') { try { ok = await verifyMessage({ address: address as `0x${string}`, message, signature: signature as `0x${string}` }); } catch { ok = false; } }
     else if (network === 'solana') ok = verifySolana(message, signature, address);
+    else if (network === 'tron') ok = verifyTron(message, signature, address);
     else ok = verifyBitcoin(message, signature, address);
     if (!ok) throw new DomainError('SIGNATURE_INVALID', 'assinatura do desafio inválida para o endereço informado');
     if (!(await this.store.consumeNonce(nonce, this.now()))) throw new DomainError('NONCE_INVALID', 'desafio já utilizado');

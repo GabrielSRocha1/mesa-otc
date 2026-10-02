@@ -6,8 +6,10 @@ import type { CanonicalAsset, ChainRef, KeyScheme, Leg, Network, Participant, Ro
 export interface AdapterCapabilities { escrowNN: boolean; htlc: boolean; verifiableSigSchemes: KeyScheme[]; finalityConfirmations: number; nativeCode: string }
 export interface AssetVerification { ok: boolean; reasons: string[]; observed: { exists: boolean; decimals?: number; symbol?: string; codeHash?: string; mintAuthority?: string | null; standard?: string }; checkedAt: number }
 export type OnChainDealStatus = 'NONE' | 'REGISTERED' | 'FUNDED' | 'SETTLED' | 'REFUNDED' | 'SUPERSEDED';
-export interface OnChainDealState { status: OnChainDealStatus; revision: number; deposits: Record<number, string>; settledLegs: Record<number, string>; settledTx?: string; refundedTx?: string; dealHash?: string }
+export interface OnChainDealState { status: OnChainDealStatus; revision: number; deposits: Record<number, string>; settledLegs: Record<number, string>; settledTx?: string; refundedTx?: string; dealHash?: string; expiresAt?: number; tradeId?: string }
 export interface TxRef { chain: Network; ref: string; submittedAt: number }
+/** Resultado de registerDeal: adapters reais devolvem meta (tradeId, termsHash, janela on-chain) persistida em deal.onChain[chain]. */
+export interface RegisterResult extends TxRef { meta?: Record<string, string | number> }
 export interface TxStatus { ref: string; status: 'pending' | 'included' | 'final' | 'reverted'; confirmations: number; error?: string }
 
 export interface DealCommitment {
@@ -28,8 +30,14 @@ export interface SettlementAdapter {
   verifyAsset(asset: CanonicalAsset): Promise<AssetVerification>;
   getBalance(address: string, asset: CanonicalAsset): Promise<bigint>;
   estimateCostUsd(op: 'deposit' | 'register' | 'settle' | 'refund'): Promise<string>;
-  registerDeal(commitment: DealCommitment): Promise<TxRef>;
+  registerDeal(commitment: DealCommitment): Promise<RegisterResult>;
   deposit(dealId: string, legIndex: number, from: string): Promise<TxRef>;
+  /**
+   * Opcional (adapters reais): submete o passo on-chain da vez (sellerSign/pmSign/buyerSign)
+   * no momento em que a assinatura mesa é aceita. Falha deve lançar — a assinatura mesa é
+   * abortada para que mesa e chain nunca divirjam.
+   */
+  recordApproval?(dealId: string, sig: ApprovalSignature): Promise<TxRef | null>;
   settle(dealId: string, legIndex: number, signatures: ApprovalSignature[], preimage?: string): Promise<TxRef>;
   refund(dealId: string, legIndex: number): Promise<TxRef>;
   supersede(dealId: string, revision: number): Promise<TxRef | null>;

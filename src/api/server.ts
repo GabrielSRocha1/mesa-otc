@@ -43,11 +43,12 @@ export interface DevMint { solanaChainId: string; mint: (address: string, contra
 /** Conta demo (apresentações): keyring das 4 carteiras falsas + set de todos os endereços fake. */
 export interface DevDemo { keyring: import('../portal/demo.js').DemoMesaKeyring; addresses: Set<string> }
 /** Modo EVM dev: contrato real (Sepolia/anvil), keyring de EOAs dev e mint dos tokens mock. */
-export interface DevEvm { chainId: string; escrow: string; tbtc: `0x${string}`; tusdt: `0x${string}`; explorerBase: string | null; keyring: import('../adapters/evm.js').EvmDevKeyring; mintToken: (token: `0x${string}`, to: string, amount: bigint) => Promise<void> }
+export interface DevEvmKeyring { addressFor(owner: string): string; accountByAddress(address: string): import('viem/accounts').PrivateKeyAccount | null }
+export interface DevEvm { chainId: string; escrow: string; tbtc: `0x${string}`; tusdt: `0x${string}`; explorerBase: string | null; keyring: DevEvmKeyring; mintToken: (token: `0x${string}`, to: string, amount: bigint) => Promise<void> }
 export interface ApiDeps { deals: DealEngine; settlement: SettlementEngine; price: PriceEngine; liquidity: LiquidityEngine; router: RouterEngine; registry: AssetRegistry; platformFeeBps: number; networkCostUsd: (n: Network) => Promise<string>; auth: WalletAuth; portal: PortalService; identity: IdentityService; identityDev?: { email: FakeEmailChannel; sms: FakeSmsChannel }; rooms: RoomService; proposals: ProposalService; store: Store; audit: AuditLog; mesaHtmlPath?: string; portalHtmlPath?: string; conviteHtmlPath?: string; env: string; rateLimit?: { windowMs: number; max: number }; dev?: DevMint }
 declare module 'fastify' { interface FastifyRequest { session: Session | null } }
 
-const NetworkZ = z.enum(['bitcoin', 'ethereum', 'solana', 'zcash']); const RoleZ = z.enum(['SELLER', 'BUYER', 'PAYMASTER_1', 'PAYMASTER_2']);
+const NetworkZ = z.enum(['bitcoin', 'ethereum', 'solana', 'zcash', 'tron']); const RoleZ = z.enum(['SELLER', 'BUYER', 'PAYMASTER_1', 'PAYMASTER_2']);
 // Endereços multichain expostos por verum.getAddresses() (opcional em connect/confirm).
 const WalletAddressesZ = z.array(z.object({ network: z.string().min(2).max(40), address: z.string().min(8).max(120) })).max(30).optional();
 const short = (d: Deal) => ({ id: d.id, state: d.state, revision: d.revision, requiredSignatures: d.requiredSignatures, validSignatures: d.validSignatures, expiresAt: d.expiresAt, turnRole: d.turnRole ?? null, turnExpiresAt: d.turnExpiresAt ?? null, updatedAt: d.updatedAt, assetIn: d.draft.assetIn.assetId, assetOut: d.draft.assetOut.assetId, amountInBase: d.draft.amountInBase });
