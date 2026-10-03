@@ -396,6 +396,9 @@ export async function buildApi(deps: ApiDeps): Promise<FastifyInstance> {
     const d = await deps.deals.get(id);
     const role = d.turnRole; if (!role) throw new DomainError('SETTLEMENT_NOT_ALLOWED', 'Nenhum turno de assinatura em aberto');
     const p = d.participants.find(x => x.role === role); if (!p) throw new DomainError('NOT_PARTICIPANT', 'papel da vez sem participante');
+    // Resiliência serverless: se o auto-funding da criação falhou (timeout/RPC), retenta aqui —
+    // sem isso o turno trava em FUNDING_REQUIRED mesmo com a carteira dev tendo saldo.
+    if (p.fundingRequired && p.funding !== 'FINAL') await deps.deals.fund(id, role, p.address);
     const env = await deps.deals.envelope(id, role, p.address);
     let signature: string; let scheme: 'secp256k1' | 'ed25519';
     const evAcc = ev?.keyring.accountByAddress(p.address);
