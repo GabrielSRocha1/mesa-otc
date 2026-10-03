@@ -1822,7 +1822,7 @@ img,svg,canvas,video{max-width:100%}
     const st=$('#opDealStatus'); if(st) st.textContent = d.state==='AWAITING_SIGNATURES'?('Operação '+d.id+' · aguardando '+(OP_STEP_LABEL[d.turnRole]||'—')) : ('Operação '+d.id+' · '+d.state);
     const awaiting=d.state==='AWAITING_SIGNATURES';
     const btn=$('#opStartDeal'); if(btn) btn.style.display = awaiting?'none':'';
-    const sbtn=$('#opSignTurn'); if(sbtn) sbtn.style.display = (awaiting&&d.turnRole)?'':'none';
+    const sbtn=$('#opSignTurn'); if(sbtn){ sbtn.style.display = (awaiting&&d.turnRole)?'':'none'; if(!sbtn.disabled) sbtn.textContent = d.demo?'Assinar minha vez':'Assinar com Verum Wallet'; }
     const nbtn=$('#opNewDeal'); if(nbtn) nbtn.style.display = awaiting?'':'none'; // com deal em andamento, permite abandonar e criar outra
     startTurnCountdown();
     renderContract(d);
@@ -1888,6 +1888,27 @@ img,svg,canvas,video{max-width:100%}
       __dbg('signTurn connect'); const r=await prov.connect(); const address=(r&&r.publicKey?r.publicKey:prov.publicKey).toString();
       if(turn && address!==turn.address) throw new Error('Carteira conectada ('+shortAddr(address)+') não é a do papel da vez: '+OP_STEP_LABEL[d.turnRole]+' ('+shortAddr(turn.address)+')');
       const wtok=await walletSession(prov,address); const auth={authorization:'Bearer '+wtok};
+      // ── Passo ON-CHAIN (escrow canônico): a Verum Wallet assina a PRÓPRIA transação do contrato
+      // (seller_sign deposita o principal; buyer_sign idem; PMs só avançam o estado). Só depois o
+      // aval da mesa é registrado — o backend detecta o passo já feito e não tenta reassinar.
+      const stepRes=await fetch(API+'/v1/deals/'+d.id+'/onchain-tx',{headers:auth});
+      if(stepRes.ok){
+        const step=await stepRes.json();
+        if(step&&step.kind==='solana'&&step.transactionBase64){
+          if(btn) btn.textContent='Confirme na Verum Wallet…';
+          const raw=Uint8Array.from(atob(step.transactionBase64),c=>c.charCodeAt(0));
+          if(typeof prov.signTransaction!=='function') throw new Error('Esta versão da Verum Wallet não assina transações — atualize o app');
+          const signed=await prov.signTransaction(raw);
+          const toB64=(x)=>{ if(typeof x==='string') return x; const u=x instanceof Uint8Array?x:(x&&typeof x.serialize==='function'?x.serialize():Uint8Array.from(x)); let s=''; for(const b of u) s+=String.fromCharCode(b); return btoa(s); };
+          if(btn) btn.textContent='Enviando à rede…';
+          const bc=await fetch(API+'/v1/deals/'+d.id+'/onchain-tx',{method:'POST',headers:{...auth,'content-type':'application/json','idempotency-key':d.id+':'+d.turnRole+':onchain'},body:JSON.stringify({signedTransactionBase64:toB64(signed)})});
+          const bo=await bc.json().catch(()=>({})); if(!bc.ok) throw new Error(bo.message||bo.error||('Transação on-chain rejeitada ('+bc.status+')'));
+          toast('Transação confirmada on-chain · '+(bo.txHash?shortAddr(bo.txHash):''),'ok');
+        } else if(step&&step.kind&&step.kind!=='done'&&step.kind!=='solana'){
+          throw new Error('Esta rede ('+step.kind+') exige carteira EVM/Tron para o passo on-chain');
+        }
+      } // 400 = rede simulada/keyring dev: o backend cuida do passo on-chain sozinho
+      if(btn) btn.textContent='Registrando aval…';
       const env=await (await fetch(API+'/v1/deals/'+d.id+'/approval-envelope',{headers:auth})).json();
       if(!env||!env.message||!env.payload) throw new Error((env&&(env.message||env.error))||'Envelope indisponível');
       const signature=await solSignMessage(prov,env.message);
@@ -1896,7 +1917,7 @@ img,svg,canvas,video{max-width:100%}
       toast('Assinatura registrada · '+OP_STEP_LABEL[d.turnRole]+(out.state==='SETTLEMENT_VALIDATION'?' · todas assinadas!':''),'ok');
       refreshMesaDeal();
     }catch(e){ toast(e.message||'Falha ao assinar','err'); }
-    finally{ const b=$('#opSignTurn'); if(b){ b.disabled=false; b.textContent='Assinar minha vez'; } }
+    finally{ const b=$('#opSignTurn'); if(b){ b.disabled=false; b.textContent=(opDeal&&opDeal.demo)?'Assinar minha vez':'Assinar com Verum Wallet'; } }
   }
   function startTurnCountdown(){ if(opTurnTimer) clearInterval(opTurnTimer); opTurnTimer=setInterval(()=>{ const el=$('#opSteps .op-turn-chip'); if(!el){ clearInterval(opTurnTimer); return; } const cd=el.querySelector('.op-turn-cd'); if(cd) cd.textContent=fmtCountdown(Number(el.dataset.turnExp)); },1000); }
   async function refreshMesaDeal(){ if(!getTok()) return; refreshMesaDeals(); try{ const r=await pmApi('/v1/portal/mesa/deal'); if(r&&r.deal){ opDeal=r.deal; renderEsteira(r.deal); if(!opDealTimer) startDealPolling(); } }catch(e){} }
