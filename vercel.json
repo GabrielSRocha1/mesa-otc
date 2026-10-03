@@ -6,7 +6,7 @@
   "functions": {
     "api/index.js": {
       "includeFiles": "{web/**,db/migrations/**}",
-      "maxDuration": 30
+      "maxDuration": 300
     }
   },
   "rewrites": [
