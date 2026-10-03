@@ -49,6 +49,9 @@
     "vitest": "^5.0.1"
   },
   "overrides": {
-    "tmp": "^0.2.7"
+    "tmp": "^0.2.7",
+    "rpc-websockets": {
+      "uuid": "9.0.1"
+    }
   }
 }
