@@ -7,8 +7,9 @@ import { EventEmitter } from 'node:events';
 import { z } from 'zod';
 import { computeDealHash, newId, randomHex, sha256Hex, canonicalize, NETWORK_KEY_SCHEME, ROLE_ORDER, SIGNING_ORDER, PRE_SETTLING_EXPIRABLE, TERMINAL_STATES, type Deal, type DealState, type Environment, type Leg, type Participant, type Role, type Terms, type CanonicalAsset, type Network } from '../domain/types.js';
 
-/** Janela rolante por assinante: cada papel tem 5 minutos QUANDO chega a vez dele. */
-const SIGNER_WINDOW_MS = 5 * 60 * 1000;
+import { SIGN_WINDOW_MS } from '../domain/constants.js';
+/** Janela rolante por assinante: cada papel tem SIGN_WINDOW_MINUTES QUANDO chega a vez dele. */
+const SIGNER_WINDOW_MS = SIGN_WINDOW_MS;
 import { DomainError } from '../domain/errors.js';
 import { assertTransition, CANCELLABLE_STATES } from '../domain/stateMachine.js';
 import { hexToBytes } from '@noble/hashes/utils.js';

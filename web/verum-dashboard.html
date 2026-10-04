@@ -689,7 +689,7 @@ img,svg,canvas,video{max-width:100%}
     <nav class="nav">
       <a href="#" class="active" data-view="dashboard"><svg viewBox="0 0 24 24"><rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="3" width="7" height="7" rx="1.5"/><rect x="3" y="14" width="7" height="7" rx="1.5"/><rect x="14" y="14" width="7" height="7" rx="1.5"/></svg>Dashboard</a>
       <a href="#" data-view="operacoes"><svg viewBox="0 0 24 24"><rect x="4" y="4" width="16" height="16" rx="2"/><path d="M8 9h8M8 13h5"/></svg>Operações</a>
-      <a href="#" data-view="carteiras"><svg viewBox="0 0 24 24"><rect x="3" y="6" width="18" height="13" rx="2"/><path d="M16 12h2M3 10h18"/></svg>Carteiras</a>
+      <a href="#" data-view="carteiras"><svg viewBox="0 0 24 24"><rect x="3" y="6" width="18" height="13" rx="2"/><path d="M16 12h2M3 10h18"/></svg>ABRIR MESA</a>
       <a href="#" data-view="liquidez"><svg viewBox="0 0 24 24"><path d="M3 17l5-5 4 3 8-9"/><path d="M21 6v5h-5"/></svg>Liquidez</a>
       <a href="#" data-view="relatorios"><svg viewBox="0 0 24 24"><path d="M6 3h9l5 5v13a1 1 0 01-1 1H6a1 1 0 01-1-1V4a1 1 0 011-1z"/><path d="M14 3v6h6M9 14h6M9 17h4"/></svg>Relatórios</a>
       <a href="#" data-view="seguranca"><svg viewBox="0 0 24 24"><path d="M12 3l7 3v5c0 5-3 8-7 10-4-2-7-5-7-10V6z"/><path d="M9 12l2 2 4-4"/></svg>Segurança</a>
@@ -805,6 +805,25 @@ img,svg,canvas,video{max-width:100%}
           <button class="btn btn-primary" id="opsNewTop" type="button" data-goto="operacao" style="display:none"><svg viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg>Criar operação</button>
         </div>
       </div>
+      <!-- ===== Mesas v3: lista com badges, filtro e busca ===== -->
+      <section class="card" id="m3OpsCard" style="display:none;margin-bottom:16px">
+        <div class="card-h"><div class="t"><svg viewBox="0 0 24 24" style="width:17px;height:17px;stroke:var(--blue);fill:none;stroke-width:2;vertical-align:-3px;margin-right:6px"><rect x="3" y="6" width="18" height="13" rx="2"/><path d="M16 12h2M3 10h18"/></svg>Mesas</div>
+          <div style="display:flex;gap:8px;align-items:center">
+            <input class="inp" id="m3OpsSearch" placeholder="Buscar por código…" style="height:34px;width:170px;font-size:12.5px">
+            <select class="inp" id="m3OpsFilter" style="height:34px;width:170px;font-size:12.5px">
+              <option value="">Todos os status</option>
+              <option value="ACTIVE">Ativa</option><option value="WAITING_CONNECTIONS">Aguardando conexões</option>
+              <option value="WAITING_SIGNATURES">Aguardando assinaturas</option><option value="SIGNING">Assinatura em andamento</option>
+              <option value="COMPLETED">Concluída</option><option value="EXPIRED">Expirada</option>
+              <option value="CANCELLED">Cancelada</option><option value="FAILED">Falha</option>
+            </select>
+          </div>
+        </div>
+        <div class="tbl-wrap"><table class="tbl">
+          <thead><tr><th>Código</th><th>Participantes</th><th>Valor</th><th>Status</th><th></th></tr></thead>
+          <tbody id="m3OpsRows"></tbody>
+        </table></div>
+      </section>
       <section class="card" id="opsListCard" style="display:none">
         <div class="card-h"><div class="t"><svg viewBox="0 0 24 24" style="width:17px;height:17px;stroke:var(--blue);fill:none;stroke-width:2;vertical-align:-3px;margin-right:6px"><rect x="4" y="4" width="16" height="16" rx="2"/><path d="M8 9h8M8 13h5"/></svg>Operações da mesa</div><span class="badge info" id="opsListCount">0</span></div>
         <div class="op-deal-list" id="opsList"></div>
@@ -976,7 +995,63 @@ img,svg,canvas,video{max-width:100%}
     <!-- ===================== VIEW: CARTEIRAS ===================== -->
     <section class="view" id="view-carteiras">
       <div class="page-head">
-        <div><h1>Carteiras</h1><p>Conecte as 4 carteiras da mesa. Envie um link para cada dono confirmar a própria carteira — sem entrar na sua conta.</p></div>
+        <div><h1>ABRIR MESA</h1><p>Crie mesas com cadeiras e convites. A wallet de cada participante é identificada na conexão, com prova de posse — você nunca cadastra o endereço de ninguém.</p></div>
+        <div class="ph-actions"><button class="btn btn-primary" id="m3New" type="button"><svg viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg>Criar mesa</button></div>
+      </div>
+
+      <!-- ===== Mesas v3: criação ===== -->
+      <section class="card" id="m3Create" style="display:none;margin-bottom:16px">
+        <div class="card-h"><div class="t">Nova mesa</div><span class="badge info">Validade: 60 minutos</span></div>
+        <div class="form-row"><div class="fl">Rótulo (opcional)</div><input class="inp" id="m3cLabel" maxlength="120" placeholder="Ex.: Mesa BTC — cliente institucional"></div>
+        <div class="form-row"><div class="fl">Rede da mesa</div>
+          <select class="inp" id="m3cNet">
+            <option value="solana">Solana</option><option value="ethereum">Ethereum</option><option value="tron">Tron</option><option value="bsc">BNB Smart Chain</option><option value="polygon">Polygon</option><option value="base">Base</option><option value="arbitrum">Arbitrum One</option>
+          </select>
+        </div>
+        <div class="form-row"><div><div class="fl">Cadeiras</div><div class="fh">Pay Master 2 é opcional (4ª cadeira)</div></div><button class="sw" id="m3cPm2" type="button"></button></div>
+        <div id="m3cChairs"></div>
+        <div style="display:flex;gap:10px;margin-top:14px">
+          <button class="btn btn-primary" id="m3cSubmit" type="button">Criar mesa e cadeiras</button>
+          <button class="btn" id="m3cCancel" type="button">Cancelar</button>
+        </div>
+      </section>
+
+      <!-- ===== Mesas v3: minhas mesas ===== -->
+      <section class="card" id="m3ListCard" style="margin-bottom:16px">
+        <div class="card-h"><div class="t"><svg viewBox="0 0 24 24" style="width:17px;height:17px;stroke:var(--blue);fill:none;stroke-width:2;vertical-align:-3px;margin-right:6px"><rect x="3" y="6" width="18" height="13" rx="2"/><path d="M16 12h2M3 10h18"/></svg>Minhas mesas</div><span class="badge info" id="m3Count">0</span></div>
+        <div id="m3List"><p style="color:var(--ink-3);font-size:12.5px;margin:0">Nenhuma mesa criada ainda. Toque em "Criar mesa".</p></div>
+      </section>
+
+      <!-- ===== Mesas v3: detalhe da mesa selecionada ===== -->
+      <section class="card" id="m3Detail" style="display:none;margin-bottom:16px">
+        <div class="card-h"><div class="t" id="m3dTitle">Mesa</div><span class="badge info" id="m3dStatus">—</span></div>
+        <div style="display:flex;gap:14px;flex-wrap:wrap;align-items:center;margin-bottom:12px">
+          <span class="mono" id="m3dCode" style="font-size:13px"></span>
+          <span class="badge wait" id="m3dTtl" title="Tempo restante da mesa">—</span>
+          <span class="badge wait" id="m3dTurn" style="display:none" title="Tempo para assinaturas">—</span>
+        </div>
+        <div class="op-parts" id="m3dChairs"></div>
+        <div class="grid" style="grid-template-columns:1fr 1fr;margin-top:14px">
+          <div>
+            <div class="card-h" style="margin-bottom:6px"><div class="t" style="font-size:13.5px">Configuração da operação</div></div>
+            <div class="form-row"><div class="fl">Quantidade (unidades base)</div><input class="inp" id="m3dAmount" inputmode="numeric" placeholder="Ex.: 250000000000"></div>
+            <div class="form-row"><div class="fl">Deságio (bps)</div><input class="inp" id="m3dDiscount" type="number" min="0" max="2000" value="0"></div>
+            <div class="form-row"><div class="fl">Comissão (bps)</div><input class="inp" id="m3dCommission" type="number" min="0" max="5000" value="0"></div>
+            <button class="btn btn-block" id="m3dSaveCfg" type="button" style="margin-top:8px">Salvar configuração</button>
+          </div>
+          <div>
+            <div class="card-h" style="margin-bottom:6px"><div class="t" style="font-size:13.5px">Saldos e aprovação</div></div>
+            <div class="kv" id="m3dBalances"><div class="r"><span class="k">Saldos</span><span class="v" style="color:var(--ink-3)">—</span></div></div>
+            <div id="m3dMotivos" style="display:none;margin-top:10px;padding:10px 12px;border:1px solid var(--red);border-radius:10px;color:#fecaca;font-size:12.5px"></div>
+            <button class="btn btn-primary btn-block" id="m3dApprove" type="button" style="margin-top:10px">Aprovar operação</button>
+            <button class="btn btn-block" id="m3dSign" type="button" style="display:none;margin-top:8px">Assinar a vez da mesa</button>
+            <button class="btn btn-block" id="m3dCancelMesa" type="button" style="margin-top:8px;border-color:var(--red);color:#fecaca">Cancelar mesa</button>
+          </div>
+        </div>
+      </section>
+
+      <div class="page-head" style="margin-top:8px">
+        <div><h2 style="font-size:17px;margin:0">Mesa rápida (legada)</h2><p>Fluxo anterior com 4 carteiras fixas da conta.</p></div>
         <div class="ph-actions"><span class="badge info" id="mesaCount">—</span></div>
       </div>
       <div class="vgrid wide" id="mesaSlots">
@@ -1059,6 +1134,33 @@ img,svg,canvas,video{max-width:100%}
     </section>
 
     </main>
+  </div>
+</div>
+
+<!-- ===== Modo PARTICIPANTE (mesa v3): visão limitada, somente leitura; DTO recortado no backend ===== -->
+<div id="pMode" style="display:none;position:fixed;inset:0;z-index:40;background:var(--bg);overflow:auto">
+  <div style="max-width:860px;margin:0 auto;padding:18px 16px 40px">
+    <div style="position:sticky;top:0;z-index:5;background:var(--bg);padding:10px 0;display:flex;gap:10px;align-items:center;flex-wrap:wrap;border-bottom:1px solid var(--line)">
+      <div style="font-family:var(--f-head);font-weight:800;font-size:15px">VERUM OTC</div>
+      <span class="mono" id="pCode" style="font-size:12.5px;color:var(--ink-2)"></span>
+      <span class="badge info" id="pStatus">—</span>
+      <span class="badge wait" id="pTtl" title="Tempo da mesa">—</span>
+      <span class="badge wait" id="pTurnTtl" style="display:none" title="Tempo para assinaturas">—</span>
+    </div>
+    <section class="card" style="margin-top:14px" id="pMeCard"></section>
+    <section class="card" style="margin-top:14px">
+      <div class="card-h"><div class="t">Participantes</div></div>
+      <div class="op-parts" id="pChairs"></div>
+    </section>
+    <section class="card" style="margin-top:14px">
+      <div class="card-h"><div class="t">Resumo da operação</div></div>
+      <div class="kv" id="pSummary"><div class="r"><span class="k">Configuração</span><span class="v" style="color:var(--ink-3)">Aguardando o Pay Master</span></div></div>
+    </section>
+    <section class="card" style="margin-top:14px">
+      <div class="card-h"><div class="t">Assinaturas</div><span class="badge info" id="pSigCount">0/0</span></div>
+      <div id="pSigns" style="font-size:13px;color:var(--ink-2)"></div>
+      <button class="btn btn-primary btn-block" id="pSignBtn" type="button" style="display:none;margin-top:12px;height:50px">Revisar e assinar</button>
+    </section>
   </div>
 </div>
 
@@ -1153,6 +1255,10 @@ img,svg,canvas,video{max-width:100%}
   const META=document.querySelector('meta[name="verum-otc-api"]');
   const API=((META&&META.content)||'/').replace(/\/$/,'');
   const shortAddr = a => a && a.length>12 ? a.slice(0,6)+'…'+a.slice(-4) : a;
+  // ── Relógio do SERVIDOR: todos os timers usam srvNow() (nunca Date.now() como autoridade) ──
+  let srvOff=0;
+  const srvNow=()=>Date.now()+srvOff;
+  (function syncClock(){ fetch(API+'/v1/time').then(r=>r.json()).then(j=>{ if(j&&typeof j.time==='number') srvOff=j.time-Date.now(); }).catch(()=>{}); setTimeout(syncClock,120000); })();
   // Token em memória + localStorage. Dentro do iframe da Verum o localStorage pode ser
   // bloqueado; a cópia em memória mantém a sessão. Hand-off do portal chega via URL (#tok=).
   let _tok='';
@@ -1795,7 +1901,7 @@ img,svg,canvas,video{max-width:100%}
   let opDeal=null, opDealTimer=null, opTurnTimer=null;
   const OP_STEP_LABEL={SELLER:'Vendedor',PAYMASTER_1:'Pay Master 1',PAYMASTER_2:'Pay Master 2',BUYER:'Comprador'};
   const OP_SIGN_ORDER=['SELLER','PAYMASTER_1','PAYMASTER_2','BUYER'];
-  function fmtCountdown(exp){ const ms=Math.max(0,exp-Date.now()); if(ms>=3600000){ const h=Math.floor(ms/3600000), m=Math.floor(ms%3600000/60000); return h+'h'+('0'+m).slice(-2)+'m restantes'; } const m=Math.floor(ms/60000), s=Math.floor(ms%60000/1000); return m+'m'+('0'+s).slice(-2)+'s restantes'; }
+  function fmtCountdown(exp){ const ms=Math.max(0,exp-srvNow()); if(ms>=3600000){ const h=Math.floor(ms/3600000), m=Math.floor(ms%3600000/60000); return h+'h'+('0'+m).slice(-2)+'m restantes'; } const m=Math.floor(ms/60000), s=Math.floor(ms%60000/1000); return m+'m'+('0'+s).slice(-2)+'s restantes'; }
   const OP_DOT={ done:'<svg viewBox="0 0 24 24"><path d="M5 13l4 4L19 7"/></svg>', turn:'<svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 8v4l2 2"/></svg>', lock:'<svg viewBox="0 0 24 24"><rect x="5" y="11" width="14" height="9" rx="2"/><path d="M8 11V8a4 4 0 018 0v3"/></svg>' };
   function renderEsteira(d){
     const steps=$('#opSteps'); if(!steps||!d) return;
@@ -2190,13 +2296,296 @@ img,svg,canvas,video{max-width:100%}
   }).catch(e=>toast(e.message||'Falha ao carregar alertas','err')); }
   function securityInit(){ const bell=$('#alertBell'); if(bell) bell.addEventListener('click',showAlerts); securityLoad(); refreshAlerts(); if(!alertTimer) alertTimer=setInterval(refreshAlerts,20000); }
 
+  /* ================= MESAS v3 — admin (ABRIR MESA) ================= */
+  const M3_STATUS={ DRAFT:['info','● Rascunho'], WAITING_INVITES:['wait','● Aguardando convites'], WAITING_CONNECTIONS:['wait','● Aguardando conexões'], ACTIVE:['info','● Ativa'], READY_FOR_APPROVAL:['info','● Pronta para aprovação'], APPROVED:['info','● Aprovada'], WAITING_SIGNATURES:['wait','● Aguardando assinaturas'], SIGNING:['wait','● Assinatura em andamento'], COMPLETED:['ok','✓ Concluída'], SIGNATURE_TIMEOUT:['err','⚠ Tempo de assinatura esgotado'], EXPIRED:['err','⚠ Expirada'], CANCELLED:['err','✕ Cancelada'], FAILED:['err','✕ Falha'] };
+  const m3Badge=s=>{ const b=M3_STATUS[s]||['info',s]; return '<span class="badge '+b[0]+'">'+esc(b[1])+'</span>'; };
+  const M3_ROLE={SELLER:'Vendedor',BUYER:'Comprador',PAYMASTER_1:'Pay Master 1',PAYMASTER_2:'Pay Master 2'};
+  let m3Sel=null, m3Cache=null, m3Timer=null, m3TickT=null, m3Bal=null;
+  function m3cChairRow(role){
+    const fixed=role==='PAYMASTER_1';
+    return '<div class="form-row" data-m3-chair="'+role+'" style="gap:8px;flex-wrap:wrap">'
+      +'<div style="min-width:120px"><div class="fl">'+M3_ROLE[role]+'</div>'+(fixed?'<div class="fh">Sua cadeira (wallet já conectada)</div>':'')+'</div>'
+      +'<input class="inp" data-m3f="symbol" placeholder="Ativo (ex.: SOL, USDT)" style="width:130px" value="'+(role==='BUYER'?'USDT':'SOL')+'">'
+      +'<input class="inp" data-m3f="contract" placeholder="Contrato/mint (vazio = nativo)" style="flex:1;min-width:160px">'
+      +'<input class="inp" data-m3f="decimals" type="number" min="0" max="30" placeholder="Decimais" style="width:90px" value="'+(role==='BUYER'?'6':'9')+'">'
+      +(fixed?'':'<input class="inp" data-m3f="label" placeholder="Rótulo interno (opcional)" style="flex:1;min-width:150px">')
+      +'</div>';
+  }
+  function m3OpenCreate(){ const c=$('#m3Create'); if(!c) return; c.style.display=''; $('#m3cChairs').innerHTML=['SELLER','BUYER','PAYMASTER_1'].map(m3cChairRow).join(''); $('#m3cPm2').classList.remove('on'); }
+  async function m3SubmitCreate(){
+    const net=$('#m3cNet').value;
+    const roles=['SELLER','BUYER','PAYMASTER_1']; if($('#m3cPm2').classList.contains('on')) roles.push('PAYMASTER_2');
+    const chairs=[];
+    for(const role of roles){
+      const row=document.querySelector('[data-m3-chair="'+role+'"]');
+      if(!row && role==='PAYMASTER_2'){ chairs.push({role,expectedAsset:{network:net,contractOrMint:null,decimals:9,symbol:'SOL'}}); continue; }
+      const f=k=>{ const el=row?row.querySelector('[data-m3f="'+k+'"]'):null; return el?el.value.trim():''; };
+      chairs.push({ role, expectedAsset:{ network:net, contractOrMint:f('contract')||null, decimals:Number(f('decimals')||'9'), symbol:(f('symbol')||'SOL').toUpperCase() }, label:f('label')||undefined });
+    }
+    try{
+      const mesa=await pmApi('/v1/portal/mesas',{method:'POST',body:{ label:$('#m3cLabel').value.trim()||undefined, network:net, chairs }});
+      toast('Mesa '+mesa.code+' criada','ok'); $('#m3Create').style.display='none';
+      await m3LoadList(); m3Open(mesa.mesaId);
+    }catch(e){ toast(e.message||'Falha ao criar mesa','err'); }
+  }
+  async function m3LoadList(){
+    try{
+      const r=await pmApi('/v1/portal/mesas'); const mesas=r.mesas||[];
+      const cEl=$('#m3Count'); if(cEl) cEl.textContent=String(mesas.length);
+      const box=$('#m3List'); if(box){
+        box.innerHTML = mesas.length? mesas.map(m=>'<div class="r" style="display:flex;gap:10px;align-items:center;justify-content:space-between;padding:10px 0;border-bottom:1px solid var(--line)">'
+          +'<div><span class="mono" style="font-size:12.5px">'+esc(m.code)+'</span>'+(m.label?' <span style="color:var(--ink-3);font-size:12px">· '+esc(m.label)+'</span>':'')+'<div style="font-size:12px;color:var(--ink-3)">'+m.chairs.map(c=>esc((M3_ROLE[c.role]||c.role)+(c.firstName?(' · '+c.firstName):''))+(c.connected?' ✓':'')).join(' · ')+'</div></div>'
+          +'<div style="display:flex;gap:8px;align-items:center">'+m3Badge(m.status)+'<button class="btn" data-m3-open="'+esc(m.mesaId)+'" style="height:34px;font-size:12.5px">Ver mesa</button></div></div>').join('')
+          : '<p style="color:var(--ink-3);font-size:12.5px;margin:0">Nenhuma mesa criada ainda. Toque em "Criar mesa".</p>';
+        box.querySelectorAll('[data-m3-open]').forEach(b=>b.addEventListener('click',()=>m3Open(b.dataset.m3Open)));
+      }
+      m3RenderOps(mesas);
+      return mesas;
+    }catch(e){ return []; }
+  }
+  function m3RenderOps(mesas){
+    const card=$('#m3OpsCard'); if(!card) return;
+    const q=($('#m3OpsSearch')&&$('#m3OpsSearch').value.trim().toUpperCase())||'';
+    const f=($('#m3OpsFilter')&&$('#m3OpsFilter').value)||'';
+    const list=(mesas||[]).filter(m=>(!q||m.code.toUpperCase().includes(q))&&(!f||m.status===f));
+    card.style.display=(mesas&&mesas.length)?'':'none';
+    const rows=$('#m3OpsRows'); if(!rows) return;
+    rows.innerHTML=list.map(m=>'<tr><td class="mono">'+esc(m.code)+'</td>'
+      +'<td style="font-size:12px">'+m.chairs.map(c=>esc((M3_ROLE[c.role]||c.role)+(c.firstName?(': '+c.firstName):''))).join('<br>')+'</td>'
+      +'<td class="mono">'+esc(m.amount||'—')+'</td><td>'+m3Badge(m.status)+'</td>'
+      +'<td><button class="btn" data-m3-goto="'+esc(m.mesaId)+'" style="height:32px;font-size:12px">Ver mesa</button></td></tr>').join('')||'<tr><td colspan="5" style="color:var(--ink-3)">Nenhuma mesa com esse filtro.</td></tr>';
+    rows.querySelectorAll('[data-m3-goto]').forEach(b=>b.addEventListener('click',()=>{ showView('carteiras'); m3Open(b.dataset.m3Goto); }));
+  }
+  function m3Open(mesaId){ m3Sel=mesaId; $('#m3Detail').style.display=''; m3Refresh(); if(!m3Timer) m3Timer=setInterval(m3Refresh,5000); if(!m3TickT) m3TickT=setInterval(m3Tick,1000); }
+  function m3Tick(){
+    if(!m3Cache) return;
+    const ttl=$('#m3dTtl'); if(ttl) ttl.textContent='Mesa expira em '+fmtCountdown(m3Cache.expiresAt).replace(' restantes','');
+    const tt=$('#m3dTurn'); if(tt){ const d=m3Cache.deal; if(d&&d.turnExpiresAt&&d.state==='AWAITING_SIGNATURES'){ tt.style.display=''; tt.textContent='Assinatura: '+fmtCountdown(d.turnExpiresAt).replace(' restantes',''); } else tt.style.display='none'; }
+  }
+  async function m3Refresh(){
+    if(!m3Sel) return;
+    try{
+      const m=await pmApi('/v1/portal/mesas/'+encodeURIComponent(m3Sel));
+      m3Cache=m;
+      $('#m3dTitle').textContent='Mesa '+(m.label||m.code);
+      $('#m3dCode').textContent=m.code;
+      $('#m3dStatus').outerHTML='<span id="m3dStatus">'+m3Badge(m.status)+'</span>';
+      const chairs=$('#m3dChairs');
+      chairs.innerHTML=(m.chairs||[]).map(c=>{
+        const conn=!!c.wallet;
+        const inviteBtn=(!conn&&c.role!=='PAYMASTER_1')?'<button class="btn" data-m3-inv="'+esc(c.chairId)+'" style="height:34px;font-size:12.5px;margin-top:8px">Convidar participante</button>':'';
+        const revoke=(conn&&!m.approvedAt&&c.role!=='PAYMASTER_1')?'<button class="btn" data-m3-rvk="'+esc(c.chairId)+'" style="height:30px;font-size:11.5px;margin-top:6px;border-color:var(--red);color:#fecaca">Revogar conexão</button>':'';
+        return '<div class="op-part"><div class="nm">'+esc(M3_ROLE[c.role]||c.role)+(c.label?' <span style="color:var(--ink-3);font-weight:400;font-size:11.5px">· '+esc(c.label)+'</span>':'')+'</div>'
+          +'<div style="font-size:12.5px;color:var(--ink-2)">'+(conn?('✓ '+esc(c.firstName||'')+' · <span class="mono">'+esc(shortAddr(c.wallet.address))+'</span>'):(c.invite?'Convite enviado — aguardando conexão':'Aguardando convite'))+'</div>'
+          +'<div style="font-size:12px;color:var(--ink-3)">Ativo: '+esc(c.expectedAsset.symbol)+'</div>'+inviteBtn+revoke+'</div>';
+      }).join('');
+      chairs.querySelectorAll('[data-m3-inv]').forEach(b=>b.addEventListener('click',()=>m3Invite(b.dataset.m3Inv)));
+      chairs.querySelectorAll('[data-m3-rvk]').forEach(b=>b.addEventListener('click',async()=>{ if(!confirm('Revogar a conexão desta cadeira? O participante precisará de um novo convite.')) return; try{ await pmApi('/v1/portal/mesas/'+m3Sel+'/chairs/'+b.dataset.m3Rvk+'/revoke',{method:'POST',body:{}}); m3Refresh(); }catch(e){ toast(e.message,'err'); } }));
+      if(m.config){ if(document.activeElement!==$('#m3dAmount')) $('#m3dAmount').value=m.config.amountInBase||''; if(document.activeElement!==$('#m3dDiscount')) $('#m3dDiscount').value=m.config.discountBps; if(document.activeElement!==$('#m3dCommission')) $('#m3dCommission').value=m.config.commissionBps; }
+      const frozen=!!m.approvedAt;
+      ['m3dAmount','m3dDiscount','m3dCommission'].forEach(id=>{ const el=document.getElementById(id); if(el) el.disabled=frozen; });
+      $('#m3dSaveCfg').style.display=frozen?'none':'';
+      $('#m3dApprove').style.display=frozen?'none':'';
+      $('#m3dSign').style.display=(m.deal&&m.deal.state==='AWAITING_SIGNATURES')?'':'none';
+      if(m.deal&&m.deal.turnRole) $('#m3dSign').textContent='Assinar a vez ('+(M3_ROLE[m.deal.turnRole]||m.deal.turnRole)+') — '+(m.deal.validSignatures||0)+'/'+(m.deal.requiredSignatures||0);
+      m3Tick();
+      m3RenderBalances();
+    }catch(e){ /* polling tolerante */ }
+  }
+  let m3BalAt=0;
+  async function m3RenderBalances(){
+    if(!m3Sel||Date.now()-m3BalAt<15000) return; m3BalAt=Date.now();
+    try{
+      const r=await pmApi('/v1/portal/mesas/'+encodeURIComponent(m3Sel)+'/balances');
+      m3Bal=r;
+      const box=$('#m3dBalances'); if(!box) return;
+      if(r.demo){ box.innerHTML='<div class="r"><span class="k">Saldos</span><span class="v"><span class="badge ok">✓ Demo — suficientes</span></span></div>'; return; }
+      box.innerHTML=(r.chairs||[]).map(c=>{
+        const gas=c.gasOk==null?'—':(c.gasOk?'<span class="badge ok">Gás ≥ US$ 5 ✓</span>':'<span class="badge err">Gás insuficiente ✗</span>');
+        const asset=c.assetOk==null?'':(c.assetOk?' <span class="badge ok">'+esc(c.assetSymbol)+' ✓</span>':' <span class="badge err">'+esc(c.assetSymbol)+' ✗</span>');
+        return '<div class="r"><span class="k">'+esc(c.roleLabel+(c.firstName?(' ('+c.firstName+')'):''))+'</span><span class="v">'+gas+asset+'</span></div>';
+      }).join('')||'<div class="r"><span class="k">Saldos</span><span class="v" style="color:var(--ink-3)">—</span></div>';
+    }catch(e){}
+  }
+  async function m3Invite(chairId){
+    try{
+      const inv=await pmApi('/v1/portal/mesas/'+m3Sel+'/chairs/'+chairId+'/invite',{method:'POST',body:{}});
+      const share=navigator.share?'<button class="btn" id="m3iShare">Compartilhar</button>':'';
+      $('#modalRoot').innerHTML='<div class="mback" id="m3iBack" style="position:fixed;inset:0;background:rgba(2,6,16,.7);z-index:60;display:grid;place-items:center;padding:16px">'
+        +'<div class="card" style="max-width:520px;width:100%;max-height:90vh;overflow:auto">'
+        +'<div class="card-h"><div class="t">Convite — '+esc(M3_ROLE[inv.role]||inv.role)+'</div><button class="btn" id="m3iClose" style="height:32px">Fechar</button></div>'
+        +'<div style="text-align:center;margin:14px 0"><div style="font-family:var(--f-mono);font-size:30px;letter-spacing:.12em">'+esc(inv.code)+'</div><div style="font-size:11.5px;color:var(--ink-3);margin-top:4px">Código do convite (mostrado uma única vez)</div></div>'
+        +'<div class="mono" style="font-size:12px;word-break:break-all;background:var(--bg-2);border:1px solid var(--line);border-radius:10px;padding:10px">'+esc(inv.link)+'</div>'
+        +'<textarea class="inp" id="m3iMsg" style="width:100%;height:190px;margin-top:10px;font-size:12px;font-family:var(--f-mono)" readonly>'+esc(inv.message)+'</textarea>'
+        +'<div style="display:flex;gap:8px;margin-top:10px;flex-wrap:wrap">'
+        +'<button class="btn" id="m3iCopyLink">Copiar link</button><button class="btn" id="m3iCopyCode">Copiar código</button><button class="btn btn-primary" id="m3iCopyMsg">Copiar mensagem</button>'+share+'</div>'
+        +'</div></div>';
+      $('#m3iClose').addEventListener('click',closeModal);
+      $('#m3iBack').addEventListener('click',e=>{ if(e.target.id==='m3iBack') closeModal(); });
+      $('#m3iCopyLink').addEventListener('click',()=>{ clip(inv.link); toast('Link copiado','ok'); });
+      $('#m3iCopyCode').addEventListener('click',()=>{ clip(inv.code); toast('Código copiado','ok'); });
+      $('#m3iCopyMsg').addEventListener('click',()=>{ clip(inv.message); toast('Mensagem copiada','ok'); });
+      const sh=$('#m3iShare'); if(sh) sh.addEventListener('click',()=>{ navigator.share({title:'VERUM OTC — Convite',text:inv.message}).catch(()=>{}); });
+      m3Refresh();
+    }catch(e){ toast(e.message||'Falha ao gerar convite','err'); }
+  }
+  function m3ShowMotivos(list){ const el=$('#m3dMotivos'); if(!el) return; if(!list||!list.length){ el.style.display='none'; return; } el.style.display=''; el.innerHTML='<b>Não foi possível aprovar:</b><br>'+list.map(esc).join('<br>'); }
+  async function m3SaveCfg(){
+    const body={};
+    const a=$('#m3dAmount').value.trim(); if(a) body.amountInBase=a;
+    body.discountBps=Number($('#m3dDiscount').value||'0'); body.commissionBps=Number($('#m3dCommission').value||'0');
+    try{ await pmApi('/v1/portal/mesas/'+m3Sel+'/config',{method:'PATCH',body}); toast('Configuração salva','ok'); m3Refresh(); }
+    catch(e){ toast(e.message,'err'); }
+  }
+  async function m3Approve(){
+    m3ShowMotivos(null);
+    const btn=$('#m3dApprove'); btn.disabled=true; btn.textContent='Validando saldos e aprovando…';
+    try{
+      await pmApi('/v1/portal/mesas/'+m3Sel+'/approve',{method:'POST',body:{}});
+      toast('Operação aprovada — termos congelados','ok'); m3BalAt=0; m3Refresh();
+    }catch(e){
+      const det=(e&&e.details&&e.details.motivos)||null;
+      if(det) m3ShowMotivos(det); else toast(e.message||'Falha na aprovação','err');
+    }finally{ btn.disabled=false; btn.textContent='Aprovar operação'; }
+  }
+  async function m3Sign(){
+    const btn=$('#m3dSign'); btn.disabled=true;
+    try{ await pmApi('/v1/portal/mesas/'+m3Sel+'/deal/sign',{method:'POST',body:{}}); toast('Assinatura registrada','ok'); m3Refresh(); }
+    catch(e){ const det=(e&&e.details&&e.details.motivos)||null; if(det) m3ShowMotivos(det); else toast(e.message,'err'); }
+    finally{ btn.disabled=false; }
+  }
+  function m3Init(){
+    const nb=$('#m3New'); if(nb) nb.addEventListener('click',m3OpenCreate);
+    const cc=$('#m3cCancel'); if(cc) cc.addEventListener('click',()=>{ $('#m3Create').style.display='none'; });
+    const cs=$('#m3cSubmit'); if(cs) cs.addEventListener('click',m3SubmitCreate);
+    const p2=$('#m3cPm2'); if(p2) p2.addEventListener('click',()=>{ p2.classList.toggle('on'); const on=p2.classList.contains('on'); const box=$('#m3cChairs'); const has=box.querySelector('[data-m3-chair="PAYMASTER_2"]'); if(on&&!has) box.insertAdjacentHTML('beforeend',m3cChairRow('PAYMASTER_2')); if(!on&&has) has.remove(); });
+    const sc=$('#m3dSaveCfg'); if(sc) sc.addEventListener('click',m3SaveCfg);
+    const ap=$('#m3dApprove'); if(ap) ap.addEventListener('click',m3Approve);
+    const sg=$('#m3dSign'); if(sg) sg.addEventListener('click',m3Sign);
+    const cm=$('#m3dCancelMesa'); if(cm) cm.addEventListener('click',async()=>{ const reason=prompt('Motivo do cancelamento:'); if(reason===null) return; try{ await pmApi('/v1/portal/mesas/'+m3Sel+'/cancel',{method:'POST',body:{reason}}); toast('Mesa cancelada','ok'); m3Refresh(); m3LoadList(); }catch(e){ toast(e.message,'err'); } });
+    const os=$('#m3OpsSearch'); if(os) os.addEventListener('input',()=>m3LoadList());
+    const of=$('#m3OpsFilter'); if(of) of.addEventListener('change',()=>m3LoadList());
+    m3LoadList(); setInterval(m3LoadList,15000);
+  }
+
+  /* ================= MODO PARTICIPANTE (mesa v3) ================= */
+  const P_MESA=(new URLSearchParams(location.search)).get('mesa')||'';
+  let P_TOK='';
+  (function(){ try{ const m=/[#&]pt=([^&]+)/.exec(location.hash); if(m){ P_TOK=decodeURIComponent(m[1]); try{ sessionStorage.setItem('verum_mesa_pt_'+P_MESA,P_TOK); }catch(e){} history.replaceState(null,'',location.pathname+location.search); } if(!P_TOK&&P_MESA){ try{ P_TOK=sessionStorage.getItem('verum_mesa_pt_'+P_MESA)||''; }catch(e){} } }catch(e){} })();
+  const P_ON=!!(P_MESA&&P_TOK);
+  async function pApi(path,opts){
+    opts=opts||{}; const headers={'accept':'application/json','authorization':'Bearer '+P_TOK};
+    if(opts.body!==undefined) headers['content-type']='application/json';
+    if(opts.idem) headers['idempotency-key']=opts.idem;
+    const res=await fetch(API+path,{method:opts.method||'GET',headers,body:opts.body!==undefined?JSON.stringify(opts.body):undefined});
+    let data=null; try{ data=await res.json(); }catch(e){}
+    if(!res.ok){ const e=new Error((data&&(data.message||data.error))||('Erro '+res.status)); e.status=res.status; e.code=data&&data.error; throw e; }
+    return data;
+  }
+  let pDto=null, pBalAt=0, pBal=null;
+  function pBadgePart(c){
+    if(!c.connected) return '<span class="badge wait">Aguardando conexão</span>';
+    const d=pDto&&pDto.deal;
+    if(d&&(d.signed||[]).includes(c.role)) return '<span class="badge ok">✓ Assinado</span>';
+    if(d&&d.state==='AWAITING_SIGNATURES'&&d.turnRole===c.role) return '<span class="badge wait">→ '+(c.isMe?'Sua vez':'Vez de assinar')+'</span>';
+    return '<span class="badge ok">✓ Conectado</span>';
+  }
+  function pRender(){
+    const m=pDto; if(!m) return;
+    $('#pCode').textContent='Mesa '+m.code;
+    $('#pStatus').outerHTML='<span id="pStatus">'+m3Badge(m.status)+'</span>';
+    const me=m.viewer||{};
+    $('#pMeCard').innerHTML='<div class="card-h"><div class="t">Você — '+esc(me.roleLabel||'')+'</div><span class="badge ok">✓ Verum Wallet conectada · ✓ Posse confirmada</span></div>'
+      +'<div style="font-size:13.5px;color:var(--ink-2)">'+esc(me.firstName||'')+' · <span class="mono">'+esc(me.wallet||'')+'</span> · Ativo: '+esc(me.asset||'')+'</div>';
+    const balByRole={}; ((pBal&&pBal.chairs)||[]).forEach(b=>{ balByRole[b.role]=b; });
+    $('#pChairs').innerHTML=(m.chairs||[]).map(c=>{
+      const b=balByRole[c.role];
+      const gas=b?(b.gasOk==null?'':(b.gasOk?' · Gás ✓':' · Gás ✗')):'';
+      const asset=b&&b.assetOk!=null?(b.assetOk?' · '+esc(c.asset)+' ✓':' · '+esc(c.asset)+' ✗'):'';
+      return '<div class="op-part'+(c.isMe?' me':'')+'"><div class="nm">'+esc(c.roleLabel)+(c.isMe?' (você)':'')+'</div>'
+        +'<div style="font-size:12.5px;color:var(--ink-2)">'+esc(c.firstName||'—')+(c.wallet?' · <span class="mono">'+esc(c.wallet)+'</span>':'')+'</div>'
+        +'<div style="font-size:12px;color:var(--ink-3)">Ativo: '+esc(c.asset)+gas+asset+'</div>'
+        +'<div style="margin-top:6px">'+pBadgePart(c)+'</div></div>';
+    }).join('');
+    const cfg=m.config;
+    $('#pSummary').innerHTML = cfg
+      ? '<div class="r"><span class="k">Quantidade (unid. base)</span><span class="v mono">'+esc(cfg.amountInBase||'—')+'</span></div>'
+        +'<div class="r"><span class="k">Deságio</span><span class="v">'+(cfg.discountBps/100).toLocaleString('pt-BR')+'%</span></div>'
+        +'<div class="r"><span class="k">Comissão</span><span class="v">'+(cfg.commissionBps/100).toLocaleString('pt-BR')+'%</span></div>'
+        +'<div class="r"><span class="k">Taxa da plataforma</span><span class="v">0,03%</span></div>'
+      : '<div class="r"><span class="k">Configuração</span><span class="v" style="color:var(--ink-3)">Aguardando o Pay Master</span></div>';
+    const d=m.deal;
+    $('#pSigCount').textContent=d?((d.validSignatures||0)+'/'+(d.requiredSignatures||0)):'0/0';
+    $('#pSigns').innerHTML=d?('Ordem: Vendedor → Pay Master 1'+((m.chairs||[]).some(c=>c.role==='PAYMASTER_2')?' → Pay Master 2':'')+' → Comprador'
+      +(d.turnRole?('<br>Vez atual: <b>'+esc(M3_ROLE[d.turnRole]||d.turnRole)+'</b>'):'')) : 'A coleta de assinaturas começa após a aprovação do Pay Master.';
+    const myTurn=d&&d.state==='AWAITING_SIGNATURES'&&d.turnRole===me.role&&!(d.signed||[]).includes(me.role);
+    $('#pSignBtn').style.display=myTurn?'':'none';
+  }
+  function pTick(){
+    const m=pDto; if(!m) return;
+    $('#pTtl').textContent='Mesa: '+fmtCountdown(m.expiresAt).replace(' restantes','');
+    const tt=$('#pTurnTtl'); const d=m.deal;
+    if(d&&d.turnExpiresAt&&d.state==='AWAITING_SIGNATURES'){ tt.style.display=''; tt.textContent='Assinaturas: '+fmtCountdown(d.turnExpiresAt).replace(' restantes',''); }
+    else tt.style.display='none';
+  }
+  async function pRefresh(){
+    try{
+      pDto=await pApi('/v1/mesas/'+encodeURIComponent(P_MESA));
+      if(Date.now()-pBalAt>15000){ pBalAt=Date.now(); pApi('/v1/mesas/'+encodeURIComponent(P_MESA)+'/balances').then(b=>{ pBal=b; pRender(); }).catch(()=>{}); }
+      pRender(); pTick();
+    }catch(e){ if(e.status===401||e.status===403){ $('#pMeCard').innerHTML='<p style="color:#fecaca">Sessão expirada. Abra o link do convite novamente.</p>'; } }
+  }
+  function pReview(){
+    const m=pDto, me=m.viewer||{}, d=m.deal; if(!d) return;
+    $('#modalRoot').innerHTML='<div id="pRvBack" style="position:fixed;inset:0;background:rgba(2,6,16,.75);z-index:70;display:grid;place-items:center;padding:16px">'
+      +'<div class="card" style="max-width:480px;width:100%">'
+      +'<div class="card-h"><div class="t">Revisar e assinar</div><button class="btn" id="pRvClose" style="height:32px">Fechar</button></div>'
+      +'<div class="kv">'
+      +'<div class="r"><span class="k">Mesa</span><span class="v mono">'+esc(m.code)+'</span></div>'
+      +'<div class="r"><span class="k">Participante</span><span class="v">'+esc((me.firstName||'')+' · '+(me.roleLabel||''))+'</span></div>'
+      +'<div class="r"><span class="k">Quantidade</span><span class="v mono">'+esc((m.config&&m.config.amountInBase)||'—')+'</span></div>'
+      +'<div class="r"><span class="k">Rede</span><span class="v">'+esc(m.networkLabel||m.network)+'</span></div>'
+      +'<div class="r"><span class="k">Operação</span><span class="v mono">'+esc(d.id)+'</span></div>'
+      +'</div>'
+      +'<p style="font-size:12.5px;color:var(--amber);margin:12px 0">Revise cuidadosamente os dados antes de assinar.</p>'
+      +'<button class="btn btn-primary btn-block" id="pRvSign" style="height:50px">Assinar e continuar</button>'
+      +'</div></div>';
+    $('#pRvClose').addEventListener('click',closeModal);
+    $('#pRvBack').addEventListener('click',e=>{ if(e.target.id==='pRvBack') closeModal(); });
+    $('#pRvSign').addEventListener('click',pSign);
+  }
+  async function pSign(){
+    const btn=$('#pRvSign'); if(btn){ btn.disabled=true; btn.textContent='Assinando na Verum Wallet…'; }
+    try{
+      const d=pDto.deal;
+      const env=await pApi('/v1/deals/'+encodeURIComponent(d.id)+'/approval-envelope');
+      const prov=solProvider();
+      if(!prov) throw new Error('Abra esta mesa dentro da Verum Wallet para assinar.');
+      try{ await prov.connect(); }catch(e){}
+      const signature=await solSignMessage(prov,env.message);
+      await pApi('/v1/deals/'+encodeURIComponent(d.id)+'/approvals',{method:'POST',idem:'mesa-sign-'+d.id+'-'+(pDto.viewer&&pDto.viewer.role),body:{ role:pDto.viewer.role, signature, nonce:env.payload.nonce }});
+      closeModal(); toast('Assinatura registrada ✓','ok'); pRefresh();
+    }catch(e){ toast(e.message||'Falha ao assinar','err'); if(btn){ btn.disabled=false; btn.textContent='Assinar e continuar'; } }
+  }
+  function pInit(){
+    document.getElementById('pMode').style.display='';
+    document.body.style.overflow='auto';
+    $('#pSignBtn').addEventListener('click',pReview);
+    pRefresh(); setInterval(pRefresh,5000); setInterval(pTick,1000);
+  }
+
   /* ---------- init ---------- */
+  if(P_ON){
+    // Participante: tela própria somente leitura — nada do portal é carregado.
+    pInit();
+    return;
+  }
   opInit();
   cfgInit();
   loadNetCatalog();
   // Guard de auth: sem login/cadastro (token) → vai direto pro cadastro do portal.
   if(!getTok()){ goToRegister(); }
-  else { integratePortal(); mesaInit(); securityInit(); }
+  else { integratePortal(); mesaInit(); securityInit(); m3Init(); }
 })();
 </script>
 </body>

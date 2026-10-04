@@ -36,6 +36,9 @@ import { readNativeBalance } from '../chains/balances.js';
 import { readTokenBalances } from '../chains/tokenBalances.js';
 import { stablecoinNetworks } from '../chains/tokens.js';
 import { getIconMap } from '../chains/icons.js';
+import type { MesaService, AuthNetwork } from '../mesa/mesaService.js';
+import { validateChairBalances, defaultBalanceReaders, type BalanceReaders } from '../mesa/balances.js';
+import type { MesaChair } from '../mesa/types.js';
 
 const MAX_STREAMS_PER_SESSION = 8; const streams = new Map<string, number>();
 
@@ -46,7 +49,7 @@ export interface DevDemo { keyring: import('../portal/demo.js').DemoMesaKeyring;
 /** Modo EVM dev: contrato real (Sepolia/anvil), keyring de EOAs dev e mint dos tokens mock. */
 export interface DevEvmKeyring { addressFor(owner: string): string; accountByAddress(address: string): import('viem/accounts').PrivateKeyAccount | null }
 export interface DevEvm { chainId: string; escrow: string; tbtc: `0x${string}`; tusdt: `0x${string}`; explorerBase: string | null; keyring: DevEvmKeyring; mintToken: (token: `0x${string}`, to: string, amount: bigint) => Promise<void> }
-export interface ApiDeps { deals: DealEngine; settlement: SettlementEngine; price: PriceEngine; liquidity: LiquidityEngine; router: RouterEngine; registry: AssetRegistry; adapters?: AdapterRegistry; platformFeeBps: number; networkCostUsd: (n: Network) => Promise<string>; auth: WalletAuth; portal: PortalService; identity: IdentityService; identityDev?: { email: FakeEmailChannel; sms: FakeSmsChannel }; rooms: RoomService; proposals: ProposalService; store: Store; audit: AuditLog; mesaHtmlPath?: string; portalHtmlPath?: string; conviteHtmlPath?: string; env: string; rateLimit?: { windowMs: number; max: number }; dev?: DevMint }
+export interface ApiDeps { deals: DealEngine; settlement: SettlementEngine; price: PriceEngine; liquidity: LiquidityEngine; router: RouterEngine; registry: AssetRegistry; adapters?: AdapterRegistry; platformFeeBps: number; networkCostUsd: (n: Network) => Promise<string>; auth: WalletAuth; portal: PortalService; identity: IdentityService; identityDev?: { email: FakeEmailChannel; sms: FakeSmsChannel }; rooms: RoomService; proposals: ProposalService; mesa: MesaService; balanceReaders?: BalanceReaders; store: Store; audit: AuditLog; mesaHtmlPath?: string; portalHtmlPath?: string; conviteHtmlPath?: string; env: string; rateLimit?: { windowMs: number; max: number }; dev?: DevMint }
 declare module 'fastify' { interface FastifyRequest { session: Session | null } }
 
 const NetworkZ = z.enum(['bitcoin', 'ethereum', 'solana', 'zcash', 'tron']); const RoleZ = z.enum(['SELLER', 'BUYER', 'PAYMASTER_1', 'PAYMASTER_2']);
@@ -82,7 +85,7 @@ export async function buildApi(deps: ApiDeps): Promise<FastifyInstance> {
   });
   // Persistência do portal no serverless: hidrata o estado do backend (postgres) por request de
   // portal (vê escritas de outras instâncias) e, após mutações, persiste antes de responder.
-  const isPortalPath = (u: string): boolean => u.startsWith('/v1/portal');
+  const isPortalPath = (u: string): boolean => u.startsWith('/v1/portal') || u.startsWith('/v1/mesas') || u.startsWith('/v1/mesa-invites');
   app.addHook('onRequest', async req => { if (isPortalPath(req.routeOptions.url ?? req.url)) await deps.portal.hydrate(); });
   app.addHook('onSend', async (req, _reply, payload) => { const m = req.method; if ((m === 'POST' || m === 'PUT' || m === 'PATCH') && isPortalPath(req.routeOptions.url ?? req.url)) await deps.portal.flush(); return payload; });
   app.addHook('onResponse', async (req, reply) => { const route = req.routeOptions.url ?? 'unmatched'; metrics.httpRequests.inc({ route, status: String(reply.statusCode) }); metrics.httpSeconds.observe({ route }, reply.elapsedTime / 1000); if (reply.statusCode >= 500) logger.error({ rid: reply.getHeader('x-request-id'), route, status: reply.statusCode }, 'http 5xx'); });
@@ -330,12 +333,12 @@ export async function buildApi(deps: ApiDeps): Promise<FastifyInstance> {
       settlement: rec ? { status: rec.status, legs: rec.legs.map(l => ({ index: l.index, label: legLabel(l.index), txRef: l.txRef, step: l.step, confirmations: l.confirmations })) } : null
     };
   };
-  app.post('/v1/portal/mesa/deal', async (req, reply) => {
-    const token = portalToken(req);
+  /** Corpo aceito na criação da operação da mesa (legada e v3). */
+  const MesaDealBodyZ = z.object({ amountInBase: z.string().regex(/^[1-9][0-9]*$/).optional(), discountBps: z.coerce.number().int().min(0).max(2000).default(300), commissionBps: z.coerce.number().int().min(0).max(5000).default(200), commissionSplitBps: z.array(z.number().int().min(0)).max(2).default([]), maxSlippageBps: z.coerce.number().int().min(1).max(1000).default(50), expiresInSec: z.coerce.number().int().min(900).max(10 * 86400).default(4 * 48 * 3600), twoFactorCode: z.string().max(12).optional() });
+  type MesaDealBody = z.infer<typeof MesaDealBodyZ>;
+  /** Criação da Deal a partir dos participantes da mesa (fatorada: usada pela mesa legada e pelo approve v3). */
+  const createMesaDealForParts = async (parts: { role: Role; address: string }[], b: MesaDealBody, onCreated: (dealId: string) => void) => {
     if (!deps.dev) throw new DomainError('SETTLEMENT_NOT_ALLOWED', 'Criação de operação da mesa está disponível apenas em ambiente de desenvolvimento');
-    const b = parse(z.object({ amountInBase: z.string().regex(/^[1-9][0-9]*$/).optional(), discountBps: z.coerce.number().int().min(0).max(2000).default(300), commissionBps: z.coerce.number().int().min(0).max(5000).default(200), commissionSplitBps: z.array(z.number().int().min(0)).max(2).default([]), maxSlippageBps: z.coerce.number().int().min(1).max(1000).default(50), expiresInSec: z.coerce.number().int().min(900).max(10 * 86400).default(4 * 48 * 3600), twoFactorCode: z.string().max(12).optional() }), req.body ?? {});
-    deps.portal.require2FA(token, b.twoFactorCode); // 2FA (se ativo) exigido para assinar operações
-    const parts = deps.portal.mesaParticipants(token);
     const seller = parts.find(p => p.role === 'SELLER'); if (!seller) throw new DomainError('INVALID_INPUT', 'Mesa sem Vendedor');
     // ── Modo EVM: deal REAL no VerumOtcEscrow (Sepolia/anvil). Vendedor entrega tUSDT (leg 0 → Comprador);
     // Comprador paga tBTC (leg 1 → Vendedor). EOAs dev derivadas por dono do slot; depósitos on-chain de verdade.
@@ -352,9 +355,9 @@ export async function buildApi(deps: ApiDeps): Promise<FastifyInstance> {
       for (const p of evmParts) await deps.deals.connectWallet(created.id, p.role, p.address, p.address); // último connect congela termos + register() on-chain
       await deps.deals.open(created.id, sellerEvm.address);
       try { await deps.deals.fund(created.id, 'SELLER', sellerEvm.address); if (buyerEvm) await deps.deals.fund(created.id, 'BUYER', buyerEvm.address); } catch (e) { logger.warn({ dealId: created.id, err: (e as Error).message }, 'auto-funding EVM dev falhou'); }
-      deps.portal.setMesaDeal(token, created.id);
+      onCreated(created.id);
       await deps.audit.append({ actorType: 'user', actorId: sellerEvm.address, category: 'portal.mesa.deal.created', dealId: created.id, payload: { participants: parts.length, mode: 'evm', chainId: ev.chainId } });
-      void reply.code(201); return mesaDealView(await deps.deals.get(created.id));
+      return mesaDealView(await deps.deals.get(created.id));
     }
     const chainId = deps.dev.solanaChainId;
     const usdc = deps.registry.list().find(a => a.code === 'USDC' && a.network === 'solana'); if (!usdc) throw new DomainError('ASSET_NOT_CANONICAL', 'USDC (Solana) ausente no registro');
@@ -368,9 +371,17 @@ export async function buildApi(deps: ApiDeps): Promise<FastifyInstance> {
     const opened = await deps.deals.open(created.id, seller.address); // → AWAITING_SIGNATURES (turno do Vendedor)
     // Financiamento automático (dev) p/ liberar as assinaturas — em prod cada depositante financia pela própria carteira.
     try { await deps.deals.fund(created.id, 'SELLER', seller.address); if (buyer) await deps.deals.fund(created.id, 'BUYER', buyer.address); } catch (e) { logger.warn({ dealId: created.id, err: (e as Error).message }, 'auto-funding dev falhou'); }
-    deps.portal.setMesaDeal(token, created.id);
+    onCreated(created.id);
     await deps.audit.append({ actorType: 'user', actorId: seller.address, category: 'portal.mesa.deal.created', dealId: created.id, payload: { participants: parts.length } });
-    void reply.code(201); return mesaDealView(opened);
+    return mesaDealView(opened);
+  };
+  app.post('/v1/portal/mesa/deal', async (req, reply) => {
+    const token = portalToken(req);
+    const b = parse(MesaDealBodyZ, req.body ?? {});
+    deps.portal.require2FA(token, b.twoFactorCode); // 2FA (se ativo) exigido para assinar operações
+    const parts = deps.portal.mesaParticipants(token);
+    const view = await createMesaDealForParts(parts, b, id => deps.portal.setMesaDeal(token, id));
+    void reply.code(201); return view;
   });
   app.get('/v1/portal/mesa/deal', async req => {
     const id = deps.portal.getMesaDeal(portalToken(req)); if (!id) return { deal: null };
@@ -386,13 +397,10 @@ export async function buildApi(deps: ApiDeps): Promise<FastifyInstance> {
   });
   // Assinatura da vez pela mesa (modo EVM dev): o backend assina o digest EIP-712 do turno atual com a
   // EOA dev do papel — todas as validações do Deal Engine (ordem, turno 5 min, nonce, cripto) permanecem.
-  app.post('/v1/portal/mesa/deal/sign', async req => {
-    const token = portalToken(req);
+  /** Assinatura do turno atual pela mesa (fatorada: mesa legada e mesa v3). */
+  const signTurnOfDeal = async (id: string) => {
     const ev = deps.dev?.evm; const demo = deps.dev?.demo;
     if (!ev && !demo) throw new DomainError('SETTLEMENT_NOT_ALLOWED', 'Assinatura pela mesa disponível apenas nos modos EVM/demo (dev)');
-    const b = parse(z.object({ twoFactorCode: z.string().max(12).optional() }), req.body ?? {});
-    deps.portal.require2FA(token, b.twoFactorCode);
-    const id = deps.portal.getMesaDeal(token); if (!id) throw new DomainError('INVALID_INPUT', 'Nenhuma operação ativa na mesa');
     const d = await deps.deals.get(id);
     const role = d.turnRole; if (!role) throw new DomainError('SETTLEMENT_NOT_ALLOWED', 'Nenhum turno de assinatura em aberto');
     const p = d.participants.find(x => x.role === role); if (!p) throw new DomainError('NOT_PARTICIPANT', 'papel da vez sem participante');
@@ -430,6 +438,13 @@ export async function buildApi(deps: ApiDeps): Promise<FastifyInstance> {
       out = await deps.deals.get(id).catch(() => out);
     }
     return mesaDealView(out);
+  };
+  app.post('/v1/portal/mesa/deal/sign', async req => {
+    const token = portalToken(req);
+    const b = parse(z.object({ twoFactorCode: z.string().max(12).optional() }), req.body ?? {});
+    deps.portal.require2FA(token, b.twoFactorCode);
+    const id = deps.portal.getMesaDeal(token); if (!id) throw new DomainError('INVALID_INPUT', 'Nenhuma operação ativa na mesa');
+    return signTurnOfDeal(id);
   });
   // Histórico da mesa: todas as operações já criadas (mais recentes primeiro) + qual está ativa na esteira.
   app.get('/v1/portal/mesa/deals', async req => {
@@ -473,6 +488,184 @@ export async function buildApi(deps: ApiDeps): Promise<FastifyInstance> {
   // PM autenticado revoga um convite.
   app.post('/v1/portal/mesa/invites/revoke', async req => { const b = parse(z.object({ role: MesaRoleZ.optional(), inviteToken: z.string().max(200).optional() }), req.body); deps.portal.revokeInvite(portalToken(req), b); return { ok: true }; });
 
+  /* ---------- Mesas multi-instância (v3): cadeiras + convites por cadeira + prova de posse ---------- */
+  const ChairRoleZ = z.enum(['SELLER', 'BUYER', 'PAYMASTER_1', 'PAYMASTER_2']);
+  const AuthNetZ = z.enum(['ethereum', 'solana', 'tron', 'bitcoin']);
+  const ChairAssetZ = z.object({ network: z.string().min(2).max(40), contractOrMint: z.string().max(120).nullable().default(null), decimals: z.number().int().min(0).max(30), symbol: z.string().min(1).max(20) });
+  const readers = deps.balanceReaders ?? defaultBalanceReaders();
+  /** Mesa do admin autenticado (lança FORBIDDEN quando não é o dono). */
+  const adminMesa = (req: FastifyRequest, mesaId: string, activity = true) => {
+    const pm = deps.portal.requirePayMaster(portalToken(req), activity);
+    const mesa = deps.mesa.mesaById(mesaId);
+    if (!mesa || mesa.payMasterId !== pm.id) throw new DomainError('FORBIDDEN', 'Mesa não encontrada para este Pay Master');
+    return { pm, mesa };
+  };
+  /** Quantidade exigida (unidades humanas) por cadeira — Vendedor deposita o volume configurado. */
+  const requiredOfChair = (mesa: { config?: { amountInBase?: string } }) => (chair: MesaChair): number | null => {
+    if (chair.role !== 'SELLER' || !mesa.config?.amountInBase) return null;
+    return Number(BigInt(mesa.config.amountInBase)) / 10 ** chair.expectedAsset.decimals;
+  };
+  /** Mesa 100% demo (carteiras do keyring) → saldos canned, sem RPC. */
+  const isDemoMesa = (mesa: { chairs: MesaChair[] }): boolean => {
+    const demo = deps.dev?.demo; if (!demo) return false;
+    const connected = mesa.chairs.filter(c => c.wallet);
+    return connected.length > 0 && connected.every(c => demo.addresses.has(c.wallet!.address));
+  };
+  const mesaBalances = async (mesa: Parameters<typeof requiredOfChair>[0] & { chairs: MesaChair[] }) => {
+    if (isDemoMesa(mesa)) return { ok: true as const, checkedAt: deps.mesa.nowMs(), chairs: [], failures: [] as string[], demo: true };
+    return validateChairBalances(mesa as Parameters<typeof validateChairBalances>[0], readers, deps.mesa.nowMs(), requiredOfChair(mesa));
+  };
+
+  // Relógio do servidor — autoridade única dos timers do frontend.
+  app.get('/v1/time', async () => ({ time: deps.mesa.nowMs() }));
+
+  // --- admin (sessão do portal) ---
+  app.post('/v1/portal/mesas', async (req, reply) => {
+    const b = parse(z.object({ label: z.string().max(120).optional(), network: z.string().min(2).max(40), chairs: z.array(z.object({ role: ChairRoleZ, expectedAsset: ChairAssetZ, label: z.string().max(120).optional() })).min(3).max(4) }), req.body);
+    const mesa = deps.mesa.createMesa(portalToken(req), b);
+    void reply.code(201);
+    return deps.mesa.mesaViewFor(mesa, { kind: 'admin' });
+  });
+  app.get('/v1/portal/mesas', async req => ({ mesas: await deps.mesa.listMesas(portalToken(req)) }));
+  app.get('/v1/portal/mesas/:mesaId', async req => {
+    const { mesaId } = req.params as { mesaId: string };
+    const { mesa } = adminMesa(req, mesaId, false);
+    return deps.mesa.mesaViewFor(mesa, { kind: 'admin' });
+  });
+  app.post('/v1/portal/mesas/:mesaId/chairs/:chairId/invite', async (req, reply) => {
+    const { mesaId, chairId } = req.params as { mesaId: string; chairId: string };
+    const inv = await deps.mesa.createChairInvite(portalToken(req), mesaId, chairId);
+    void reply.code(201); return inv;
+  });
+  app.post('/v1/portal/mesas/:mesaId/invites/:inviteId/revoke', async (req) => {
+    const { mesaId, inviteId } = req.params as { mesaId: string; inviteId: string };
+    await deps.mesa.revokeInvite(portalToken(req), mesaId, inviteId);
+    return { ok: true };
+  });
+  app.post('/v1/portal/mesas/:mesaId/chairs/:chairId/revoke', async (req) => {
+    const { mesaId, chairId } = req.params as { mesaId: string; chairId: string };
+    await deps.mesa.revokeChair(portalToken(req), mesaId, chairId);
+    return { ok: true };
+  });
+  app.patch('/v1/portal/mesas/:mesaId/config', async req => {
+    const { mesaId } = req.params as { mesaId: string };
+    const b = parse(z.object({ amountInBase: z.string().regex(/^[1-9][0-9]*$/).optional(), discountBps: z.number().int().min(0).max(2000).optional(), commissionBps: z.number().int().min(0).max(5000).optional(), commissionPayer: z.enum(['SELLER', 'BUYER', 'SPLIT']).optional(), notes: z.string().max(500).optional() }), req.body ?? {});
+    return deps.mesa.updateConfig(portalToken(req), mesaId, b);
+  });
+  app.get('/v1/portal/mesas/:mesaId/balances', async req => {
+    const { mesaId } = req.params as { mesaId: string };
+    const { mesa } = adminMesa(req, mesaId, false);
+    const report = await mesaBalances(mesa);
+    await deps.audit.append({ actorType: 'user', actorId: mesa.payMasterId, category: 'mesa.saldos.revalidados', dealId: null, payload: { mesaId, ok: report.ok, failures: report.failures } });
+    return report;
+  });
+  /**
+   * APROVAR OPERAÇÃO (admin-only): só habilita com cadeiras conectadas + posse confirmada +
+   * saldos/gás revalidados on-chain + mesa no prazo. Qualquer falha → 409 com motivos NOMINAIS.
+   * Ao aprovar: termos congelados (termsHash) e Deal criada pelo serviço existente (quando dev).
+   */
+  app.post('/v1/portal/mesas/:mesaId/approve', async (req, reply) => {
+    const { mesaId } = req.params as { mesaId: string };
+    const token = portalToken(req);
+    const { pm, mesa } = adminMesa(req, mesaId);
+    const b = parse(MesaDealBodyZ, req.body ?? {});
+    deps.portal.require2FA(token, b.twoFactorCode);
+    if (mesa.cancelled) throw new DomainError('VERSION_CONFLICT', 'Mesa cancelada.');
+    if (deps.mesa.nowMs() >= mesa.expiresAt) throw new DomainError('VERSION_CONFLICT', 'Mesa expirada — crie uma nova mesa.');
+    if (mesa.approvedAt) throw new DomainError('VERSION_CONFLICT', 'Operação já aprovada.');
+    const motivos: string[] = [];
+    for (const c of mesa.chairs) if (!c.wallet) motivos.push(`${c.role === 'SELLER' ? 'Vendedor' : c.role === 'BUYER' ? 'Comprador' : c.role === 'PAYMASTER_2' ? 'Pay Master 2' : 'Pay Master 1'}: carteira não conectada`);
+    if (!mesa.config?.amountInBase) motivos.push('Configuração: quantidade da operação não definida');
+    if (!motivos.length) {
+      const report = await mesaBalances(mesa);
+      motivos.push(...report.failures);
+    }
+    if (motivos.length) {
+      await deps.audit.append({ actorType: 'user', actorId: pm.id, category: 'mesa.aprovacao.bloqueada', dealId: null, payload: { mesaId, motivos } });
+      throw new DomainError('VERSION_CONFLICT', 'Não foi possível aprovar a operação', { motivos });
+    }
+    deps.mesa.markApproved(mesa, pm.id);
+    // Deal real criada pelo serviço blockchain existente (participantes = cadeiras da mesa, base Solana).
+    const parts = mesa.chairs.filter(c => c.wallet).map(c => {
+      const w = c.wallet!;
+      const sol = (w.addresses ?? []).find(a => a.network === 'solana')?.address ?? (w.network === 'solana' ? w.address : null);
+      return { role: c.role as Role, address: sol ?? w.address };
+    });
+    const view = await createMesaDealForParts(parts, { ...b, amountInBase: mesa.config?.amountInBase ?? b.amountInBase, discountBps: mesa.config?.discountBps ?? b.discountBps, commissionBps: mesa.config?.commissionBps ?? b.commissionBps }, id => deps.mesa.attachDeal(mesa, id));
+    void reply.code(201);
+    return { approved: true, termsHash: mesa.termsHash, deal: view };
+  });
+  app.post('/v1/portal/mesas/:mesaId/deal/sign', async req => {
+    const { mesaId } = req.params as { mesaId: string };
+    const token = portalToken(req);
+    const b = parse(z.object({ twoFactorCode: z.string().max(12).optional() }), req.body ?? {});
+    deps.portal.require2FA(token, b.twoFactorCode);
+    const { pm, mesa } = adminMesa(req, mesaId);
+    if (!mesa.dealId) throw new DomainError('INVALID_INPUT', 'Nenhuma operação ativa nesta mesa');
+    // Revalidação ON-CHAIN imediatamente antes da assinatura — nunca confiar só em cache/frontend.
+    const report = await mesaBalances(mesa);
+    await deps.audit.append({ actorType: 'user', actorId: pm.id, category: 'mesa.saldos.revalidados', dealId: mesa.dealId, payload: { mesaId, ok: report.ok, failures: report.failures } });
+    if (!report.ok) throw new DomainError('VERSION_CONFLICT', 'Assinatura bloqueada: saldos insuficientes', { motivos: report.failures });
+    return signTurnOfDeal(mesa.dealId);
+  });
+  app.post('/v1/portal/mesas/:mesaId/cancel', async req => {
+    const { mesaId } = req.params as { mesaId: string };
+    const b = parse(z.object({ reason: z.string().max(200).default('') }), req.body ?? {});
+    deps.mesa.cancelMesa(portalToken(req), mesaId, b.reason);
+    return { ok: true };
+  });
+
+  // --- público (página do convite) ---
+  app.get('/v1/mesa-invites/:inviteId', async req => {
+    const { inviteId } = req.params as { inviteId: string };
+    const q = parse(z.object({ c: z.string().max(20).optional() }), req.query ?? {});
+    return deps.mesa.resolveInvite(inviteId, q.c);
+  });
+  app.post('/v1/mesa-invites/:inviteId/challenge', async (req, reply) => {
+    const { inviteId } = req.params as { inviteId: string };
+    const b = parse(z.object({ code: z.string().min(4).max(20), firstName: z.string().min(1).max(60), network: AuthNetZ, address: z.string().min(8).max(120) }), req.body);
+    const r = await deps.mesa.joinChallenge(inviteId, { ...b, network: b.network as AuthNetwork });
+    void reply.code(201); return r;
+  });
+  app.post('/v1/mesa-invites/:inviteId/join', async (req, reply) => {
+    const { inviteId } = req.params as { inviteId: string };
+    const b = parse(z.object({ code: z.string().min(4).max(20), firstName: z.string().min(1).max(60), network: AuthNetZ, address: z.string().min(8).max(120), nonce: z.string().min(8).max(80), signature: z.string().min(20).max(400), addresses: WalletAddressesZ }), req.body);
+    const r = await deps.mesa.joinMesa(inviteId, { ...b, network: b.network as AuthNetwork });
+    void reply.code(201); return r;
+  });
+
+  // --- mesa (admin OU participante; DTO recortado por papel NO BACKEND) ---
+  app.get('/v1/mesas/:mesaId', async req => {
+    const { mesaId } = req.params as { mesaId: string };
+    const mesaClaim = req.session?.mesa;
+    if (mesaClaim && mesaClaim.mesaId === mesaId) {
+      const mesa = deps.mesa.mesaById(mesaId);
+      if (!mesa) throw new DomainError('INVALID_INPUT', 'Mesa não encontrada');
+      return deps.mesa.mesaViewFor(mesa, { kind: 'participant', chairId: mesaClaim.chairId });
+    }
+    const { mesa } = adminMesa(req, mesaId, false);
+    return deps.mesa.mesaViewFor(mesa, { kind: 'admin' });
+  });
+  // Saldos para exibição a todos os participantes (indicadores suficiente/insuficiente).
+  app.get('/v1/mesas/:mesaId/balances', async req => {
+    const { mesaId } = req.params as { mesaId: string };
+    const mesaClaim = req.session?.mesa;
+    if (mesaClaim && mesaClaim.mesaId === mesaId) {
+      const mesa = deps.mesa.mesaById(mesaId);
+      if (!mesa) throw new DomainError('INVALID_INPUT', 'Mesa não encontrada');
+      return mesaBalances(mesa);
+    }
+    const { mesa } = adminMesa(req, mesaId, false);
+    return mesaBalances(mesa);
+  });
+  // Participante tenta editar a configuração → 403 (a edição é exclusiva do admin).
+  app.patch('/v1/mesas/:mesaId/config', async req => {
+    if (req.session?.mesa) throw new DomainError('FORBIDDEN', 'Somente o Pay Master 1 edita a configuração da mesa');
+    const { mesaId } = req.params as { mesaId: string };
+    const b = parse(z.object({ amountInBase: z.string().regex(/^[1-9][0-9]*$/).optional(), discountBps: z.number().int().min(0).max(2000).optional(), commissionBps: z.number().int().min(0).max(5000).optional() }), req.body ?? {});
+    return deps.mesa.updateConfig(portalToken(req), mesaId, b);
+  });
+
   /* ---------- UI (HTML autocontido) ---------- */
   // HTML autocontido servido sem cache: garante que toda alteração de UI apareça no próximo reload (sem hard-refresh manual).
   const sendHtml = (reply: FastifyReply, html: string): FastifyReply => reply.type('text/html; charset=utf-8').header('cache-control', 'no-store, must-revalidate').send(html);
@@ -480,9 +673,9 @@ export async function buildApi(deps: ApiDeps): Promise<FastifyInstance> {
   // (window.verum p/ quando o OTC roda DENTRO do navegador dApp da Verum — via iframe/postMessage).
   const dirOf = (p: string): string => p.replace(/[\\/][^\\/]*$/, '');
   const prepHtml = (path: string): string => injectPwa(readFileSync(path, 'utf8').replace('<meta name="verum-otc-api" content="">', `<meta name="verum-otc-api" content="/">`)).replace('</head>', '<script src="/verum-provider.js"></script></head>');
-  if (deps.mesaHtmlPath) { const mesa = prepHtml(deps.mesaHtmlPath); for (const p of ['/mesa', '/operacao']) app.get(p, async (_req, reply) => sendHtml(reply, mesa)); }
+  if (deps.mesaHtmlPath) { const mesa = prepHtml(deps.mesaHtmlPath); for (const p of ['/mesa', '/operacao', '/operacoes', '/abrir-mesa']) app.get(p, async (_req, reply) => sendHtml(reply, mesa)); }
   if (deps.portalHtmlPath) { const portalHtml = prepHtml(deps.portalHtmlPath); for (const p of ['/portal', '/cadastro', '/login']) app.get(p, async (_req, reply) => sendHtml(reply, portalHtml)); }
-  if (deps.conviteHtmlPath) { const convite = prepHtml(deps.conviteHtmlPath); for (const p of ['/convite', '/convite/:token', '/invite', '/invite/:token']) app.get(p, async (_req, reply) => sendHtml(reply, convite)); }
+  if (deps.conviteHtmlPath) { const convite = prepHtml(deps.conviteHtmlPath); for (const p of ['/convite', '/convite/:token', '/invite', '/invite/:token', '/otc/convite/:token']) app.get(p, async (_req, reply) => sendHtml(reply, convite)); }
   // Provider da Verum (window.verum) — só ativa quando embutido no iframe do navegador dApp da Verum.
   // Same-origin (CSP script-src 'self'). Lido do mesmo diretório dos HTML.
   const webDir = deps.mesaHtmlPath ? dirOf(deps.mesaHtmlPath) : deps.portalHtmlPath ? dirOf(deps.portalHtmlPath) : deps.conviteHtmlPath ? dirOf(deps.conviteHtmlPath) : null;

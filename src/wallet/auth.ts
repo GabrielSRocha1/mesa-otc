@@ -11,7 +11,11 @@ import type { Store } from '../db/repository.js';
 import type { AdapterRegistry } from '../adapters/types.js';
 import { verifyBitcoin, verifySolana, verifyTron } from '../engines/signature.js';
 
-export interface Session { sub: string; network: Network; chainId: string; address: string; keyScheme: KeyScheme; role: 'participant' | 'operator'; iat: number; exp: number }
+export interface Session {
+  sub: string; network: Network; chainId: string; address: string; keyScheme: KeyScheme; role: 'participant' | 'operator'; iat: number; exp: number;
+  /** Sessão de PARTICIPANTE de mesa (v3): emitida após convite válido + challenge assinado. */
+  mesa?: { mesaId: string; chairId: string; role: 'SELLER' | 'BUYER' | 'PAYMASTER_1' | 'PAYMASTER_2'; firstName: string };
+}
 export interface Challenge { message: string; nonce: string; expiresAt: number }
 
 const b64u = (s: string | Buffer): string => Buffer.from(s).toString('base64url');

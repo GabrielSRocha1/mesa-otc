@@ -7,6 +7,8 @@ import { scryptSync, randomBytes, randomUUID, timingSafeEqual } from 'node:crypt
 import { readFileSync, writeFileSync, mkdirSync, existsSync } from 'node:fs';
 import path from 'node:path';
 import { DomainError } from '../domain/errors.js';
+import { TABLE_TTL_MS, INVITE_TTL_MS } from '../domain/constants.js';
+import type { MesaRecord } from '../mesa/types.js';
 import { generateTotpSecret, verifyTotp, otpauthUri } from './totp.js';
 
 /** Endereço público da carteira numa rede (chainKey da Verum). */
@@ -40,8 +42,8 @@ export type MesaRole = 'SELLER' | 'BUYER' | 'PAYMASTER_2';
 /** Convite por papel: link portador que permite ao dono conectar a própria carteira sem login do PM. */
 export interface MesaInvite { token: string; payMasterId: string; role: MesaRole; network: string; label?: string; status: 'pending' | 'confirmed'; wallet: WalletLink | null; createdAt: number; expiresAt: number }
 
-export interface PortalData { seq: number; payMasters: Record<string, PayMaster>; sessions: Record<string, PortalSession>; codes: Record<string, MesaCode>; invites: Record<string, MesaInvite> }
-export function emptyPortalData(): PortalData { return { seq: 0, payMasters: {}, sessions: {}, codes: {}, invites: {} }; }
+export interface PortalData { seq: number; payMasters: Record<string, PayMaster>; sessions: Record<string, PortalSession>; codes: Record<string, MesaCode>; invites: Record<string, MesaInvite>; mesas: Record<string, MesaRecord> }
+export function emptyPortalData(): PortalData { return { seq: 0, payMasters: {}, sessions: {}, codes: {}, invites: {}, mesas: {} }; }
 
 /**
  * Backend de persistência do portal. `file` (dev, síncrono) ou `postgres` (Supabase). No serverless
@@ -69,7 +71,8 @@ export interface MesaSlot { role: SlotRole; status: 'empty' | 'pending' | 'confi
 export interface MesaView { payMaster: SafePayMaster; slots: MesaSlot[] }
 export interface ResolvedInvite { payMaster: SafePayMaster; role: MesaRole; network: string; label?: string; status: MesaInvite['status'] | 'expired' }
 
-const HOUR = 3600_000;
+const HOUR = 3600_000; // sessões longas do portal
+// Mesa e convite vivem pelos parâmetros canônicos (TABLE_TTL_MS / INVITE_TTL_MS).
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
 export class PortalService {
@@ -87,7 +90,7 @@ export class PortalService {
   async hydrate(): Promise<void> {
     if (!this.persistence) return;
     const d = await this.persistence.hydrate();
-    if (d) this.data = { seq: d.seq ?? 0, payMasters: d.payMasters ?? {}, sessions: d.sessions ?? {}, codes: d.codes ?? {}, invites: d.invites ?? {} };
+    if (d) this.data = { seq: d.seq ?? 0, payMasters: d.payMasters ?? {}, sessions: d.sessions ?? {}, codes: d.codes ?? {}, invites: d.invites ?? {}, mesas: d.mesas ?? {} };
   }
   /** Aguarda a última escrita pendente ser persistida (usado após mutações no serverless). */
   async flush(): Promise<void> { if (this.persistence) await this.persistence.flush(); }
@@ -97,7 +100,7 @@ export class PortalService {
     try {
       if (file && existsSync(file)) {
         const raw = JSON.parse(readFileSync(file, 'utf8')) as Partial<PortalData>;
-        return { seq: raw.seq ?? 0, payMasters: raw.payMasters ?? {}, sessions: raw.sessions ?? {}, codes: raw.codes ?? {}, invites: raw.invites ?? {} };
+        return { seq: raw.seq ?? 0, payMasters: raw.payMasters ?? {}, sessions: raw.sessions ?? {}, codes: raw.codes ?? {}, invites: raw.invites ?? {}, mesas: raw.mesas ?? {} };
       }
     } catch { /* arquivo corrompido/ausente → começa vazio */ }
     return emptyPortalData();
@@ -199,8 +202,8 @@ export class PortalService {
     return pm.wallet;
   }
 
-  /** Higieniza e deduplica os endereços multichain; marca multichain se >1 rede. */
-  private walletLink(address: string, network: string, addresses?: WalletAddress[]): WalletLink {
+  /** Higieniza e deduplica os endereços multichain; marca multichain se >1 rede. Público: reutilizado pelo MesaService. */
+  walletLink(address: string, network: string, addresses?: WalletAddress[]): WalletLink {
     const seen = new Set<string>();
     const clean: WalletAddress[] = [];
     for (const e of addresses ?? []) {
@@ -366,13 +369,37 @@ export class PortalService {
     for (const [k, c] of Object.entries(this.data.codes)) if (c.payMasterId === pm.id) delete this.data.codes[k];
     const now = this.now();
     const uid = String(++this.data.seq).padStart(6, '0');
-    const seg = (n: number): string => Math.abs(Math.floor(n)).toString(36).toUpperCase().padStart(4, '0').slice(-4);
     let code: string;
-    do { code = `MESA-${seg(this.data.seq + 100000)}-${seg(randomBytes(3).readUIntBE(0, 3))}-${seg(randomBytes(3).readUIntBE(0, 3))}`; } while (this.data.codes[code]);
-    const rec: MesaCode = { code, uid, payMasterId: pm.id, createdAt: now, expiresAt: now + HOUR };
+    do { code = this.makeMesaCode(); } while (this.data.codes[code]);
+    const rec: MesaCode = { code, uid, payMasterId: pm.id, createdAt: now, expiresAt: now + TABLE_TTL_MS };
     this.data.codes[code] = rec;
     this.write();
     return this.publicCode(rec);
+  }
+
+  /** Gerador EXISTENTE do código de mesa (MESA-XXXX-XXXX-XXXX) — fatorado p/ reuso pelas mesas v3. */
+  private makeMesaCode(): string {
+    const seg = (n: number): string => Math.abs(Math.floor(n)).toString(36).toUpperCase().padStart(4, '0').slice(-4);
+    return `MESA-${seg(this.data.seq + 100000)}-${seg(randomBytes(3).readUIntBE(0, 3))}-${seg(randomBytes(3).readUIntBE(0, 3))}`;
+  }
+
+  /* ---------- Mesas multi-instância (v3) — armazenamento no PortalData; lógica no MesaService ---------- */
+  /** Pay Master da sessão (lança se sessão inválida). `activity=false` para leituras de polling. */
+  requirePayMaster(token: string | undefined, activity = true): PayMaster {
+    const s = this.session(token, activity);
+    return this.pm(s.payMasterId);
+  }
+  /** Mapa mutável das mesas (hidratação tolerante p/ documentos antigos). */
+  mesas(): Record<string, MesaRecord> { this.data.mesas ??= {}; return this.data.mesas; }
+  /** Persiste após mutação de mesa (mesma durabilidade serverless do restante do portal). */
+  persistMesas(): void { this.write(); }
+  /** Código único de mesa v3 (mesmo gerador; unicidade contra codes e mesas). */
+  newMesaCode(): string {
+    this.data.seq += 1;
+    let code: string;
+    const taken = (c: string): boolean => !!this.data.codes[c] || Object.values(this.mesas()).some(m => m.code === c);
+    do { code = this.makeMesaCode(); } while (taken(code));
+    return code;
   }
 
   private validCode(payMasterId: string): PublicCode | null {
@@ -415,7 +442,7 @@ export class PortalService {
     for (const [k, inv] of Object.entries(this.data.invites)) if (inv.payMasterId === pm.id && inv.role === input.role) delete this.data.invites[k];
     const now = this.now();
     const inviteToken = randomBytes(24).toString('base64url');
-    const rec: MesaInvite = { token: inviteToken, payMasterId: pm.id, role: input.role, network: input.network, label: input.label?.trim() || undefined, status: 'pending', wallet: null, createdAt: now, expiresAt: now + HOUR };
+    const rec: MesaInvite = { token: inviteToken, payMasterId: pm.id, role: input.role, network: input.network, label: input.label?.trim() || undefined, status: 'pending', wallet: null, createdAt: now, expiresAt: now + INVITE_TTL_MS };
     this.data.invites[inviteToken] = rec;
     this.write();
     return this.publicInvite(rec);

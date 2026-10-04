@@ -307,7 +307,82 @@ h1{font-size:22px;margin-bottom:8px}
     }).catch(()=>{ const el=$('#pf'); if(el) el.textContent='Não foi possível ler os saldos agora.'; });
   }
 
+  /* ================= CONVITE v3 (mesa multi-instância): /otc/convite/<inviteId>?c=<código> ================= */
+  const V3=(function(){ const m=location.pathname.match(/\/otc\/convite\/([^/?#]+)/); if(!m) return null; return { inviteId:decodeURIComponent(m[1]), code:(new URLSearchParams(location.search)).get('c')||'' }; })();
+  let v3Info=null;
+  // Verum-only: aceita SOMENTE o provider oficial da Verum Wallet (window.verum, injetado pelo
+  // dapp-browser/extensão). User-agent nunca é prova. Sem Verum → tela de bloqueio.
+  function verumProvider(){ const w=window; if(w.verum) return w.verum; if(w.solana&&w.solana.isVerum) return w.solana; return null; }
+  function v3Countdown(exp){ let off=0; return ()=> { const ms=Math.max(0,exp-(Date.now()+off)); const h=Math.floor(ms/3600000),m=Math.floor(ms%3600000/60000),s=Math.floor(ms%60000/1000); return (h?(('0'+h).slice(-2)+':'):'')+('0'+m).slice(-2)+':'+('0'+s).slice(-2); }; }
+  function v3Blocked(){
+    renderState('err','Abra na Verum Wallet','Este convite deve ser aberto na Verum Wallet. Esta mesa aceita somente conexões pela Verum Wallet.',
+      '<button class="btn btn-primary" id="v3Open" style="margin-top:16px">Abrir na Verum Wallet</button>'
+      +'<a class="btn" href="https://www.verumcrypto.com/wallet" target="_blank" rel="noopener" style="margin-top:10px;text-decoration:none">Baixar Verum Wallet</a>');
+    const b=$('#v3Open'); if(b) b.addEventListener('click',openInVerumBrowser);
+  }
+  function v3Render(){
+    const i=v3Info;
+    if(i.status==='EXPIRED'){ return renderState('err','Convite expirado','Peça ao Pay Master um novo convite.'); }
+    if(i.status==='REVOKED'){ return renderState('err','Convite revogado','Peça ao Pay Master um novo convite.'); }
+    if(i.status==='USED'){ return renderState('err','Convite já utilizado','Este convite já foi usado. Se foi você, abra a mesa pelo link que recebeu após conectar.'); }
+    const tick=v3Countdown(i.expiresAt);
+    const r=ROLE[i.role]||{label:i.roleLabel||i.role,cls:'',ico:''};
+    const needCode=!i.codeValid;
+    $('#body').innerHTML=
+      '<span class="eyebrow"><svg viewBox="0 0 24 24"><rect x="5" y="11" width="14" height="9" rx="2"/><path d="M8 11V8a4 4 0 018 0v3"/></svg>Convite para mesa</span>'
+      +'<h1>VERUM OTC · Convite para mesa</h1>'
+      +'<p class="sub">Mesa <b>'+esc(i.mesaCode)+'</b> · Função <b>'+esc(i.roleLabel)+'</b> · Ativo <b>'+esc(i.asset)+'</b> ('+esc(i.networkLabel)+') · Expira em <span class="mono" id="v3Cd">'+tick()+'</span></p>'
+      +'<div class="role-box"><div class="ri '+r.cls+'"><svg viewBox="0 0 24 24">'+r.ico+'</svg></div><div><div class="rl">Sua função</div><div class="rn">'+esc(i.roleLabel)+'</div><div class="rnet">Rede: '+esc(i.networkLabel)+'</div></div></div>'
+      +(needCode?'<div style="margin-bottom:14px"><div style="font-size:12px;color:var(--ink-3);margin-bottom:6px">Código do convite</div><input id="v3Code" maxlength="9" placeholder="XXXX-XXXX" style="width:100%;height:48px;background:var(--bg-2);border:1px solid var(--line);border-radius:12px;color:var(--ink);font-family:var(--f-mono);font-size:18px;letter-spacing:.14em;text-align:center;text-transform:uppercase"></div>':'')
+      +'<div style="margin-bottom:14px"><div style="font-size:12px;color:var(--ink-3);margin-bottom:6px">Seu primeiro nome</div><input id="v3Name" maxlength="30" placeholder="Como quer ser identificado na mesa" style="width:100%;height:48px;background:var(--bg-2);border:1px solid var(--line);border-radius:12px;color:var(--ink);font-size:15px;padding:0 14px"></div>'
+      +'<button class="btn btn-primary" id="v3Connect"><svg viewBox="0 0 24 24"><rect x="3" y="6" width="18" height="13" rx="2"/><path d="M16 12h2M3 10h18"/></svg>Conectar Verum Wallet</button>'
+      +'<div class="note"><svg viewBox="0 0 24 24"><path d="M12 3l7 3v5c0 5-3 8-7 10-4-2-7-5-7-10V6z"/><path d="M9 12l2 2 4-4"/></svg><span>Esta mesa aceita conexão somente pela Verum Wallet. Assinar a autorização apenas prova que você controla a carteira — não movimenta fundos.</span></div>';
+    const cd=$('#v3Cd'); if(cd) setInterval(()=>{ cd.textContent=tick(); },1000);
+    $('#v3Connect').addEventListener('click',v3Connect);
+  }
+  function v3Busy(on,label){ const b=$('#v3Connect'); if(!b) return; b.disabled=on; b.innerHTML=on?'<span class="spin"></span>'+(label||'Aguarde…'):'Conectar Verum Wallet'; }
+  async function v3Connect(){
+    const code=($('#v3Code')?$('#v3Code').value.trim():'')||V3.code;
+    if(!code){ toast('Digite o código do convite','err'); return; }
+    const name=($('#v3Name')&&$('#v3Name').value.trim())||'';
+    if(name.length<2||name.length>30){ toast('Informe seu primeiro nome (2 a 30 caracteres)','err'); return; }
+    // Celular sem provider injetado → abre ESTE convite dentro do navegador da Verum (síncrono no clique).
+    if(!verumProvider()){ if(IS_MOBILE){ toast('Abrindo na Verum Wallet…'); openInVerumBrowser(); return; } v3Blocked(); return; }
+    try{
+      v3Busy(true,'Conectando Verum Wallet…');
+      const prov=verumProvider();
+      const r=await prov.connect();
+      const pk=(r&&r.publicKey)?r.publicKey:prov.publicKey;
+      if(!pk) throw new Error('Não foi possível ler o endereço da Verum Wallet');
+      const address=pk.toString();
+      v3Busy(true,'Gerando autorização…');
+      const ch=await api('/v1/mesa-invites/'+encodeURIComponent(V3.inviteId)+'/challenge',{method:'POST',body:{code,firstName:name,network:'solana',address}});
+      // O texto do desafio é exibido INTEGRALMENTE pela própria Verum Wallet ao pedir a assinatura.
+      v3Busy(true,'Assine na Verum Wallet…');
+      const sigRaw=await prov.signMessage(new TextEncoder().encode(ch.message),'utf8');
+      const sig=(sigRaw&&sigRaw.signature)?sigRaw.signature:sigRaw;
+      const signature=typeof sig==='string'?sig:bs58encode(sig);
+      v3Busy(true,'Confirmando posse…');
+      const addresses=await collectVerumAddresses();
+      const join=await api('/v1/mesa-invites/'+encodeURIComponent(V3.inviteId)+'/join',{method:'POST',body:{code,firstName:name,network:'solana',address,nonce:ch.nonce,signature,addresses}});
+      renderState('ok','Você entrou na mesa!','Conexão autorizada como '+esc(v3Info.roleLabel)+'. Redirecionando para a mesa…');
+      setTimeout(()=>{ window.location.href='/mesa?mesa='+encodeURIComponent(join.mesaId)+'#pt='+encodeURIComponent(join.token); },900);
+    }catch(ex){
+      v3Busy(false);
+      toast(ex.message||'Falha na conexão','err');
+    }
+  }
+
   (async function init(){
+    if(V3){
+      try{ v3Info=await api('/v1/mesa-invites/'+encodeURIComponent(V3.inviteId)+(V3.code?('?c='+encodeURIComponent(V3.code)):'')); }
+      catch(ex){ renderState('err','Convite inválido ou expirado',ex.message||'Este convite não existe ou expirou.'); return; }
+      // Fora da Verum Wallet (navegador comum/extensões de terceiros): bloqueio com instruções.
+      // No mobile a navegação ao dapp-browser acontece no CLIQUE (síncrona) — mostramos o form.
+      if(!verumProvider() && !IS_MOBILE){ v3Blocked(); return; }
+      v3Render();
+      return;
+    }
     if(!token){ render(); return; }
     try{ invite=await api('/v1/portal/mesa/invites/'+encodeURIComponent(token)); render(); }
     catch(ex){ renderState('err','Convite não encontrado',ex.message||'Este convite não existe ou expirou.'); }

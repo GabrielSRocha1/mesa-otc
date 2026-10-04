@@ -1,6 +1,6 @@
 import type { AuditEvent, Deal, DealEvent, RiskEvent, SettlementRecord, SignatureRecord } from '../domain/types.js';
 import { DomainError } from '../domain/errors.js';
-import type { NonceRow, Store } from './repository.js';
+import type { MesaInviteRow, NonceRow, Store } from './repository.js';
 
 const clone = <T>(v: T): T => structuredClone(v);
 
@@ -42,6 +42,21 @@ export class MemoryStore implements Store {
   async consumeNonce(value: string, at: number): Promise<boolean> { const n = this.nonces.get(value); if (!n || n.consumedAt !== null) return false; n.consumedAt = at; return true; }
   async findOpenNonce(dealId: string, revision: number, role: string, now: number): Promise<NonceRow | null> { let best: NonceRow | null = null; for (const n of this.nonces.values()) if (n.kind === 'approval' && n.dealId === dealId && n.revision === revision && n.role === role && n.consumedAt === null && n.expiresAt > now && (!best || n.issuedAt > best.issuedAt)) best = n; return best ? { ...best } : null; }
   async purge(now: number, idempotencyTtlMs: number): Promise<{ nonces: number; idempotency: number }> { let nonces = 0, idempotency = 0; for (const [k, n] of this.nonces) if (n.expiresAt <= now) { this.nonces.delete(k); nonces++; } for (const [k, v] of this.idemAt) if (v <= now - idempotencyTtlMs) { this.idem.delete(k); this.idemAt.delete(k); idempotency++; } return { nonces, idempotency }; }
+  private mesaInvites = new Map<string, MesaInviteRow>();
+  async insertMesaInvite(r: MesaInviteRow): Promise<void> {
+    if (this.mesaInvites.has(r.inviteId)) throw new DomainError('VERSION_CONFLICT', 'convite já existe');
+    if (r.status === 'PENDING' && [...this.mesaInvites.values()].some(i => i.mesaId === r.mesaId && i.chairId === r.chairId && i.status === 'PENDING')) throw new DomainError('VERSION_CONFLICT', 'cadeira já tem convite pendente');
+    this.mesaInvites.set(r.inviteId, { ...r });
+  }
+  async getMesaInvite(inviteId: string): Promise<MesaInviteRow | null> { const r = this.mesaInvites.get(inviteId); return r ? { ...r } : null; }
+  async listMesaInvites(mesaId: string): Promise<MesaInviteRow[]> { return [...this.mesaInvites.values()].filter(i => i.mesaId === mesaId).sort((a, b) => a.createdAt - b.createdAt).map(i => ({ ...i })); }
+  async consumeMesaInvite(inviteId: string, usedBy: { address: string; name: string }, at: number): Promise<boolean> {
+    const r = this.mesaInvites.get(inviteId);
+    if (!r || r.status !== 'PENDING' || r.expiresAt <= at) return false;
+    r.status = 'USED'; r.usedByAddress = usedBy.address; r.usedByName = usedBy.name; r.usedAt = at;
+    return true;
+  }
+  async revokeMesaInvite(inviteId: string, mesaId: string): Promise<boolean> { const r = this.mesaInvites.get(inviteId); if (!r || r.mesaId !== mesaId || r.status !== 'PENDING') return false; r.status = 'REVOKED'; return true; }
   async insertSettlement(s: SettlementRecord): Promise<boolean> { if (this.settlements.has(s.dealId)) return false; this.settlements.set(s.dealId, clone(s)); return true; }
   async updateSettlement(s: SettlementRecord): Promise<void> { this.settlements.set(s.dealId, clone(s)); }
   async getSettlement(dealId: string): Promise<SettlementRecord | null> { const s = this.settlements.get(dealId); return s ? clone(s) : null; }

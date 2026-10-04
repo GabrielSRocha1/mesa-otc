@@ -6,6 +6,15 @@ import type { AuditEvent, Deal, DealEvent, RiskEvent, SettlementRecord, Signatur
 
 export interface NonceRow { value: string; kind: 'challenge' | 'approval'; dealId: string | null; revision: number | null; role: string | null; subject: string | null; issuedAt: number; expiresAt: number; consumedAt: number | null }
 
+/** Convite por cadeira da mesa (v3). O código XXXX-XXXX nunca é armazenado em claro (hash + prefixo). */
+export interface MesaInviteRow {
+  inviteId: string; mesaId: string; chairId: string;
+  codeHash: string; codePrefix: string;
+  status: 'PENDING' | 'USED' | 'REVOKED';
+  usedByAddress: string | null; usedByName: string | null; usedAt: number | null;
+  createdAt: number; expiresAt: number;
+}
+
 export interface Store {
   init(): Promise<void>;
   insertDeal(deal: Deal): Promise<void>;
@@ -37,6 +46,13 @@ export interface Store {
   appendAudit(a: AuditEvent): Promise<void>;
   lastAudit(): Promise<AuditEvent | null>;
   listAudit(limit?: number): Promise<AuditEvent[]>;
+  insertMesaInvite(r: MesaInviteRow): Promise<void>;
+  getMesaInvite(inviteId: string): Promise<MesaInviteRow | null>;
+  listMesaInvites(mesaId: string): Promise<MesaInviteRow[]>;
+  /** Consumo ATÔMICO: UPDATE … WHERE status='PENDING' AND expires_at > now RETURNING — exatamente uma tentativa vence. */
+  consumeMesaInvite(inviteId: string, usedBy: { address: string; name: string }, at: number): Promise<boolean>;
+  /** Revoga um convite ainda pendente (ação administrativa explícita). */
+  revokeMesaInvite(inviteId: string, mesaId: string): Promise<boolean>;
   getIdempotent(key: string, actorId: string): Promise<{ requestHash: string; response: unknown } | null>;
   putIdempotent(key: string, actorId: string, requestHash: string, response: unknown, at: number): Promise<void>;
   close(): Promise<void>;

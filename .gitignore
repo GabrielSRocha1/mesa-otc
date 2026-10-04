@@ -12,3 +12,6 @@ cache/
 .env.*.local
 .claude/
 *.local.json
+
+.vercel
+.env*
