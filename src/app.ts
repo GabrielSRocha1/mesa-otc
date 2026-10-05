@@ -10,6 +10,7 @@ import { createLocalAdapters, LocalChainAdapter } from './adapters/local.js';
 import { verumEvmConfig, solanaConfig, tronConfig, bitcoinConfig } from './config.js';
 import { BitcoinChainAdapter } from './adapters/bitcoin.js';
 import { VerumEvmAdapter } from './adapters/verum/evm.js';
+import { VerumEvmV2Adapter } from './adapters/verum/evmV2.js';
 import { VerumSolanaAdapter } from './adapters/verum/solana.js';
 import { VerumTronAdapter } from './adapters/verum/tron.js';
 import { VerumEvmDevKeyring, TronDevKeyring } from './adapters/verum/keyring.js';
@@ -97,8 +98,14 @@ export async function createApp(config: Config, o: AppOverrides = {}): Promise<A
     local.tron = tronLocal; adapters.register(tronLocal);
     if (verumEvmCfg) {
       verumEvmKeyring = config.OTC_ENV === 'prod' ? undefined : new VerumEvmDevKeyring(config.identityMasterSecret);
-      verumEvm = new VerumEvmAdapter(verumEvmCfg, verumEvmKeyring ?? null, dealDeps); adapters.register(verumEvm);
-      logger.info({ chainId: verumEvmCfg.chainId, escrow: verumEvmCfg.escrow }, 'modo VERUM_EVM ativo: escrow canônico VerumOTCEscrowEVM');
+      if (verumEvmCfg.escrowV2) {
+        // Escrow V2 (ADR-v4): cadeiras 2–4 + perna HTLC — substitui o V1 na rede EVM.
+        adapters.register(new VerumEvmV2Adapter(verumEvmCfg, verumEvmKeyring ?? null, dealDeps));
+        logger.info({ chainId: verumEvmCfg.chainId, escrowV2: verumEvmCfg.escrowV2 }, 'modo VERUM_EVM_V2 ativo: escrow VerumOTCEscrowV2EVM (2–4 cadeiras + HTLC)');
+      } else {
+        verumEvm = new VerumEvmAdapter(verumEvmCfg, verumEvmKeyring ?? null, dealDeps); adapters.register(verumEvm);
+        logger.info({ chainId: verumEvmCfg.chainId, escrow: verumEvmCfg.escrow }, 'modo VERUM_EVM ativo: escrow canônico VerumOTCEscrowEVM');
+      }
     }
     if (solCfg) {
       verumSolana = new VerumSolanaAdapter(solCfg, addr => demoKeyringRef?.secretKeyByAddress(addr) ?? null, dealDeps); adapters.register(verumSolana);

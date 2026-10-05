@@ -65,5 +65,6 @@ copyTs("packages/router/src/types.ts", "router/types.ts", 1);
 for (const f of ["evm.ts", "tron.ts", "solana.ts"]) copyTs(`packages/router/src/adapters/${f}`, `router/adapters/${f}`, 2);
 jsonToTs("packages/router/src/abi/VerumOTCEscrow.abi.json", "router/abi/verumOtcEscrowEvm.ts");
 jsonToTs("packages/router/src/abi/VerumOTCEscrowTron.abi.json", "router/abi/verumOtcEscrowTron.ts");
+jsonToTs("packages/router/src/abi/VerumOTCEscrowV2.abi.json", "router/abi/verumOtcEscrowV2.ts");
 
 console.log(`src/onchain sincronizado a partir de ${SRC}`);
