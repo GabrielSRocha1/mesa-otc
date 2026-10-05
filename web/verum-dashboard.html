@@ -897,11 +897,7 @@ img,svg,canvas,video{max-width:100%}
       <section class="card" id="m3Create" style="display:none;margin-bottom:16px">
         <div class="card-h"><div class="t">Nova mesa · Passo 1 de 4 — Mesa e cadeiras</div><span class="badge info">Validade: 60 minutos</span></div>
         <div class="form-row"><div class="fl">Rótulo (opcional)</div><input class="inp" id="m3cLabel" maxlength="120" placeholder="Ex.: Mesa BTC — cliente institucional"></div>
-        <div class="form-row"><div><div class="fl">Rede principal</div><div class="fh">Rede padrão das pernas — cada lado pode trocar a sua no passo 2 (bridge/HTLC cuidam do resto)</div></div>
-          <select class="inp" id="m3cNet" style="max-width:230px">
-            <option value="solana">Solana</option><option value="ethereum">Ethereum</option><option value="tron">Tron</option><option value="bsc">BNB Smart Chain</option><option value="polygon">Polygon</option><option value="base">Base</option><option value="arbitrum">Arbitrum One</option>
-          </select>
-        </div>
+        <!-- "Rede principal" saiu (v4): a rede é escolhida POR LADO no passo 2; bridge/HTLC cuidam do resto. -->
         <div class="form-row"><div><div class="fl">Cadeiras</div><div class="fh">Bilateral (2), com Pay Master (3) ou dois Pay Masters (4) — escrow dinâmico</div></div>
           <select class="inp" id="m3cMode" style="max-width:260px">
             <option value="4" selected>4 — Vendedor, Comprador, PM 1 e 2</option>
@@ -2284,14 +2280,14 @@ img,svg,canvas,video{max-width:100%}
     $('#m3cSellNet').innerHTML=nets; $('#m3cBuyNet').innerHTML=nets;
     await Promise.all([m3LoadTokensSide('sell',net),m3LoadTokensSide('buy',net)]);
     if(m3TokLists.buy.length>1) $('#m3cBuyTok').value='1'; // sugere par distinto
-    $('#m3s2Net').textContent=($('#m3cNet').selectedOptions[0]||{}).textContent||net;
+    $('#m3s2Net').textContent='rede por lado';
     m3PlanHint();
   }
   // Token efetivo por lado: dropdown do registro ou campos manuais do modo avançado.
   function m3TokenOf(side){
     const adv=$('#m3cAdv').style.display!=='none';
     const a=k=>{ const el=document.querySelector('[data-m3adv="'+k+'"]'); return el?el.value.trim():''; };
-    const net=$(side==='sell'?'#m3cSellNet':'#m3cBuyNet').value||$('#m3cNet').value;
+    const net=$(side==='sell'?'#m3cSellNet':'#m3cBuyNet').value||'solana';
     if(adv&&a(side+'Contract')){ return { network:net, symbol:(a(side+'Sym')||'TOKEN').toUpperCase(), contractOrMint:a(side+'Contract'), decimals:Number(a(side+'Dec')||'18'), representationOf:null }; }
     const sel=$(side==='sell'?'#m3cSellTok':'#m3cBuyTok'); const t=m3TokLists[side][Number(sel.value)];
     return t?{network:net,symbol:t.symbol,contractOrMint:t.contractOrMint,decimals:t.decimals,representationOf:t.representationOf}:null;
@@ -2329,9 +2325,10 @@ img,svg,canvas,video{max-width:100%}
   }
   // Dados consolidados do wizard (validados a cada transição de passo).
   function m3WizardData(){
-    const net=$('#m3cNet').value;
     const sell=m3TokenOf('sell'), buy=m3TokenOf('buy');
     if(!sell||!buy) return { err:'Escolha rede e token do Vendedor e do Comprador (ou preencha o modo avançado).' };
+    // Rede derivada (v4): gás/âncora dos PMs fica no lado de CONTRATO (BTC nativo não hospeda PM).
+    const net=(sell.network==='bitcoin')?buy.network:sell.network;
     if(sell.network===buy.network&&(sell.contractOrMint||'')===(buy.contractOrMint||'')&&sell.symbol===buy.symbol) return { err:'Os ativos do Vendedor e do Comprador devem ser diferentes.' };
     const amountInBase=humanToBase($('#m3cSellAmt').value,sell.decimals);
     const buyerAmountInBase=humanToBase($('#m3cBuyAmt').value,buy.decimals);
@@ -2360,7 +2357,7 @@ img,svg,canvas,video{max-width:100%}
     const payerTxt={SELLER:'Vendedor',BUYER:'Comprador',SPLIT:'Dividido 50/50'}[d.commissionPayer];
     const chairsTxt={2:'2 — Bilateral (Vendedor e Comprador)',3:'3 — Vendedor, Comprador e Pay Master 1',4:'4 — Vendedor, Comprador, Pay Master 1 e 2'}[d.roles.length];
     $('#m3rSummary').innerHTML=[
-      row('Rede principal',esc(($('#m3cNet').selectedOptions[0]||{}).textContent||d.net)),
+      row('Redes',esc(d.sell.network===d.buy.network?d.sell.network:(d.sell.network+' ↔ '+d.buy.network))),
       row('Cadeiras',chairsTxt),
       row('Liquidação','<span style="color:var(--blue)">'+esc(d.plan.txt)+'</span>'),
       row('Vendedor entrega',esc(d.sell.symbol)+' em '+esc(d.sell.network)+(d.sell.representationOf?' <span style="color:var(--ink-3)">· '+esc(d.sell.representationOf)+'</span>':'')),
@@ -2393,7 +2390,7 @@ img,svg,canvas,video{max-width:100%}
       const cEl=$('#m3Count'); if(cEl) cEl.textContent=String(mesas.length);
       const box=$('#m3List'); if(box){
         box.innerHTML = mesas.length? mesas.map(m=>'<div class="r" style="display:flex;gap:10px;align-items:center;justify-content:space-between;padding:10px 0;border-bottom:1px solid var(--line)">'
-          +'<div><span class="mono" style="font-size:12.5px">'+esc(m.code)+'</span>'+(m.operationCode?' <span class="mono" style="color:var(--blue);font-size:12px">· '+esc(m.operationCode)+'</span>':'')+(m.label?' <span style="color:var(--ink-3);font-size:12px">· '+esc(m.label)+'</span>':'')+'<div style="font-size:12px;color:var(--ink-3)">'+m.chairs.map(c=>esc((M3_ROLE[c.role]||c.role)+(c.firstName?(' · '+c.firstName):''))+(c.connected?' ✓':'')).join(' · ')+'</div></div>'
+          +'<div><span class="mono" style="font-size:12.5px">'+esc(m.code)+'</span>'+(m.operationCode?' <span class="mono" style="color:var(--blue);font-size:12px">· '+esc(m.operationCode)+'</span>':'')+(m.networkLabel?' <span style="color:var(--ink-3);font-size:12px">· '+esc(m.networkLabel)+'</span>':'')+(m.label?' <span style="color:var(--ink-3);font-size:12px">· '+esc(m.label)+'</span>':'')+'<div style="font-size:12px;color:var(--ink-3)">'+m.chairs.map(c=>esc((M3_ROLE[c.role]||c.role)+(c.firstName?(' · '+c.firstName):''))+(c.connected?' ✓':'')).join(' · ')+'</div></div>'
           +'<div style="display:flex;gap:8px;align-items:center">'+m3Badge(m.status)+'<button class="btn" data-m3-open="'+esc(m.mesaId)+'" style="height:34px;font-size:12.5px">Ver mesa</button></div></div>').join('')
           : '<p style="color:var(--ink-3);font-size:12.5px;margin:0">Nenhuma mesa criada ainda. Toque em "Criar mesa".</p>';
         box.querySelectorAll('[data-m3-open]').forEach(b=>b.addEventListener('click',()=>m3Open(b.dataset.m3Open)));
@@ -2546,7 +2543,7 @@ img,svg,canvas,video{max-width:100%}
     const cc=$('#m3cCancel'); if(cc) cc.addEventListener('click',()=>m3Step(0));
     // Navegação do wizard: 1 Mesa → 2 Ativos → 3 Valores/taxas → 4 Revisão.
     const on=(id,fn)=>{ const el=$(id); if(el) el.addEventListener('click',fn); };
-    on('#m3cNext',async()=>{ await m3LoadTokens($('#m3cNet').value); m3Step(2); });
+    on('#m3cNext',async()=>{ await m3LoadTokens($('#m3cSellNet')?.value||'solana'); m3Step(2); });
     on('#m3cBack2',()=>m3Step(1));
     on('#m3cNext2',()=>{ const d=m3WizardData(); if(d.err){ toast(d.err,'err'); return; } m3AmtPreview(); m3Step(3); });
     on('#m3cBack',()=>m3Step(2));

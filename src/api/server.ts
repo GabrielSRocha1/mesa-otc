@@ -560,7 +560,8 @@ export async function buildApi(deps: ApiDeps): Promise<FastifyInstance> {
 
   // --- admin (sessão do portal) ---
   app.post('/v1/portal/mesas', async (req, reply) => {
-    const b = parse(z.object({ label: z.string().max(120).optional(), network: z.string().min(2).max(40), chairs: z.array(z.object({ role: ChairRoleZ, expectedAsset: ChairAssetZ, label: z.string().max(120).optional() })).min(2).max(4) }), req.body);
+    // v4: `network` é opcional — derivada da cadeira do vendedor quando ausente (redes são por perna).
+    const b = parse(z.object({ label: z.string().max(120).optional(), network: z.string().min(2).max(40).optional(), chairs: z.array(z.object({ role: ChairRoleZ, expectedAsset: ChairAssetZ, label: z.string().max(120).optional() })).min(2).max(4) }), req.body);
     const mesa = deps.mesa.createMesa(portalToken(req), b);
     void reply.code(201);
     return deps.mesa.mesaViewFor(mesa, { kind: 'admin' });

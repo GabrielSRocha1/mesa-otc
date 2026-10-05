@@ -62,7 +62,8 @@ export interface MesaServiceDeps {
 }
 
 export interface CreateMesaChairInput { role: MesaChairRole; expectedAsset: ChairAsset; label?: string }
-export interface CreateMesaInput { label?: string; network: string; chairs: CreateMesaChairInput[] }
+/** `network` é opcional (v4): quando ausente, deriva da cadeira do VENDEDOR — quem manda nas pernas são as redes de cada lado. */
+export interface CreateMesaInput { label?: string; network?: string; chairs: CreateMesaChairInput[] }
 
 export class MesaService {
   private readonly now: () => number;
@@ -85,21 +86,34 @@ export class MesaService {
     if (new Set(roles).size !== roles.length) throw new DomainError('INVALID_INPUT', 'Cada função aparece no máximo uma vez');
     for (const r of ['SELLER', 'BUYER'] as MesaChairRole[]) if (!roles.includes(r)) throw new DomainError('INVALID_INPUT', `A mesa precisa da cadeira ${CHAIR_ROLE_LABEL[r]}`);
     if (roles.includes('PAYMASTER_2') && !roles.includes('PAYMASTER_1')) throw new DomainError('INVALID_INPUT', 'Pay Master 2 exige a cadeira Pay Master 1');
-    if (!input.network || typeof input.network !== 'string') throw new DomainError('INVALID_INPUT', 'Rede da mesa obrigatória (uma mesa = uma rede)');
+    // "Rede principal" DERIVADA (v4): rede do lado vendedor (fallback: primeira cadeira). O campo
+    // saiu do wizard — quem decide a liquidação são as redes de CADA perna; este valor sobrevive
+    // só como rótulo/fallback e por compatibilidade (termsHash, convites).
+    const network = input.network || input.chairs.find(c => c.role === 'SELLER')?.expectedAsset.network || input.chairs[0]?.expectedAsset.network;
+    if (!network || typeof network !== 'string') throw new DomainError('INVALID_INPUT', 'Rede da mesa indeterminada — informe a rede de cada lado');
     const t = this.now();
     const chairs: MesaChair[] = input.chairs.map(c => {
       const asset = c.expectedAsset;
       if (!asset || typeof asset.symbol !== 'string' || typeof asset.decimals !== 'number') throw new DomainError('INVALID_INPUT', `Ativo esperado inválido na cadeira ${CHAIR_ROLE_LABEL[c.role]}`);
-      const chair: MesaChair = { chairId: 'ch_' + randomUUID(), role: c.role, expectedAsset: { network: asset.network || input.network, contractOrMint: asset.contractOrMint ?? null, decimals: asset.decimals, symbol: asset.symbol }, label: c.label?.trim() || undefined, wallet: null };
+      const chair: MesaChair = { chairId: 'ch_' + randomUUID(), role: c.role, expectedAsset: { network: asset.network || network, contractOrMint: asset.contractOrMint ?? null, decimals: asset.decimals, symbol: asset.symbol }, label: c.label?.trim() || undefined, wallet: null };
       // A cadeira Pay Master 1 é do próprio admin — já conectada com a wallet dele (quando houver).
       if (c.role === 'PAYMASTER_1' && pm.wallet) { chair.wallet = pm.wallet; chair.firstName = pm.name.split(/\s+/)[0]; chair.connectedAt = t; }
       return chair;
     });
-    const mesa: MesaRecord = { mesaId: 'mesa_' + randomUUID(), payMasterId: pm.id, code: this.d.portal.newMesaCode(), operationCode: `OP-${newInviteCode()}`, label: input.label?.trim() || undefined, network: input.network, chairs, approvals: {}, dealId: null, dealIds: [], createdAt: t, expiresAt: t + TABLE_TTL_MS };
+    const mesa: MesaRecord = { mesaId: 'mesa_' + randomUUID(), payMasterId: pm.id, code: this.d.portal.newMesaCode(), operationCode: `OP-${newInviteCode()}`, label: input.label?.trim() || undefined, network, chairs, approvals: {}, dealId: null, dealIds: [], createdAt: t, expiresAt: t + TABLE_TTL_MS };
     this.d.portal.mesas()[mesa.mesaId] = mesa;
     this.d.portal.persistMesas();
     void this.audit('mesa.criada', pm.id, { mesaId: mesa.mesaId, code: mesa.code, network: mesa.network, chairs: chairs.map(c => ({ chairId: c.chairId, role: c.role })) });
     return mesa;
+  }
+
+  /** Rótulo de redes da mesa (v4): lados na mesma rede → nome dela; redes distintas → "A ↔ B". */
+  networksLabel(mesa: MesaRecord): string {
+    const name = (n?: string) => (n ? getChain(n)?.displayName ?? n : null);
+    const s = name(mesa.chairs.find(c => c.role === 'SELLER')?.expectedAsset.network);
+    const b = name(mesa.chairs.find(c => c.role === 'BUYER')?.expectedAsset.network);
+    if (s && b && s !== b) return `${s} ↔ ${b}`;
+    return s ?? b ?? getChain(mesa.network)?.displayName ?? mesa.network;
   }
 
   /** Mesa do admin (lança FORBIDDEN se não for o dono). */
@@ -111,13 +125,13 @@ export class MesaService {
   /** Mesa por id (participante já autorizado pela sessão). */
   mesaById(mesaId: string): MesaRecord | null { return this.d.portal.mesas()[mesaId] ?? null; }
 
-  async listMesas(portalToken: string | undefined): Promise<{ mesaId: string; code: string; operationCode: string | null; label?: string; network: string; status: MesaStatus; chairs: { role: MesaChairRole; firstName: string | null; connected: boolean }[]; amount: string | null; createdAt: number; expiresAt: number }[]> {
+  async listMesas(portalToken: string | undefined): Promise<{ mesaId: string; code: string; operationCode: string | null; label?: string; network: string; networkLabel: string; status: MesaStatus; chairs: { role: MesaChairRole; firstName: string | null; connected: boolean }[]; amount: string | null; createdAt: number; expiresAt: number }[]> {
     const pm = this.d.portal.requirePayMaster(portalToken, false);
     const mesas = Object.values(this.d.portal.mesas()).filter(m => m.payMasterId === pm.id).sort((a, b) => b.createdAt - a.createdAt);
     const out = [];
     for (const m of mesas) {
       const status = await this.statusOf(m);
-      out.push({ mesaId: m.mesaId, code: m.code, operationCode: m.operationCode ?? null, label: m.label, network: m.network, status, chairs: m.chairs.map(c => ({ role: c.role, firstName: c.firstName ?? null, connected: !!c.wallet })), amount: m.config?.amountInBase ?? null, createdAt: m.createdAt, expiresAt: m.expiresAt });
+      out.push({ mesaId: m.mesaId, code: m.code, operationCode: m.operationCode ?? null, label: m.label, network: m.network, networkLabel: this.networksLabel(m), status, chairs: m.chairs.map(c => ({ role: c.role, firstName: c.firstName ?? null, connected: !!c.wallet })), amount: m.config?.amountInBase ?? null, createdAt: m.createdAt, expiresAt: m.expiresAt });
     }
     return out;
   }
@@ -374,7 +388,7 @@ export class MesaService {
     const deal = mesa.dealId ? await this.d.getDeal(mesa.dealId) : null;
     const status = deriveMesaStatus(mesa, invites, deal, now);
     const base = {
-      mesaId: mesa.mesaId, code: mesa.code, operationCode: mesa.operationCode ?? null, network: mesa.network, networkLabel: getChain(mesa.network)?.displayName ?? mesa.network,
+      mesaId: mesa.mesaId, code: mesa.code, operationCode: mesa.operationCode ?? null, network: mesa.network, networkLabel: this.networksLabel(mesa),
       settlement: deriveSettlementPlan(mesa.chairs),
       status, createdAt: mesa.createdAt, expiresAt: mesa.expiresAt, serverTime: now,
       approvedAt: mesa.approvedAt ?? null, termsHash: mesa.termsHash ?? null,
