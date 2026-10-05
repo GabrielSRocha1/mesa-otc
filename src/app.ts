@@ -42,7 +42,7 @@ import type { Config } from './config.js';
 import type { Deal, Participant, Role } from './domain/types.js';
 import type { ApprovalSignature } from './adapters/types.js';
 
-export interface AppOverrides { autoSettle?: boolean; store?: Store; adapters?: SettlementAdapter[]; priceSources?: PriceSource[]; liquiditySources?: LiquiditySource[]; screening?: WalletScreening; now?: () => number; denylist?: string[]; balanceReaders?: import('./mesa/balances.js').BalanceReaders; btcAddressOf?: (dealId: string, role: Role) => Promise<string | null> }
+export interface AppOverrides { autoSettle?: boolean; store?: Store; adapters?: SettlementAdapter[]; priceSources?: PriceSource[]; liquiditySources?: LiquiditySource[]; screening?: WalletScreening; now?: () => number; denylist?: string[]; balanceReaders?: import('./mesa/balances.js').BalanceReaders; btcAddressOf?: (dealId: string, role: Role) => Promise<string | null>; evmAddressOf?: (dealId: string, role: Role) => Promise<string | null> }
 export interface App { config: Config; store: Store; adapters: AdapterRegistry; local?: { evm: LocalChainAdapter; solana: LocalChainAdapter; bitcoin: LocalChainAdapter; tron?: LocalChainAdapter }; verumEvm?: VerumEvmAdapter; verumSolana?: VerumSolanaAdapter; verumTron?: VerumTronAdapter; verumEvmKeyring?: VerumEvmDevKeyring; tronKeyring?: TronDevKeyring; registry: AssetRegistry; price: PriceEngine; liquidity: LiquidityEngine; router: RouterEngine; signature: SignatureEngine; risk: RiskEngine; audit: AuditLog; deals: DealEngine; settlement: SettlementEngine; auth: WalletAuth; identity: IdentityService; rooms: RoomService; proposals: ProposalService; mesa: import('./mesa/mesaService.js').MesaService; api: Awaited<ReturnType<typeof buildApi>>; sources: { price: StaticPriceSource[]; liquidity: StaticLiquiditySource[] }; startScheduler(): void; stopScheduler(): void; close(): Promise<void> }
 
 export const LOCAL_TOKENS = { usdtEth: '0x0000000000000000000000000000000000000001', usdcEth: '0x0000000000000000000000000000000000000002', usdtSol: 'USDT1111111111111111111111111111111111111111', usdcSol: 'USDC1111111111111111111111111111111111111111', usdtTron: 'TUsdtDemo1111111111111111111111111', btcTron: 'TBtcDemo11111111111111111111111111' };
@@ -100,7 +100,18 @@ export async function createApp(config: Config, o: AppOverrides = {}): Promise<A
       verumEvmKeyring = config.OTC_ENV === 'prod' ? undefined : new VerumEvmDevKeyring(config.identityMasterSecret);
       if (verumEvmCfg.escrowV2) {
         // Escrow V2 (ADR-v4): cadeiras 2–4 + perna HTLC — substitui o V1 na rede EVM.
-        adapters.register(new VerumEvmV2Adapter(verumEvmCfg, verumEvmKeyring ?? null, dealDeps));
+        // Vendedor de BTC nativo (participante na rede bitcoin) precisa de endereço EVM para
+        // RECEBER o token do comprador: resolve pela carteira multichain da cadeira da mesa.
+        const evmAddressOf = o.evmAddressOf ?? (async (dealId: string, role: Role) => {
+          for (const m of Object.values(portalRef?.mesas() ?? {})) {
+            if (m.dealId !== dealId && !m.dealIds.includes(dealId)) continue;
+            const w = m.chairs.find(c => c.role === role)?.wallet;
+            if (!w) return null;
+            return (w.addresses ?? []).find(a => /^0x[0-9a-fA-F]{40}$/.test(a.address))?.address ?? (/^0x[0-9a-fA-F]{40}$/.test(w.address) ? w.address : null);
+          }
+          return null;
+        });
+        adapters.register(new VerumEvmV2Adapter(verumEvmCfg, verumEvmKeyring ?? null, { ...dealDeps, evmAddressOf }));
         logger.info({ chainId: verumEvmCfg.chainId, escrowV2: verumEvmCfg.escrowV2 }, 'modo VERUM_EVM_V2 ativo: escrow VerumOTCEscrowV2EVM (2–4 cadeiras + HTLC)');
       } else {
         verumEvm = new VerumEvmAdapter(verumEvmCfg, verumEvmKeyring ?? null, dealDeps); adapters.register(verumEvm);
@@ -156,6 +167,8 @@ export async function createApp(config: Config, o: AppOverrides = {}): Promise<A
   const prices: Record<string, number> = { ...LOCAL_PRICES };
   if (verumEvmCfg) { prices[`eip155:${verumEvmCfg.chainId}/erc20:${verumEvmCfg.tbtc.toLowerCase()}`] = 64_230.5; prices[`eip155:${verumEvmCfg.chainId}/erc20:${verumEvmCfg.tusdt.toLowerCase()}`] = 1.0002; prices[`eip155:${verumEvmCfg.chainId}/slip44:60`] = 2_418.75; }
   prices[`tron:${tronChainId}/trc20:${tronUsdt}`] = 1.0001; prices[`tron:${tronChainId}/trc20:${tronTbtc}`] = 64_230.5;
+  // BTC nativo na chainId REAL do adapter (testnet/mainnet via BITCOIN_*; o regtest já está em LOCAL_PRICES).
+  prices[`bip122:${adapters.require('bitcoin').chain.chainId}/slip44:0`] = 64_230.5;
   if (solCfg) { const solChainId = adapters.require('solana').chain.chainId; prices[`solana:${solChainId}/token:${solCfg.tusdtMint}`] = 1.0001; prices[`solana:${solChainId}/token:${solCfg.tbtcMint}`] = 64_230.5; }
   const depth: Record<string, number> = Object.fromEntries(Object.keys(prices).map(k => [k, 8_000_000]));
   const priceSources = (o.priceSources as StaticPriceSource[] | undefined) ?? [new StaticPriceSource('Pyth', 1.0, prices), new StaticPriceSource('Chainlink', 1.0, prices), new StaticPriceSource('Coinbase', 0.8, prices), new StaticPriceSource('Kraken', 0.8, prices)];

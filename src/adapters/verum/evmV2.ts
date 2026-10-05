@@ -82,19 +82,28 @@ export function evmLegMapOf(c: DealCommitment): EvmLegMap {
   throw new DomainError('SETTLEMENT_NOT_ALLOWED', 'deal sem leg EVM para o escrow V2');
 }
 
-/** Constrói os TermsV2 on-chain a partir do commitment congelado (papéis presentes, 2–4). */
-export function buildVerumTermsV2(c: DealCommitment, chainNow: number): TermsV2Call {
+/**
+ * Constrói os TermsV2 on-chain a partir do commitment congelado (papéis presentes, 2–4).
+ * `sellerEvm`: endereço EVM do VENDEDOR quando o participante está na rede bitcoin (deal HTLC) —
+ * é nele que o contrato paga o token do comprador no settle.
+ */
+export function buildVerumTermsV2(c: DealCommitment, chainNow: number, sellerEvm?: string | null): TermsV2Call {
   const map = evmLegMapOf(c);
   const order: Role[] = ['SELLER', 'PAYMASTER_1', 'PAYMASTER_2', 'BUYER'];
   const present = order.map(r => c.participants.find(p => p.role === r)).filter(Boolean) as DealCommitment['participants'];
   if (present.length < 2) throw new DomainError('SETTLEMENT_NOT_ALLOWED', 'escrow V2 exige ao menos Vendedor e Comprador');
+  const walletOf = (p: DealCommitment['participants'][number]): Hex => {
+    if (/^0x[0-9a-fA-F]{40}$/.test(p.address)) return p.address as Hex;
+    if (p.role === 'SELLER' && map.external && sellerEvm && /^0x[0-9a-fA-F]{40}$/.test(sellerEvm)) return sellerEvm as Hex;
+    throw new DomainError('SETTLEMENT_NOT_ALLOWED', `participante ${p.role} sem endereço EVM para o escrow V2 (carteira multichain sem conta Ethereum?)`);
+  };
   const legOf = (i: number | null) => (i === null ? null : c.legs.find(l => l.index === i) ?? null);
   const sellerLeg = legOf(map.sellerLegIndex);
   const buyerLeg = legOf(map.buyerLegIndex) as NonNullable<ReturnType<typeof legOf>>;
   const btcLeg = map.external ? c.legs.find(l => l.escrowChain === 'bitcoin') : null;
   const clamp = (n: number) => Math.min(Math.max(0, n), 10000);
   return {
-    participants: present.map(p => ({ wallet: p.address as Hex, role: ROLE_TO_ONCHAIN[p.role] })),
+    participants: present.map(p => ({ wallet: walletOf(p), role: ROLE_TO_ONCHAIN[p.role] })),
     sellerAsset: (sellerLeg?.asset.contractOrMint ?? zeroAddress) as Hex,
     sellerAmount: BigInt((sellerLeg ?? btcLeg)?.amountBase ?? '0'),
     buyerAsset: buyerLeg.asset.contractOrMint as Hex,
@@ -125,7 +134,7 @@ export class VerumEvmV2Adapter implements SettlementAdapter, ParticipantStepProv
   private readonly pub: PublicClient;
   private readonly keeper: PrivateKeyAccount;
   private readonly keeperWallet: WalletClient;
-  constructor(private readonly cfg: VerumEvmSettings, private readonly keyring: VerumEvmDevKeyring | null, private readonly deps: VerumAdapterDeps) {
+  constructor(private readonly cfg: VerumEvmSettings, private readonly keyring: VerumEvmDevKeyring | null, private readonly deps: VerumAdapterDeps & { evmAddressOf?: (dealId: string, role: Role) => Promise<string | null> }) {
     if (!cfg.escrowV2) throw new DomainError('INVALID_INPUT', 'VERUM_EVM_V2_ESCROW_ADDRESS ausente');
     this.escrowV2 = cfg.escrowV2;
     this.chain = { network: 'ethereum', chainId: String(cfg.chainId) };
@@ -212,7 +221,10 @@ export class VerumEvmV2Adapter implements SettlementAdapter, ParticipantStepProv
     }
     try {
       const now = await this.chainNow();
-      const terms = buildVerumTermsV2(c, now);
+      // Vendedor em outra rede (BTC nativo): o endereço EVM de payout vem da carteira multichain.
+      const sellerPart = c.participants.find(p => p.role === 'SELLER');
+      const sellerEvm = sellerPart && /^0x[0-9a-fA-F]{40}$/.test(sellerPart.address) ? sellerPart.address : await this.deps.evmAddressOf?.(c.dealId, 'SELLER') ?? null;
+      const terms = buildVerumTermsV2(c, now, sellerEvm);
       const map = evmLegMapOf(c);
       // Hash pelo PRÓPRIO contrato (função pure) — zero chance de divergência de EIP-712 off-chain.
       const termsHash = await this.view<Hex>('hashTermsV2', [terms]);
@@ -265,11 +277,13 @@ export class VerumEvmV2Adapter implements SettlementAdapter, ParticipantStepProv
       if (state !== StateV2.SIGNING || CANON.indexOf(role) < Number(t.nextIdx)) return null; // já avançou
       const now = await this.chainNow();
       const deadline = Math.min(now + 300, Number(t.expiresAt));
-      const pk = this.keyring?.privateKeyByAddress(sig.signer);
-      if (!pk) throw new DomainError('SETTLEMENT_FAILED', `sem chave dev para ${sig.signer} — fluxo de carteira real usa /v1/deals/:id/onchain-tx`);
+      // Vendedor de BTC nativo: o signatário on-chain é a carteira EVM registrada nos TermsV2.
+      const evmSigner = /^0x[0-9a-fA-F]{40}$/.test(sig.signer) ? sig.signer : role === OnchainRole.SELLER ? t.seller : sig.signer;
+      const pk = this.keyring?.privateKeyByAddress(evmSigner);
+      if (!pk) throw new DomainError('SETTLEMENT_FAILED', `sem chave dev para ${evmSigner} — fluxo de carteira real usa /v1/deals/:id/onchain-tx`);
       const approval = await signApprovalEvm(pk, this.cfg.chainId, this.escrowV2, b.meta.tradeId as Hex, b.meta.termsHash as Hex, role, deadline);
       // SELLER/BUYER precisam ser msg.sender (depositam na assinatura); PMs são relayáveis pelo keeper.
-      const sender = role === OnchainRole.SELLER || role === OnchainRole.BUYER ? this.devAccount(sig.signer) : this.keeper;
+      const sender = role === OnchainRole.SELLER || role === OnchainRole.BUYER ? this.devAccount(evmSigner) : this.keeper;
       if (sender !== this.keeper) await this.ensureGas(sender.address);
       const tx = await this.write('signV2', [b.meta.tradeId as Hex, BigInt(deadline), approval.signature as Hex], sender);
       return this.ref(tx);
