@@ -986,6 +986,7 @@ img,svg,canvas,video{max-width:100%}
             <button class="btn btn-primary btn-block" id="m3dApprove" type="button" style="margin-top:10px">Aprovar operação</button>
             <button class="btn btn-block" id="m3dSign" type="button" style="display:none;margin-top:8px">Assinar a vez da mesa</button>
             <button class="btn btn-block" id="m3dCancelMesa" type="button" style="margin-top:8px;border-color:var(--red);color:#fecaca">Cancelar mesa</button>
+            <div id="m3dIrrev" style="display:none;margin-top:8px;font-size:12px;color:var(--amber);border:1px solid var(--line);border-radius:10px;padding:8px 10px">🔒 Operação irreversível — fundos trancados no escrow. O contrato segue até a extração da preimage (liquidação) ou a expiração do timelock (reembolso automático).</div>
           </div>
         </div>
       </section>
@@ -2459,6 +2460,9 @@ img,svg,canvas,video{max-width:100%}
       $('#m3dSaveCfg').style.display=frozen?'none':'';
       $('#m3dApprove').style.display=frozen?'none':'';
       $('#m3dSign').style.display=(m.deal&&m.deal.state==='AWAITING_SIGNATURES')?'':'none';
+      // Trava de irrevogabilidade (backend manda): leg de contrato financiada → sem "Cancelar mesa".
+      const cmBtn=$('#m3dCancelMesa'); if(cmBtn) cmBtn.style.display=(m.canCancel===false)?'none':'';
+      const irrev=$('#m3dIrrev'); if(irrev) irrev.style.display=m.irreversible?'':'none';
       if(m.deal&&m.deal.turnRole) $('#m3dSign').textContent='Assinar a vez ('+(M3_ROLE[m.deal.turnRole]||m.deal.turnRole)+') — '+(m.deal.validSignatures||0)+'/'+(m.deal.requiredSignatures||0);
       m3Tick();
       m3RenderBalances();
@@ -2468,14 +2472,17 @@ img,svg,canvas,video{max-width:100%}
   async function m3RenderBalances(){
     if(!m3Sel||Date.now()-m3BalAt<15000) return; m3BalAt=Date.now();
     try{
-      const r=await pmApi('/v1/portal/mesas/'+encodeURIComponent(m3Sel)+'/balances');
+      const r=await pmApi('/v1/portal/mesas/'+encodeURIComponent(m3Sel)+'/precheck');
       m3Bal=r;
       const box=$('#m3dBalances'); if(!box) return;
       if(r.demo){ box.innerHTML='<div class="r"><span class="k">Saldos</span><span class="v"><span class="badge ok">✓ Demo — suficientes</span></span></div>'; return; }
+      const num=n=>(n==null?'—':Number(n).toLocaleString('pt-BR',{maximumFractionDigits:6}));
       box.innerHTML=(r.chairs||[]).map(c=>{
         const gas=c.gasOk==null?'—':(c.gasOk?'<span class="badge ok">Gás ≥ US$ 5 ✓</span>':'<span class="badge err">Gás insuficiente ✗</span>');
+        // Indicador exigido × disponível da perna (ex.: BTC do Vendedor, USDT do Comprador).
+        const nums=(c.assetRequired!=null)?'<span style="color:var(--ink-3);font-size:11px;margin-right:6px" class="mono">'+num(c.assetAmount)+' / '+num(c.assetRequired)+'</span>':'';
         const asset=c.assetOk==null?'':(c.assetOk?' <span class="badge ok">'+esc(c.assetSymbol)+' ✓</span>':' <span class="badge err">'+esc(c.assetSymbol)+' ✗</span>');
-        return '<div class="r"><span class="k">'+esc(c.roleLabel+(c.firstName?(' ('+c.firstName+')'):''))+'</span><span class="v">'+gas+asset+'</span></div>';
+        return '<div class="r"><span class="k">'+esc(c.roleLabel+(c.firstName?(' ('+c.firstName+')'):''))+'</span><span class="v">'+nums+gas+asset+'</span></div>';
       }).join('')||'<div class="r"><span class="k">Saldos</span><span class="v" style="color:var(--ink-3)">—</span></div>';
     }catch(e){}
   }
@@ -2594,11 +2601,14 @@ img,svg,canvas,video{max-width:100%}
     const balByRole={}; ((pBal&&pBal.chairs)||[]).forEach(b=>{ balByRole[b.role]=b; });
     $('#pChairs').innerHTML=(m.chairs||[]).map(c=>{
       const b=balByRole[c.role];
-      const gas=b?(b.gasOk==null?'':(b.gasOk?' · Gás ✓':' · Gás ✗')):'';
-      const asset=b&&b.assetOk!=null?(b.assetOk?' · '+esc(c.asset)+' ✓':' · '+esc(c.asset)+' ✗'):'';
+      // Exigência do cliente: TODOS na mesa veem se cada perna tem saldo (verde ✓ / vermelho ✗).
+      const num=n=>(n==null?'—':Number(n).toLocaleString('pt-BR',{maximumFractionDigits:6}));
+      const gas=b&&b.gasOk!=null?(' <span class="badge '+(b.gasOk?'ok':'err')+'">Gás '+(b.gasOk?'✓':'✗')+'</span>'):'';
+      const nums=b&&b.assetRequired!=null?(' <span class="mono" style="font-size:11px;color:var(--ink-3)">'+num(b.assetAmount)+' / '+num(b.assetRequired)+'</span>'):'';
+      const asset=b&&b.assetOk!=null?(' <span class="badge '+(b.assetOk?'ok':'err')+'">'+esc(c.asset)+' '+(b.assetOk?'✓':'✗')+'</span>'):'';
       return '<div class="op-part'+(c.isMe?' me':'')+'"><div class="nm">'+esc(c.roleLabel)+(c.isMe?' (você)':'')+'</div>'
         +'<div style="font-size:12.5px;color:var(--ink-2)">'+esc(c.firstName||'—')+(c.wallet?' · <span class="mono">'+esc(c.wallet)+'</span>':'')+'</div>'
-        +'<div style="font-size:12px;color:var(--ink-3)">Ativo: '+esc(c.asset)+gas+asset+'</div>'
+        +'<div style="font-size:12px;color:var(--ink-3)">Ativo: '+esc(c.asset)+nums+gas+asset+'</div>'
         +'<div style="margin-top:6px">'+pBadgePart(c)+'</div></div>';
     }).join('');
     const cfg=m.config;
@@ -2610,8 +2620,9 @@ img,svg,canvas,video{max-width:100%}
       : '<div class="r"><span class="k">Configuração</span><span class="v" style="color:var(--ink-3)">Aguardando o Pay Master</span></div>';
     const d=m.deal;
     $('#pSigCount').textContent=d?((d.validSignatures||0)+'/'+(d.requiredSignatures||0)):'0/0';
-    $('#pSigns').innerHTML=d?('Ordem: Vendedor → Pay Master 1'+((m.chairs||[]).some(c=>c.role==='PAYMASTER_2')?' → Pay Master 2':'')+' → Comprador'
-      +(d.turnRole?('<br>Vez atual: <b>'+esc(M3_ROLE[d.turnRole]||d.turnRole)+'</b>'):'')) : 'A coleta de assinaturas começa após a aprovação do Pay Master.';
+    $('#pSigns').innerHTML=(d?('Ordem: Vendedor → Pay Master 1'+((m.chairs||[]).some(c=>c.role==='PAYMASTER_2')?' → Pay Master 2':'')+' → Comprador'
+      +(d.turnRole?('<br>Vez atual: <b>'+esc(M3_ROLE[d.turnRole]||d.turnRole)+'</b>'):'')) : 'A coleta de assinaturas começa após a aprovação do Pay Master.')
+      +(m.irreversible?'<br><span style="color:var(--amber)">🔒 Operação irreversível — fundos trancados; o contrato roda até a liquidação (preimage) ou o reembolso após o timelock.</span>':'');
     const myTurn=d&&d.state==='AWAITING_SIGNATURES'&&d.turnRole===me.role&&!(d.signed||[]).includes(me.role);
     $('#pSignBtn').style.display=myTurn?'':'none';
   }
@@ -2625,7 +2636,7 @@ img,svg,canvas,video{max-width:100%}
   async function pRefresh(){
     try{
       pDto=await pApi('/v1/mesas/'+encodeURIComponent(P_MESA));
-      if(Date.now()-pBalAt>15000){ pBalAt=Date.now(); pApi('/v1/mesas/'+encodeURIComponent(P_MESA)+'/balances').then(b=>{ pBal=b; pRender(); }).catch(()=>{}); }
+      if(Date.now()-pBalAt>15000){ pBalAt=Date.now(); pApi('/v1/mesas/'+encodeURIComponent(P_MESA)+'/precheck').then(b=>{ pBal=b; pRender(); }).catch(()=>{}); }
       pRender(); pTick();
     }catch(e){ if(e.status===401||e.status===403){ $('#pMeCard').innerHTML='<p style="color:#fecaca">Sessão expirada. Abra o link do convite novamente.</p>'; } }
   }

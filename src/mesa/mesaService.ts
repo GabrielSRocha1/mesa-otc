@@ -339,10 +339,26 @@ export class MesaService {
     this.d.portal.persistMesas();
   }
 
-  cancelMesa(portalToken: string | undefined, mesaId: string, reason: string): void {
+  /**
+   * Trava de irrevogabilidade: assim que a leg de CONTRATO é financiada (token trancado no escrow)
+   * ou a coleta de assinaturas termina, o processo roda sozinho até a extração da preimage (claim)
+   * ou a expiração do timelock (refund) — nenhum usuário cancela mais nada.
+   */
+  isIrreversible(deal: Deal | null): boolean {
+    if (!deal) return false;
+    if (['FULLY_SIGNED', 'SETTLEMENT_VALIDATION', 'SETTLING', 'SETTLED'].includes(deal.state)) return true;
+    return deal.participants.some(p => p.fundingRequired && p.funding === 'FINAL');
+  }
+  async irreversibleOf(mesa: MesaRecord): Promise<boolean> {
+    const deal = mesa.dealId ? await this.d.getDeal(mesa.dealId) : null;
+    return this.isIrreversible(deal);
+  }
+
+  async cancelMesa(portalToken: string | undefined, mesaId: string, reason: string): Promise<void> {
     const pm = this.d.portal.requirePayMaster(portalToken);
     const mesa = this.mesaOf(pm.id, mesaId);
     if (mesa.cancelled) return;
+    if (await this.irreversibleOf(mesa)) throw new DomainError('VERSION_CONFLICT', 'Operação irreversível: fundos já trancados no escrow — o contrato segue até a liquidação (preimage) ou o reembolso após o timelock.');
     mesa.cancelled = { at: this.now(), reason: reason.trim() || 'Cancelada pelo Pay Master' };
     this.d.portal.persistMesas();
     void this.audit('mesa.cancelada', pm.id, { mesaId, reason: mesa.cancelled.reason });
@@ -362,6 +378,8 @@ export class MesaService {
       settlement: deriveSettlementPlan(mesa.chairs),
       status, createdAt: mesa.createdAt, expiresAt: mesa.expiresAt, serverTime: now,
       approvedAt: mesa.approvedAt ?? null, termsHash: mesa.termsHash ?? null,
+      // Trava de irrevogabilidade exposta ao frontend: canCancel=false → UI remove "Cancelar mesa".
+      irreversible: this.isIrreversible(deal), canCancel: !mesa.cancelled && !this.isIrreversible(deal),
       deal: deal ? { id: deal.id, state: deal.state, requiredSignatures: deal.requiredSignatures, validSignatures: deal.validSignatures, turnRole: deal.turnRole ?? null, turnExpiresAt: deal.turnExpiresAt ?? null, expiresAt: deal.expiresAt, signed: deal.signatures.filter(s => s.status === 'valid' && s.revision === deal.revision).map(s => s.role) } : null,
     };
     if (viewer.kind === 'admin') {

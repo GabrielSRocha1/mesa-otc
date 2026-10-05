@@ -7,7 +7,8 @@ import { SqlStore, createPgliteClient, createPgClient, type SqlClient } from './
 import type { Store } from './db/repository.js';
 import { AdapterRegistry, type ApprovalVerifier, type DealCommitment, type SettlementAdapter } from './adapters/types.js';
 import { createLocalAdapters, LocalChainAdapter } from './adapters/local.js';
-import { verumEvmConfig, solanaConfig, tronConfig } from './config.js';
+import { verumEvmConfig, solanaConfig, tronConfig, bitcoinConfig } from './config.js';
+import { BitcoinChainAdapter } from './adapters/bitcoin.js';
 import { VerumEvmAdapter } from './adapters/verum/evm.js';
 import { VerumSolanaAdapter } from './adapters/verum/solana.js';
 import { VerumTronAdapter } from './adapters/verum/tron.js';
@@ -37,10 +38,10 @@ import { CHALLENGE_TTL_MS } from './domain/constants.js';
 import { MesaService } from './mesa/mesaService.js';
 import { metrics, logger } from './monitoring/metrics.js';
 import type { Config } from './config.js';
-import type { Deal, Participant } from './domain/types.js';
+import type { Deal, Participant, Role } from './domain/types.js';
 import type { ApprovalSignature } from './adapters/types.js';
 
-export interface AppOverrides { autoSettle?: boolean; store?: Store; adapters?: SettlementAdapter[]; priceSources?: PriceSource[]; liquiditySources?: LiquiditySource[]; screening?: WalletScreening; now?: () => number; denylist?: string[]; balanceReaders?: import('./mesa/balances.js').BalanceReaders }
+export interface AppOverrides { autoSettle?: boolean; store?: Store; adapters?: SettlementAdapter[]; priceSources?: PriceSource[]; liquiditySources?: LiquiditySource[]; screening?: WalletScreening; now?: () => number; denylist?: string[]; balanceReaders?: import('./mesa/balances.js').BalanceReaders; btcAddressOf?: (dealId: string, role: Role) => Promise<string | null> }
 export interface App { config: Config; store: Store; adapters: AdapterRegistry; local?: { evm: LocalChainAdapter; solana: LocalChainAdapter; bitcoin: LocalChainAdapter; tron?: LocalChainAdapter }; verumEvm?: VerumEvmAdapter; verumSolana?: VerumSolanaAdapter; verumTron?: VerumTronAdapter; verumEvmKeyring?: VerumEvmDevKeyring; tronKeyring?: TronDevKeyring; registry: AssetRegistry; price: PriceEngine; liquidity: LiquidityEngine; router: RouterEngine; signature: SignatureEngine; risk: RiskEngine; audit: AuditLog; deals: DealEngine; settlement: SettlementEngine; auth: WalletAuth; identity: IdentityService; rooms: RoomService; proposals: ProposalService; mesa: import('./mesa/mesaService.js').MesaService; api: Awaited<ReturnType<typeof buildApi>>; sources: { price: StaticPriceSource[]; liquidity: StaticLiquiditySource[] }; startScheduler(): void; stopScheduler(): void; close(): Promise<void> }
 
 export const LOCAL_TOKENS = { usdtEth: '0x0000000000000000000000000000000000000001', usdcEth: '0x0000000000000000000000000000000000000002', usdtSol: 'USDT1111111111111111111111111111111111111111', usdcSol: 'USDC1111111111111111111111111111111111111111', usdtTron: 'TUsdtDemo1111111111111111111111111', btcTron: 'TBtcDemo11111111111111111111111111' };
@@ -81,6 +82,7 @@ export async function createApp(config: Config, o: AppOverrides = {}): Promise<A
   const solCfg = o.adapters ? null : solanaConfig(config);
   const tronCfg = o.adapters ? null : tronConfig(config);
   const dealDeps = { getDeal: (id: string) => store.getDeal(id) };
+  let portalRef: PortalService | null = null; // preenchido quando o portal sobe (resolvedor BTC multichain)
   let demoKeyringRef: DemoMesaKeyring | null = null; // preenchido quando a conta demo é semeada (assina txs Solana dev)
   let verumEvm: VerumEvmAdapter | undefined; let verumEvmKeyring: VerumEvmDevKeyring | undefined;
   let verumSolana: VerumSolanaAdapter | undefined; let verumTron: VerumTronAdapter | undefined; let tronKeyring: TronDevKeyring | undefined;
@@ -106,6 +108,26 @@ export async function createApp(config: Config, o: AppOverrides = {}): Promise<A
       tronKeyring = config.OTC_ENV === 'prod' ? undefined : new TronDevKeyring(config.identityMasterSecret);
       verumTron = new VerumTronAdapter(tronCfg, tronKeyring ?? null, dealDeps); adapters.register(verumTron);
       logger.info({ chainId: tronCfg.chainId, escrow: tronCfg.escrow }, 'modo TRON ativo: escrow VerumOTCEscrowTron real');
+    }
+    // Bitcoin REAL (HTLC P2WSH via Esplora): substitui o simulador regtest quando BITCOIN_* está completo.
+    const btcCfg = bitcoinConfig(config);
+    if (btcCfg) {
+      // Payout BTC de papel sem carteira bitcoin NA DEAL (ex.: comprador conectado via Solana):
+      // resolve pelo endereço multichain da Verum Wallet conectada à cadeira da mesa (late binding
+      // — o portal sobe depois dos adapters).
+      const btcAddressOf = o.btcAddressOf ?? (async (dealId: string, role: Role) => {
+        for (const m of Object.values(portalRef?.mesas() ?? {})) {
+          if (m.dealId !== dealId && !m.dealIds.includes(dealId)) continue;
+          const w = m.chairs.find(c => c.role === role)?.wallet;
+          if (!w) return null;
+          return (w.addresses ?? []).find(a => a.network === 'bitcoin')?.address ?? (w.network === 'bitcoin' ? w.address : null);
+        }
+        return null;
+      });
+      const btcReal = new BitcoinChainAdapter(btcCfg, { ...dealDeps, btcAddressOf });
+      btcReal.now = now;
+      adapters.register(btcReal);
+      logger.info({ network: btcCfg.network, esplora: btcCfg.esploraUrl, csvBlocks: btcCfg.csvBlocks }, 'modo BITCOIN ativo: HTLC P2WSH real na rede Bitcoin');
     }
   }
   const tokens = verumEvmCfg ? { ...LOCAL_TOKENS, usdtEth: verumEvmCfg.tusdt } : LOCAL_TOKENS;
@@ -168,6 +190,7 @@ export async function createApp(config: Config, o: AppOverrides = {}): Promise<A
   // senão arquivo local (dev). Hidrata o estado inicial antes de servir requisições.
   const portalPersistence = sqlClient ? new PostgresPortalPersistence(sqlClient, now) : undefined;
   const portal = new PortalService({ file: config.PORTAL_DATA_FILE, sessionTtlMs: 24 * 3600_000, now, persistence: portalPersistence });
+  portalRef = portal;
   if (portalPersistence) await portal.hydrate();
   // Conta DEMO (apresentações): mesa 4/4 com carteiras falsas do keyring; nunca em produção.
   let demo: { keyring: DemoMesaKeyring; addresses: Set<string> } | undefined;

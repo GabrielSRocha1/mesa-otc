@@ -38,7 +38,7 @@ import { stablecoinNetworks } from '../chains/tokens.js';
 import { getIconMap } from '../chains/icons.js';
 import type { MesaService, AuthNetwork } from '../mesa/mesaService.js';
 import { validateChairBalances, defaultBalanceReaders, type BalanceReaders } from '../mesa/balances.js';
-import type { MesaChair } from '../mesa/types.js';
+import type { MesaChair, MesaRecord } from '../mesa/types.js';
 import registryData from '../onchain/registry/registryData.js';
 import { registryChecker, verumWalletChecker, composeCheckers, validateMesaTokens } from '../mesa/antiscam.js';
 
@@ -524,6 +524,17 @@ export async function buildApi(deps: ApiDeps): Promise<FastifyInstance> {
     if (isDemoMesa(mesa)) return { ok: true as const, checkedAt: deps.mesa.nowMs(), chairs: [], failures: [] as string[], demo: true };
     return validateChairBalances(mesa as Parameters<typeof validateChairBalances>[0], readers, deps.mesa.nowMs(), requiredOfChair(mesa));
   };
+  /**
+   * balancePreCheck — gate ÚNICO antes de sacramentar a operação: todos na mesa veem os saldos das
+   * duas pernas (ex.: BTC do Vendedor e USDT do Comprador) lidos ON-CHAIN nas redes de cada lado, e
+   * nenhuma assinatura do termsHash passa sem `ok`. Também informa a trava de irrevogabilidade:
+   * leg de contrato financiada → `canCancel: false` (o fluxo segue até a preimage ou o timelock).
+   */
+  const balancePreCheck = async (mesa: MesaRecord) => {
+    const report = await mesaBalances(mesa);
+    const irreversible = await deps.mesa.irreversibleOf(mesa);
+    return { ...report, irreversible, canCancel: !mesa.cancelled && !irreversible };
+  };
 
   // Relógio do servidor — autoridade única dos timers do frontend.
   app.get('/v1/time', async () => ({ time: deps.mesa.nowMs() }));
@@ -587,6 +598,12 @@ export async function buildApi(deps: ApiDeps): Promise<FastifyInstance> {
     await deps.audit.append({ actorType: 'user', actorId: mesa.payMasterId, category: 'mesa.saldos.revalidados', dealId: null, payload: { mesaId, ok: report.ok, failures: report.failures } });
     return report;
   });
+  // balancePreCheck do admin: saldos das duas pernas + trava de irrevogabilidade (canCancel).
+  app.get('/v1/portal/mesas/:mesaId/precheck', async req => {
+    const { mesaId } = req.params as { mesaId: string };
+    const { mesa } = adminMesa(req, mesaId, false);
+    return balancePreCheck(mesa);
+  });
   /**
    * APROVAR OPERAÇÃO (admin-only): só habilita com cadeiras conectadas + posse confirmada +
    * saldos/gás revalidados on-chain + mesa no prazo. Qualquer falha → 409 com motivos NOMINAIS.
@@ -637,8 +654,8 @@ export async function buildApi(deps: ApiDeps): Promise<FastifyInstance> {
     deps.portal.require2FA(token, b.twoFactorCode);
     const { pm, mesa } = adminMesa(req, mesaId);
     if (!mesa.dealId) throw new DomainError('INVALID_INPUT', 'Nenhuma operação ativa nesta mesa');
-    // Revalidação ON-CHAIN imediatamente antes da assinatura — nunca confiar só em cache/frontend.
-    const report = await mesaBalances(mesa);
+    // balancePreCheck ON-CHAIN imediatamente antes da assinatura do termsHash — nunca cache/frontend.
+    const report = await balancePreCheck(mesa);
     await deps.audit.append({ actorType: 'user', actorId: pm.id, category: 'mesa.saldos.revalidados', dealId: mesa.dealId, payload: { mesaId, ok: report.ok, failures: report.failures } });
     if (!report.ok) throw new DomainError('VERSION_CONFLICT', 'Assinatura bloqueada: saldos insuficientes', { motivos: report.failures });
     return signTurnOfDeal(mesa.dealId);
@@ -646,7 +663,7 @@ export async function buildApi(deps: ApiDeps): Promise<FastifyInstance> {
   app.post('/v1/portal/mesas/:mesaId/cancel', async req => {
     const { mesaId } = req.params as { mesaId: string };
     const b = parse(z.object({ reason: z.string().max(200).default('') }), req.body ?? {});
-    deps.mesa.cancelMesa(portalToken(req), mesaId, b.reason);
+    await deps.mesa.cancelMesa(portalToken(req), mesaId, b.reason);
     return { ok: true };
   });
 
@@ -692,6 +709,18 @@ export async function buildApi(deps: ApiDeps): Promise<FastifyInstance> {
     }
     const { mesa } = adminMesa(req, mesaId, false);
     return mesaBalances(mesa);
+  });
+  // balancePreCheck para TODOS na mesa: saldos das duas pernas + trava de irrevogabilidade.
+  app.get('/v1/mesas/:mesaId/precheck', async req => {
+    const { mesaId } = req.params as { mesaId: string };
+    const mesaClaim = req.session?.mesa;
+    if (mesaClaim && mesaClaim.mesaId === mesaId) {
+      const mesa = deps.mesa.mesaById(mesaId);
+      if (!mesa) throw new DomainError('INVALID_INPUT', 'Mesa não encontrada');
+      return balancePreCheck(mesa);
+    }
+    const { mesa } = adminMesa(req, mesaId, false);
+    return balancePreCheck(mesa);
   });
   // Participante tenta editar a configuração → 403 (a edição é exclusiva do admin).
   app.patch('/v1/mesas/:mesaId/config', async req => {

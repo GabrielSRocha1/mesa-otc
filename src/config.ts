@@ -59,6 +59,14 @@ const Schema = z.object({
   TRON_TUSDT: z.string().regex(/^T[1-9A-HJ-NP-Za-km-z]{33}$/).optional(),
   TRON_TBTC: z.string().regex(/^T[1-9A-HJ-NP-Za-km-z]{33}$/).optional(),
   TRON_CONFIRMATIONS: z.coerce.number().int().min(1).max(64).default(19),
+  // Bitcoin nativo (HTLC P2WSH real via Esplora — blockstream/mempool/regtest local).
+  BITCOIN_ESPLORA_URL: z.string().optional(),
+  BITCOIN_NETWORK: z.enum(['mainnet', 'testnet', 'regtest']).optional(),
+  BITCOIN_CLAIM_KEY: z.string().regex(/^(0x)?[0-9a-fA-F]{64}$/).optional(),
+  BITCOIN_REFUND_KEY: z.string().regex(/^(0x)?[0-9a-fA-F]{64}$/).optional(),
+  BITCOIN_CONFIRMATIONS: z.coerce.number().int().min(1).max(12).default(3),
+  BITCOIN_CSV_BLOCKS: z.coerce.number().int().min(6).max(1000).default(144),
+  BITCOIN_FEE_FLOOR_SAT_VB: z.coerce.number().int().min(1).max(500).default(2),
   // Conta DEMO do portal (apresentações): semeada no boot fora de produção.
   DEMO_EMAIL: z.string().default('demo@verumotc.com'),
   DEMO_PASSWORD: z.string().min(8).default('VerumDemo2026'),
@@ -84,6 +92,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
     ['VERUM_EVM', [c.VERUM_EVM_RPC_URL, c.VERUM_EVM_CHAIN_ID, c.VERUM_EVM_ESCROW_ADDRESS, c.VERUM_EVM_KEEPER_KEY, c.VERUM_EVM_ATTESTOR_KEY, c.VERUM_EVM_TBTC, c.VERUM_EVM_TUSDT]],
     ['SOLANA', [c.SOLANA_RPC_URL, c.SOLANA_CHAIN_ID, c.SOLANA_PROGRAM_ID, c.SOLANA_EXECUTOR_KEYPAIR, c.SOLANA_ATTESTOR_KEYPAIR, c.SOLANA_TUSDT_MINT, c.SOLANA_TBTC_MINT]],
     ['TRON', [c.TRON_FULL_HOST, c.TRON_CHAIN_ID, c.TRON_ESCROW_ADDRESS, c.TRON_EXECUTOR_KEY, c.TRON_ATTESTOR_KEY, c.TRON_TUSDT, c.TRON_TBTC]],
+    ['BITCOIN', [c.BITCOIN_ESPLORA_URL, c.BITCOIN_NETWORK, c.BITCOIN_CLAIM_KEY, c.BITCOIN_REFUND_KEY]],
   ];
   for (const [name, keys] of groups) {
     const set = keys.filter(Boolean).length;
@@ -104,6 +113,13 @@ export interface SolanaSettings { rpcUrl: string; chainId: '101' | '102' | '103'
 export function solanaConfig(c: Config): SolanaSettings | null {
   if (!c.SOLANA_RPC_URL || !c.SOLANA_CHAIN_ID || !c.SOLANA_PROGRAM_ID || !c.SOLANA_EXECUTOR_KEYPAIR || !c.SOLANA_ATTESTOR_KEYPAIR || !c.SOLANA_TUSDT_MINT || !c.SOLANA_TBTC_MINT) return null;
   return { rpcUrl: c.SOLANA_RPC_URL, chainId: c.SOLANA_CHAIN_ID, programId: c.SOLANA_PROGRAM_ID, executorKeypair: c.SOLANA_EXECUTOR_KEYPAIR, attestorKeypair: c.SOLANA_ATTESTOR_KEYPAIR, tusdtMint: c.SOLANA_TUSDT_MINT, tbtcMint: c.SOLANA_TBTC_MINT, confirmations: c.SOLANA_CONFIRMATIONS };
+}
+
+/** Bitcoin nativo (HTLC P2WSH real). null = grupo ausente (simulador regtest local). */
+export interface BitcoinSettingsCfg { esploraUrl: string; network: 'mainnet' | 'testnet' | 'regtest'; claimKey: string; refundKey: string; confirmations: number; csvBlocks: number; feeFloorSatVb: number }
+export function bitcoinConfig(c: Config): BitcoinSettingsCfg | null {
+  if (!c.BITCOIN_ESPLORA_URL || !c.BITCOIN_NETWORK || !c.BITCOIN_CLAIM_KEY || !c.BITCOIN_REFUND_KEY) return null;
+  return { esploraUrl: c.BITCOIN_ESPLORA_URL, network: c.BITCOIN_NETWORK, claimKey: c.BITCOIN_CLAIM_KEY, refundKey: c.BITCOIN_REFUND_KEY, confirmations: c.BITCOIN_CONFIRMATIONS, csvBlocks: c.BITCOIN_CSV_BLOCKS, feeFloorSatVb: c.BITCOIN_FEE_FLOOR_SAT_VB };
 }
 
 /** Escrow canônico Verum — Tron (Nile). null = grupo ausente. */
