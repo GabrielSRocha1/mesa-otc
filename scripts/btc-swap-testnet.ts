@@ -23,14 +23,12 @@ import { secp256k1 } from '@noble/curves/secp256k1.js';
 import { sha256 } from '@noble/hashes/sha2.js';
 import { ripemd160 } from '@noble/hashes/legacy.js';
 import { bytesToHex, hexToBytes, concatBytes } from '@noble/hashes/utils.js';
-import { bech32 } from '@scure/base';
 import { loadConfig, bitcoinConfig, verumEvmConfig } from '../src/config.js';
 import { createApp } from '../src/app.js';
 import { bitcoinMessageHash } from '../src/engines/signature.js';
 import { SIGNING_ORDER, type CanonicalAsset, type Role } from '../src/domain/types.js';
-import { p2wpkhAddress, bip143Sighash, varint, EsploraClient, type HtlcUtxo, type BitcoinNet } from '../src/adapters/bitcoin.js';
+import { p2wpkhAddress, p2wshAddress, htlcWitnessScript, bip143Sighash, varint, EsploraClient, type HtlcUtxo, type BitcoinNet } from '../src/adapters/bitcoin.js';
 import type { VerumEvmV2Adapter } from '../src/adapters/verum/evmV2.js';
-import { DomainError } from '../src/domain/errors.js';
 
 const log = (m: string): void => console.log(`\n▸ ${m}`);
 const sleep = (ms: number): Promise<void> => new Promise(r => setTimeout(r, ms));
@@ -131,7 +129,29 @@ for (const p of participants) if (p.role !== 'SELLER') deal = await app.deals.co
 deal = await app.deals.get(deal.id);
 log(`Deal ${deal.id} · estado ${deal.state} · rota ${deal.terms?.route.routeId ?? '—'} · htlcHash ${deal.terms?.route.htlcHash?.slice(0, 16)}…`);
 
-// ---- 4. open = registro REAL: createTradeV2 na Sepolia + derivação do cofre P2WSH ----
+// ---- 4. LOCK ANTES DO OPEN: o cofre P2WSH é derivável dos termos congelados (htlcHash) +
+// chaves keeper do .env — trancamos e CONFIRMAMOS o BTC antes de abrir, porque as janelas da
+// mesa (40 min da trade + 5 min POR TURNO de assinatura) começam no open e a testnet4 pode
+// levar dezenas de minutos para fechar um bloco.
+const htlcHash = deal.terms!.route.htlcHash as string;
+const witnessScript = htlcWitnessScript(htlcHash, secp256k1.getPublicKey(hexToBytes(btcCfg.claimKey.replace(/^0x/, '')), true), secp256k1.getPublicKey(hexToBytes(btcCfg.refundKey.replace(/^0x/, '')), true), btcCfg.csvBlocks);
+const vault = p2wshAddress(witnessScript, net);
+log(`COFRE HTLC (P2WSH ${net}): ${vault}`);
+const alreadyLocked = (await esplora.utxos(vault).catch(() => [])).reduce((s, u) => s + BigInt(u.value), 0n);
+if (alreadyLocked < SATS) {
+  const utxos: HtlcUtxo[] = (await esplora.utxos(sellerBtcAddr)).map(u => ({ txid: u.txid, vout: u.vout, valueSat: BigInt(u.value), confirmations: 1 }));
+  const lockTxid = await esplora.broadcast(buildLockTx(utxos, sha256(witnessScript), SATS, 1500n));
+  log(`Lock transmitido: ${lockTxid}`);
+  console.log(`  acompanhe: ${btcCfg.esploraUrl.replace(/\/api\/?$/, '')}/tx/${lockTxid}`);
+  log('Aguardando a confirmação do lock ANTES de abrir a trade (as janelas só começam depois)…');
+  for (;;) {
+    const st = await esplora.tx(lockTxid).catch(() => null);
+    if (st?.status.confirmed) { log('Lock confirmado on-chain.'); break; }
+    console.log('  …aguardando bloco na testnet4'); await sleep(30_000);
+  }
+} else log(`Cofre já tem ${alreadyLocked} sats confirmados — reaproveitando o lock.`);
+
+// ---- 5. open (createTradeV2 na Sepolia) + funding das duas pernas — agora tudo em ritmo Sepolia ----
 log('Abrindo a deal (createTradeV2 na Sepolia — ~30-90s de confirmações)…');
 await app.deals.open(deal.id, sellerBtcAddr);
 deal = await app.deals.get(deal.id);
@@ -140,30 +160,9 @@ console.log(`  tradeId Sepolia: ${tradeId} · https://sepolia.etherscan.io/addre
 
 log('Financiando a perna do comprador (approve tUSDT)…');
 await app.deals.fund(deal.id, 'BUYER', buyerEvm.address);
-
-// ---- 5. fund do vendedor → FUNDING_REQUIRED com o cofre; o script constrói e transmite o lock ----
-let vault = '';
-try { await app.deals.fund(deal.id, 'SELLER', sellerBtcAddr); }
-catch (e) {
-  const err = e as DomainError;
-  vault = String(err.details?.address ?? '');
-  if (err.code !== 'FUNDING_REQUIRED' || !vault) throw e;
-}
-log(`COFRE HTLC (P2WSH ${net}): ${vault}`);
-// Programa P2WSH (sha256 do witness script) decodificado do próprio endereço do cofre.
-const dec = bech32.decode(vault as `${string}1${string}`, 120);
-const vaultProgram = Uint8Array.from(bech32.fromWords(dec.words.slice(1)));
-const utxos: HtlcUtxo[] = (await esplora.utxos(sellerBtcAddr)).map(u => ({ txid: u.txid, vout: u.vout, valueSat: BigInt(u.value), confirmations: 1 }));
-const lockHex = buildLockTx(utxos, vaultProgram, SATS, 1500n);
-const lockTxid = await esplora.broadcast(lockHex);
-log(`Lock transmitido: ${lockTxid}`);
-console.log(`  acompanhe: ${btcCfg.esploraUrl.replace(/\/api\/?$/, '')}/tx/${lockTxid}`);
-
-log(`Aguardando ${btcCfg.confirmations} confirmação(ões) do lock para o fund do vendedor…`);
-for (;;) {
-  try { await app.deals.fund(deal.id, 'SELLER', sellerBtcAddr); log('Perna BTC financiada (lock detectado on-chain).'); break; }
-  catch (e) { const err = e as DomainError; if (err.code !== 'FUNDING_REQUIRED') throw e; console.log(`  …${err.message}`); await sleep(30_000); }
-}
+log('Financiando a perna do vendedor (lock já confirmado — detecção imediata)…');
+await app.deals.fund(deal.id, 'SELLER', sellerBtcAddr);
+log('Perna BTC financiada (lock detectado on-chain).');
 
 // ---- 6. assinaturas na ordem Vendedor → PM1 → Comprador ----
 for (const role of SIGNING_ORDER) {
