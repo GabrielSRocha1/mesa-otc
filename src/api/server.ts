@@ -39,6 +39,8 @@ import { getIconMap } from '../chains/icons.js';
 import type { MesaService, AuthNetwork } from '../mesa/mesaService.js';
 import { validateChairBalances, defaultBalanceReaders, type BalanceReaders } from '../mesa/balances.js';
 import type { MesaChair } from '../mesa/types.js';
+import registryData from '../onchain/registry/registryData.js';
+import { registryChecker, verumWalletChecker, composeCheckers, validateMesaTokens } from '../mesa/antiscam.js';
 
 const MAX_STREAMS_PER_SESSION = 8; const streams = new Map<string, number>();
 
@@ -493,6 +495,12 @@ export async function buildApi(deps: ApiDeps): Promise<FastifyInstance> {
   const AuthNetZ = z.enum(['ethereum', 'solana', 'tron', 'bitcoin']);
   const ChairAssetZ = z.object({ network: z.string().min(2).max(40), contractOrMint: z.string().max(120).nullable().default(null), decimals: z.number().int().min(0).max(30), symbol: z.string().min(1).max(20) });
   const readers = deps.balanceReaders ?? defaultBalanceReaders();
+  // Verificação de segurança de tokens: registro oficial + (opcional) API da Verum Wallet.
+  // Em dev, os tokens de teste (tUSDT/tBTC Sepolia e mints locais da Solana) são canônicos.
+  const devAllowedTokens = deps.dev ? ['USDT1111111111111111111111111111111111111111', 'USDC1111111111111111111111111111111111111111', deps.dev.evm?.tusdt, deps.dev.evm?.tbtc] : [];
+  const tokenSecurity = process.env.VERUM_WALLET_SECURITY_URL
+    ? composeCheckers(registryChecker({ allowed: devAllowedTokens }), verumWalletChecker(process.env.VERUM_WALLET_SECURITY_URL))
+    : registryChecker({ allowed: devAllowedTokens });
   /** Mesa do admin autenticado (lança FORBIDDEN quando não é o dono). */
   const adminMesa = (req: FastifyRequest, mesaId: string, activity = true) => {
     const pm = deps.portal.requirePayMaster(portalToken(req), activity);
@@ -500,10 +508,11 @@ export async function buildApi(deps: ApiDeps): Promise<FastifyInstance> {
     if (!mesa || mesa.payMasterId !== pm.id) throw new DomainError('FORBIDDEN', 'Mesa não encontrada para este Pay Master');
     return { pm, mesa };
   };
-  /** Quantidade exigida (unidades humanas) por cadeira — Vendedor deposita o volume configurado. */
-  const requiredOfChair = (mesa: { config?: { amountInBase?: string } }) => (chair: MesaChair): number | null => {
-    if (chair.role !== 'SELLER' || !mesa.config?.amountInBase) return null;
-    return Number(BigInt(mesa.config.amountInBase)) / 10 ** chair.expectedAsset.decimals;
+  /** Quantidade exigida (unidades humanas) por cadeira — o escrow tem duas pernas: Vendedor e Comprador depositam. */
+  const requiredOfChair = (mesa: { config?: { amountInBase?: string; buyerAmountInBase?: string } }) => (chair: MesaChair): number | null => {
+    const base = chair.role === 'SELLER' ? mesa.config?.amountInBase : chair.role === 'BUYER' ? mesa.config?.buyerAmountInBase : undefined;
+    if (!base) return null;
+    return Number(BigInt(base)) / 10 ** chair.expectedAsset.decimals;
   };
   /** Mesa 100% demo (carteiras do keyring) → saldos canned, sem RPC. */
   const isDemoMesa = (mesa: { chairs: MesaChair[] }): boolean => {
@@ -519,9 +528,28 @@ export async function buildApi(deps: ApiDeps): Promise<FastifyInstance> {
   // Relógio do servidor — autoridade única dos timers do frontend.
   app.get('/v1/time', async () => ({ time: deps.mesa.nowMs() }));
 
+  // Tokens autorizados por rede (espelho do registro oficial sincronizado de verum-otc-onchain).
+  // Alimenta o dropdown do wizard: o usuário escolhe o token; contrato/mint e decimais vêm daqui.
+  const TOKEN_CHAIN_BY_NETWORK: Record<string, number> = { ethereum: 1, bsc: 56, polygon: 137, arbitrum: 42161, solana: 101, tron: 728126428 };
+  app.get('/v1/tokens', async req => {
+    const { network } = req.query as { network?: string };
+    const chainId = network ? TOKEN_CHAIN_BY_NETWORK[network] : undefined;
+    const tokens = registryData.tokens
+      .filter(t => t.status === 'ACTIVE' && (chainId === undefined || t.chainId === chainId))
+      .map(t => ({ symbol: t.symbol, contractOrMint: t.address, decimals: t.decimals, representationOf: ('representationOf' in t ? (t as { representationOf?: string }).representationOf : undefined) ?? null }));
+    // Em dev (Sepolia) os tokens reais de teste do escrow entram na lista para o wizard funcionar de ponta a ponta.
+    if (deps.dev?.evm && (!network || network === 'ethereum')) {
+      tokens.unshift(
+        { symbol: 'tUSDT', contractOrMint: deps.dev.evm.tusdt, decimals: 6, representationOf: 'USDT (teste Sepolia)' },
+        { symbol: 'tBTC', contractOrMint: deps.dev.evm.tbtc, decimals: 8, representationOf: 'BTC (teste Sepolia)' },
+      );
+    }
+    return { network: network ?? null, tokens };
+  });
+
   // --- admin (sessão do portal) ---
   app.post('/v1/portal/mesas', async (req, reply) => {
-    const b = parse(z.object({ label: z.string().max(120).optional(), network: z.string().min(2).max(40), chairs: z.array(z.object({ role: ChairRoleZ, expectedAsset: ChairAssetZ, label: z.string().max(120).optional() })).min(3).max(4) }), req.body);
+    const b = parse(z.object({ label: z.string().max(120).optional(), network: z.string().min(2).max(40), chairs: z.array(z.object({ role: ChairRoleZ, expectedAsset: ChairAssetZ, label: z.string().max(120).optional() })).min(2).max(4) }), req.body);
     const mesa = deps.mesa.createMesa(portalToken(req), b);
     void reply.code(201);
     return deps.mesa.mesaViewFor(mesa, { kind: 'admin' });
@@ -549,7 +577,7 @@ export async function buildApi(deps: ApiDeps): Promise<FastifyInstance> {
   });
   app.patch('/v1/portal/mesas/:mesaId/config', async req => {
     const { mesaId } = req.params as { mesaId: string };
-    const b = parse(z.object({ amountInBase: z.string().regex(/^[1-9][0-9]*$/).optional(), discountBps: z.number().int().min(0).max(2000).optional(), commissionBps: z.number().int().min(0).max(5000).optional(), commissionPayer: z.enum(['SELLER', 'BUYER', 'SPLIT']).optional(), notes: z.string().max(500).optional() }), req.body ?? {});
+    const b = parse(z.object({ amountInBase: z.string().regex(/^[1-9][0-9]*$/).optional(), buyerAmountInBase: z.string().regex(/^[1-9][0-9]*$/).optional(), discountBps: z.number().int().min(0).max(2000).optional(), commissionBps: z.number().int().min(0).max(5000).optional(), commissionPayer: z.enum(['SELLER', 'BUYER', 'SPLIT']).optional(), notes: z.string().max(500).optional() }), req.body ?? {});
     return deps.mesa.updateConfig(portalToken(req), mesaId, b);
   });
   app.get('/v1/portal/mesas/:mesaId/balances', async req => {
@@ -573,6 +601,13 @@ export async function buildApi(deps: ApiDeps): Promise<FastifyInstance> {
     if (mesa.cancelled) throw new DomainError('VERSION_CONFLICT', 'Mesa cancelada.');
     if (deps.mesa.nowMs() >= mesa.expiresAt) throw new DomainError('VERSION_CONFLICT', 'Mesa expirada — crie uma nova mesa.');
     if (mesa.approvedAt) throw new DomainError('VERSION_CONFLICT', 'Operação já aprovada.');
+    // Anti-scam: token que se passa por USDT/USDC/WBTC… com contrato divergente do registro oficial
+    // (ou marcado como malicioso pela Verum Wallet) BLOQUEIA a operação com 403 — antes de qualquer saldo.
+    const scam = await validateMesaTokens(mesa.chairs, tokenSecurity);
+    if (scam.length) {
+      await deps.audit.append({ actorType: 'user', actorId: pm.id, category: 'mesa.aprovacao.token_scam', dealId: null, payload: { mesaId, motivos: scam } });
+      throw new DomainError('FORBIDDEN', 'Operação travada: token reprovado na verificação de segurança', { motivos: scam });
+    }
     const motivos: string[] = [];
     for (const c of mesa.chairs) if (!c.wallet) motivos.push(`${c.role === 'SELLER' ? 'Vendedor' : c.role === 'BUYER' ? 'Comprador' : c.role === 'PAYMASTER_2' ? 'Pay Master 2' : 'Pay Master 1'}: carteira não conectada`);
     if (!mesa.config?.amountInBase) motivos.push('Configuração: quantidade da operação não definida');

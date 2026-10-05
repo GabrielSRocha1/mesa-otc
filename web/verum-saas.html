@@ -251,7 +251,7 @@ img,svg{max-width:100%}
   <div class="auth-brand">
     <div class="top">
       <div class="brand">
-        <div class="mark"><svg viewBox="0 0 24 24" fill="none"><path d="M3 4l6 16 3-8 3 8 6-16" stroke="#4f9bff" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></svg></div>
+        <div class="mark"><svg viewBox="0 0 512 512" fill="none"><defs><linearGradient id="vmark" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#4f9bff"/><stop offset="1" stop-color="#22c55e"/></linearGradient></defs><path d="M140 150 L256 372 L372 150" stroke="url(#vmark)" stroke-width="46" stroke-linecap="round" stroke-linejoin="round"/><circle cx="256" cy="150" r="26" fill="#22c55e"/></svg></div>
         <div><div class="name">VERUM OTC</div><div class="tag">Secure. Transparent. Institutional.</div></div>
       </div>
     </div>
@@ -382,117 +382,6 @@ img,svg{max-width:100%}
   </div>
 </section>
 
-<!-- ================= SCREEN 2 · DASHBOARD ================= -->
-<section class="dash hidden" id="screenDash">
-  <header class="topbar">
-    <div class="brand">
-      <div class="mark"><svg viewBox="0 0 24 24" fill="none"><path d="M3 4l6 16 3-8 3 8 6-16" stroke="#4f9bff" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></svg></div>
-      <div><div class="name">VERUM OTC</div><div class="tag">Mesa de Operação · Pay Master</div></div>
-    </div>
-    <div class="top-sp"></div>
-    <div class="userchip">
-      <div><div class="ut">Conectado como</div><div class="un" id="chipName">—</div></div>
-      <div class="uav" id="chipAv">P</div>
-    </div>
-    <button class="logout" id="btnLogout" title="Sair"><svg viewBox="0 0 24 24"><path d="M15 12H3M9 6l-6 6 6 6M13 4h6a1 1 0 011 1v14a1 1 0 01-1 1h-6"/></svg></button>
-  </header>
-
-  <main class="dash-main">
-    <div class="welcome">
-      <div class="wav" id="wAv">P</div>
-      <div>
-        <h1>Bem-vindo, <span id="wName">Pay Master</span></h1>
-        <span class="role"><svg viewBox="0 0 24 24"><circle cx="9" cy="8" r="3"/><path d="M3.5 19a5.5 5.5 0 0111 0M17 7a2.5 2.5 0 010 5"/></svg>Pay Master 1 · <span id="wOrg">Instituição</span></span>
-      </div>
-    </div>
-
-    <div class="grid">
-      <!-- ---- WALLET CARD ---- -->
-      <section class="card">
-        <div class="card-h"><span class="ci wallet-ci"><svg viewBox="0 0 24 24" stroke="currentColor"><rect x="3" y="6" width="18" height="13" rx="2"/><path d="M16 12h2M3 10h18"/></svg></span><h3>Carteira</h3></div>
-        <p class="desc">Conecte a carteira que assinará as operações como Pay Master 1.</p>
-
-        <!-- not connected -->
-        <div id="walletEmpty" class="connect-empty">
-          <div class="big"><svg viewBox="0 0 24 24"><rect x="3" y="6" width="18" height="13" rx="2"/><path d="M16 12h2"/></svg></div>
-          <p>Nenhuma carteira conectada. Conecte para se identificar como Pay Master 1.</p>
-          <button class="btn btn-blue btn-block" id="btnConnect">
-            <svg viewBox="0 0 24 24"><rect x="3" y="6" width="18" height="13" rx="2"/><path d="M16 12h2M3 10h18"/></svg>
-            Conectar Carteira
-          </button>
-        </div>
-
-        <!-- connected -->
-        <div id="walletLive" class="wallet-live hidden">
-          <div class="wl-id">
-            <div class="badge-pm"><svg viewBox="0 0 24 24"><circle cx="12" cy="8" r="4"/><path d="M4 20a8 8 0 0116 0"/></svg></div>
-            <div>
-              <div class="pm-role">Pay Master 1</div>
-              <div class="pm-name" id="wlName">—</div>
-            </div>
-            <span class="conn"><span class="d"></span>Conectada</span>
-          </div>
-          <div class="wl-meta">
-            <div class="r"><span class="k">Endereço</span><span class="v mono"><span id="wlAddr">—</span><span class="copy-ic" id="copyAddr" title="Copiar"><svg viewBox="0 0 24 24"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V5a2 2 0 012-2h8"/></svg></span></span></div>
-            <div class="r"><span class="k">Rede</span><span class="v"><span class="chain-tag"><span class="cd" style="background:#9945ff"></span><span id="wlNet">Solana</span></span></span></div>
-            <div class="r"><span class="k">Papel</span><span class="v" style="color:var(--purple)">Pay Master 1</span></div>
-            <div class="r"><span class="k">Status</span><span class="v" style="color:var(--green)">Verificada</span></div>
-          </div>
-          <!-- Carteira conectada libera a mesa direto — o código de mesa é opcional (só p/ compartilhar com a contraparte). -->
-          <button class="btn btn-blue btn-block" id="btnOpenMesa" style="margin-bottom:8px">
-            <svg viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M3 9h18M8 14h8"/></svg>
-            Abrir Mesa de Operação
-            <svg viewBox="0 0 24 24"><path d="M5 12h14M13 6l6 6-6 6"/></svg>
-          </button>
-          <button class="btn btn-ghost btn-block" id="btnDisconnect">Desconectar carteira</button>
-        </div>
-      </section>
-
-      <!-- ---- CODE CARD ---- -->
-      <section class="card">
-        <div class="card-h"><span class="ci code-ci"><svg viewBox="0 0 24 24" stroke="currentColor"><path d="M8 3H5a2 2 0 00-2 2v3M16 3h3a2 2 0 012 2v3M8 21H5a2 2 0 01-2-2v-3M16 21h3a2 2 0 002-2v-3"/><path d="M7 12h10"/></svg></span><h3>Código Mesa de Operação</h3></div>
-        <p class="desc">Opcional: gere um código único para compartilhar com a contraparte e vincular a operação à sua mesa. Validade de 1 hora.</p>
-
-        <!-- locked (wallet needed) -->
-        <div id="codeLocked" class="code-locked">
-          <svg viewBox="0 0 24 24"><rect x="5" y="11" width="14" height="9" rx="2"/><path d="M8 11V8a4 4 0 018 0v3"/></svg>
-          Conecte a carteira para liberar a geração do código.
-        </div>
-
-        <!-- generate button -->
-        <button class="btn btn-primary btn-block hidden" id="btnGenerate">
-          <svg viewBox="0 0 24 24"><path d="M12 3v4M12 17v4M3 12h4M17 12h4M6 6l2.5 2.5M15.5 15.5L18 18M18 6l-2.5 2.5M8.5 15.5L6 18"/></svg>
-          Gerar Código Mesa de Operação
-        </button>
-
-        <!-- generated code -->
-        <div id="codeBox" class="code-box hidden">
-          <div class="code-display">
-            <div class="cl">Código da mesa</div>
-            <div class="code-value" id="codeValue">—</div>
-            <div class="code-sub">
-              <span class="item">Nº único: <b id="codeUid">—</b></span>
-              <span class="item">Gerado: <b id="codeGen">—</b></span>
-              <span class="item">Expira: <b id="codeExp">—</b></span>
-            </div>
-          </div>
-          <div class="valid-row">
-            <span class="valid-chip" id="validChip"><svg viewBox="0 0 24 24"><path d="M12 3l7 3v5c0 5-3 8-7 10-4-2-7-5-7-10V6z"/></svg>Válido por 1 hora</span>
-            <span class="countdown" id="countdown">60:00</span>
-          </div>
-          <div class="code-actions">
-            <button class="btn btn-blue" id="btnCopy" style="flex:2">
-              <svg viewBox="0 0 24 24"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V5a2 2 0 012-2h8"/></svg>
-              Copiar código
-            </button>
-            <button class="btn" id="btnRegen"><svg viewBox="0 0 24 24"><path d="M3 12a9 9 0 019-9 9 9 0 016.7 3M21 12a9 9 0 01-9 9 9 9 0 01-6.7-3"/><path d="M18 3v4h-4M6 21v-4h4"/></svg>Novo</button>
-          </div>
-          <div class="mesa-note"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 11v5M12 8h.01"/></svg>Compartilhe este código com a contraparte para vincular a operação à sua mesa. Após 1 hora ele expira automaticamente por segurança.</div>
-        </div>
-      </section>
-    </div>
-  </main>
-</section>
 
 <div class="toasts" id="toasts"></div>
 
@@ -504,7 +393,6 @@ img,svg{max-width:100%}
 (function(){
   "use strict";
   const $ = s => document.querySelector(s);
-  const HOUR=3600*1000;
   const TOK='verum_portal_token';
 
   /* ---------- mostrar/ocultar senha (ícone de olho) ---------- */
@@ -549,11 +437,6 @@ img,svg{max-width:100%}
     return data;
   }
 
-  /* ---------- estado local (apenas espelho da API) ---------- */
-  let me = null;          // { payMaster, wallet, code }
-  let codeExpLocal = 0;   // âncora local de expiração (Date.now()+ttlMs)
-  let tick = null;
-
   /* ---------- toast ---------- */
   const ICONS={ok:'<path d="M5 13l4 4L19 7"/>',info:'<circle cx="12" cy="12" r="9"/><path d="M12 8h.01M11 12h1v4h1"/>',err:'<circle cx="12" cy="12" r="9"/><path d="M12 8v5M12 16h.01"/>'};
   function toast(msg,type){
@@ -566,92 +449,18 @@ img,svg{max-width:100%}
   }
 
   /* ---------- helpers ---------- */
-  const initials = n => (n||'P').trim().split(/\s+/).map(w=>w[0]).slice(0,2).join('').toUpperCase();
-  const pad = n => String(n).padStart(2,'0');
-  function copy(txt,msg){
-    const done=()=>toast(msg||('Copiado: '+txt),'ok');
-    if(navigator.clipboard&&navigator.clipboard.writeText){ navigator.clipboard.writeText(txt).then(done).catch(done); } else done();
-  }
-  function hexAddr(){
-    let h='0x'; const c='0123456789abcdef';
-    for(let i=0;i<40;i++) h+=c[Math.floor(Math.random()*16)];
-    return h;
-  }
-  const shortAddr = a => a && a.length>12 ? a.slice(0,6)+'…'+a.slice(-4) : a;
-
-  /* ---------- Verum Wallet (conexão multichain) ---------- */
-  // A OTC conecta só à Verum Wallet, por UM botão. A prova de posse é Solana
-  // (window.verum) e o getAddresses() expõe os endereços das demais redes.
-  const VERUM_WALLET_URL='https://www.verumcrypto.com/wallet';
-  // No celular (sem extensão/ window.verum) abrimos o NAVEGADOR dApp da Verum já carregando o
-  // próprio OTC — o site roda DENTRO da Verum (onde window.verum existe) e conecta lá, igual ao
-  // Verum Vesting. Rota HTTPS do PWA da Verum: /dapp-browser?url=<enc do OTC>.
   const IS_MOBILE=/android|iphone|ipad|ipod|mobile/i.test(navigator.userAgent||'');
-  function hasInjectedWallet(){ const w=window; return !!(w.verum||w.solana||w.ethereum); }
-  const VERUM_DAPP_BROWSER='https://www.verumcrypto.com/dapp-browser';
-  function verumDappUrl(){ return location.origin+location.pathname; }
-  function openInVerumBrowser(){
-    const url=VERUM_DAPP_BROWSER+'?url='+encodeURIComponent(verumDappUrl())+'&name='+encodeURIComponent('VERUM OTC');
-    window.location.href=url; // leva o usuário à Verum com o OTC aberto no navegador dela
-  }
-  const walletErr = (msg,code) => { const e=new Error(msg); e.code=code; return e; };
-  function solProvider(){
-    const w=window;
-    if(w.verum) return w.verum;
-    if(w.solflare && (w.solflare.isSolflare || typeof w.solflare.connect==='function')) return w.solflare;
-    if(w.solana && (w.solana.isVerum || w.solana.isSolflare)) return w.solana;
-    return null;
-  }
-  async function connectVerum(){
-    const p=solProvider(); if(!p) throw walletErr('Verum Wallet não encontrada. Instale/desbloqueie a extensão.','NO_WALLET');
-    const r=await p.connect();
-    const pk=(r&&r.publicKey)?r.publicKey:p.publicKey;
-    if(!pk) throw walletErr('Não foi possível ler o endereço da carteira','NO_WALLET');
-    return {address:pk.toString(),network:'solana'};
-  }
-  // Endereços multichain que a Verum expõe (getAddresses). Roda contra um timeout
-  // p/ NUNCA travar a conexão se a extensão não tiver relay p/ getAddresses.
-  async function collectVerumAddresses(){
-    try{
-      const p=window.verum;
-      if(p&&typeof p.getAddresses==='function'){
-        const to=new Promise(res=>setTimeout(()=>res(null),2500));
-        const r=await Promise.race([Promise.resolve(p.getAddresses()).catch(()=>null),to]);
-        if(r&&Array.isArray(r.addresses)) return r.addresses.filter(a=>a&&a.network&&a.address).map(a=>({network:String(a.network),address:String(a.address)}));
-      }
-    }catch(e){}
-    return [];
-  }
 
   /* ================= SCREEN CONTROL ================= */
-  function applyMe(payload){
-    me = payload;
-    const p = me.payMaster || {};
-    $('#chipName').textContent=p.name||'Pay Master';
-    // Conta demo: marca discreta ao lado do nome (carteiras/saldos simulados p/ apresentação).
-    if(p.demo && !document.getElementById('demoTag')){
-      const t=document.createElement('span'); t.id='demoTag'; t.textContent='DEMO';
-      t.title='Ambiente de demonstração — carteiras e saldos simulados';
-      t.style.cssText='margin-left:7px;font-size:10px;font-weight:800;letter-spacing:.09em;color:var(--blue);background:var(--blue-soft);border:1px solid rgba(79,155,255,.3);padding:2px 7px;border-radius:999px;vertical-align:middle';
-      $('#chipName').appendChild(t);
-    }
-    $('#chipAv').textContent=initials(p.name);
-    $('#wAv').textContent=initials(p.name);
-    $('#wName').textContent=(p.name||'Pay Master').split(' ')[0];
-    $('#wOrg').textContent=p.org||'Instituição';
-    if(me.code && me.code.ttlMs>0) codeExpLocal = Date.now()+me.code.ttlMs; else codeExpLocal=0;
-    renderWallet(); renderCode();
-  }
-  function showDash(payload){
-    $('#screenAuth').classList.add('hidden');
-    $('#screenDash').classList.remove('hidden');
-    applyMe(payload);
+  // Autenticou → vai direto ao dashboard (/mesa). Hand-off do token pela URL (fragment,
+  // não vai ao servidor) — sobrevive mesmo se o localStorage estiver bloqueado no iframe
+  // da Verum. O /mesa lê e limpa o fragment.
+  function goToMesa(){
+    const t=getTok(); window.location.href='/mesa'+(t?('#tok='+encodeURIComponent(t)):'');
   }
   function showAuth(){
-    $('#screenDash').classList.add('hidden');
     $('#screenAuth').classList.remove('hidden');
     showView('viewRegister');
-    if(tick){clearInterval(tick);tick=null;}
   }
   // alterna entre os cards de autenticação (cadastro / verificação / login)
   function showView(id){ ['viewRegister','viewVerify','viewLogin'].forEach(v=>$('#'+v).classList.toggle('hidden', v!==id)); }
@@ -690,8 +499,7 @@ img,svg{max-width:100%}
       const r=await api('/v1/portal/register',{method:'POST',body:{name,email,password:pass}});
       setTok(r.token);
       toast('Conta criada','ok');
-      const data=await api('/v1/portal/me');
-      showDash(data);
+      goToMesa();
     }catch(ex){ toast(ex.message,'err'); }
   });
 
@@ -707,8 +515,7 @@ img,svg{max-width:100%}
       setTok(r.token);
       toast('E-mail verificado · conta criada','ok');
       pendingReg=null; verifyCode='';
-      const data=await api('/v1/portal/me');
-      showDash(data);
+      goToMesa();
     }catch(ex){ toast(ex.message,'err'); }
     finally{ btn.disabled=false; }
   });
@@ -730,130 +537,10 @@ img,svg{max-width:100%}
     try{
       const r=await api('/v1/portal/login',{method:'POST',body:{email,password:pass}});
       setTok(r.token);
-      const data=await api('/v1/portal/me');
-      toast('Bem-vindo de volta','ok'); showDash(data);
+      toast('Bem-vindo de volta','ok'); goToMesa();
     }catch(ex){ toast(ex.message,'err'); }
     finally{ if(btn) btn.disabled=false; }
   });
-
-  /* ================= WALLET ================= */
-  function renderWallet(){
-    const w = me && me.wallet;
-    if(w){
-      $('#walletEmpty').classList.add('hidden');
-      $('#walletLive').classList.remove('hidden');
-      $('#wlName').textContent=(me.payMaster&&me.payMaster.name)||'Pay Master 1';
-      $('#wlAddr').textContent=shortAddr(w.address);
-      const nEl=$('#wlNet'); if(nEl){ const cap=s=>s?s.charAt(0).toUpperCase()+s.slice(1):s; nEl.textContent=w.multichain?('Multichain · '+((w.addresses&&w.addresses.length)||0)+' redes'):cap(w.network||'solana'); }
-      $('#codeLocked').classList.add('hidden');
-      if(!(me.code)) $('#btnGenerate').classList.remove('hidden');
-    }else{
-      $('#walletEmpty').classList.remove('hidden');
-      $('#walletLive').classList.add('hidden');
-      $('#codeLocked').classList.remove('hidden');
-      $('#btnGenerate').classList.add('hidden');
-      $('#codeBox').classList.add('hidden');
-    }
-  }
-
-  $('#btnConnect').addEventListener('click',async ()=>{
-    // Mobile sem carteira injetada → abre no navegador da Verum Wallet. SÍNCRONO no clique:
-    // navegadores mobile bloqueiam navegação p/ esquema de app se ocorrer após um await.
-    if(IS_MOBILE && !hasInjectedWallet()){ toast('Abrindo no navegador da Verum Wallet…','info'); openInVerumBrowser(); return; }
-    const b=$('#btnConnect'); b.disabled=true; const prev=b.innerHTML; b.textContent='Conectando…';
-    try{
-      // Prova de posse via Solana (window.verum) e captura das demais redes.
-      let w;
-      try{ w=await connectVerum(); }
-      catch(ex){
-        if(ex.code==='NO_WALLET'){
-          try{ window.open(VERUM_WALLET_URL,'_blank','noopener'); }catch(e){}
-          toast('Abrindo a Verum Wallet… conecte sua carteira por lá.','info');
-          b.innerHTML=prev; return;
-        }
-        throw ex;
-      }
-      const addresses=await collectVerumAddresses();
-      const wallet=await api('/v1/portal/wallet/connect',{method:'POST',body:{address:w.address,network:'solana',addresses}});
-      me.wallet=wallet; renderWallet(); renderCode();
-      toast(wallet.multichain?('Verum Wallet conectada · multichain ('+(wallet.addresses?wallet.addresses.length:addresses.length)+' redes)'):'Verum Wallet conectada como Pay Master 1','ok');
-      // Carteira conectada → abre a mesa direto (o código de mesa é opcional).
-      setTimeout(openMesa,900);
-    }catch(ex){ toast(ex.message||'Falha ao conectar carteira','err'); b.innerHTML=prev; }
-    finally{ b.disabled=false; }
-  });
-
-  $('#btnDisconnect').addEventListener('click',async ()=>{
-    try{
-      await api('/v1/portal/wallet/disconnect',{method:'POST',body:{}});
-      me.wallet=null; me.code=null; codeExpLocal=0;
-      if(tick){clearInterval(tick);tick=null;}
-      renderWallet(); renderCode();
-      toast('Carteira desconectada','info');
-    }catch(ex){ toast(ex.message,'err'); }
-  });
-
-  $('#copyAddr').addEventListener('click',()=>{ if(me&&me.wallet) copy(me.wallet.address,'Endereço copiado'); });
-
-  /* ================= CÓDIGO MESA ================= */
-  function fmtTime(ms){ const d=new Date(ms); return pad(d.getHours())+':'+pad(d.getMinutes())+':'+pad(d.getSeconds()); }
-
-  function renderCode(){
-    const c=me&&me.code;
-    if(!c){ $('#codeBox').classList.add('hidden'); if(me&&me.wallet) $('#btnGenerate').classList.remove('hidden'); return; }
-    $('#btnGenerate').classList.add('hidden');
-    $('#codeBox').classList.remove('hidden');
-    $('#codeValue').textContent=c.code;
-    $('#codeUid').textContent=c.uid;
-    $('#codeGen').textContent=fmtTime(c.createdAt);
-    $('#codeExp').textContent=fmtTime(c.expiresAt);
-    startTick();
-  }
-
-  function startTick(){
-    if(tick) clearInterval(tick);
-    updateCountdown();
-    tick=setInterval(updateCountdown,1000);
-  }
-  function updateCountdown(){
-    const c=me&&me.code; if(!c) return;
-    const left=codeExpLocal-Date.now();
-    const chip=$('#validChip'), cd=$('#countdown');
-    if(left<=0){
-      cd.textContent='00:00';
-      chip.className='valid-chip dead';
-      chip.innerHTML='<svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 8v5M12 16h.01"/></svg>Código expirado';
-      $('#btnCopy').disabled=true;
-      if(tick){clearInterval(tick);tick=null;}
-      return;
-    }
-    const totS=Math.floor(left/1000);
-    const h=Math.floor(totS/3600), m=Math.floor(totS%3600/60), s=totS%60;
-    cd.textContent=(h>0?pad(h)+':':'')+pad(m)+':'+pad(s);
-    if(left<5*60*1000){ chip.className='valid-chip warn'; chip.innerHTML='<svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 8v4l2 2"/></svg>Expira em breve'; }
-    else{ chip.className='valid-chip'; chip.innerHTML='<svg viewBox="0 0 24 24"><path d="M12 3l7 3v5c0 5-3 8-7 10-4-2-7-5-7-10V6z"/></svg>Válido por 1 hora'; }
-    $('#btnCopy').disabled=false;
-  }
-
-  async function newCode(msg){
-    try{
-      const code=await api('/v1/portal/mesa/code',{method:'POST',body:{}});
-      me.code=code; codeExpLocal=Date.now()+(code.ttlMs||HOUR);
-      $('#btnCopy').disabled=false;
-      renderCode();
-      toast(msg||'Código de mesa gerado · válido por 1h','ok');
-    }catch(ex){ toast(ex.message,'err'); }
-  }
-
-  $('#btnGenerate').addEventListener('click',()=>newCode());
-  $('#btnRegen').addEventListener('click',()=>newCode('Novo código gerado'));
-  $('#btnCopy').addEventListener('click',()=>{ if(me&&me.code) copy(me.code.code,'Código copiado para a área de transferência'); });
-  function openMesa(){ toast('Abrindo Mesa de Operação…','info'); setTimeout(()=>{
-    // Hand-off do token pela URL (fragment, não vai ao servidor) — sobrevive mesmo se o
-    // localStorage estiver bloqueado no iframe da Verum. O /mesa lê e limpa o fragment.
-    const t=getTok(); window.location.href='/mesa'+(t?('#tok='+encodeURIComponent(t)):'');
-  },350); }
-  $('#btnOpenMesa').addEventListener('click',openMesa);
 
   /* ================= TECLADO SEGURO (senhas · mobile) =================
      Não existe API web para detectar/bloquear gravação de tela (do sistema ou
@@ -910,21 +597,11 @@ img,svg{max-width:100%}
     });
   })();
 
-  /* ================= LOGOUT ================= */
-  $('#btnLogout').addEventListener('click',async ()=>{
-    if(!confirm('Sair da mesa? Sua conta continua salva no servidor.')) return;
-    try{ await api('/v1/portal/logout',{method:'POST',body:{}}); }catch(ex){}
-    setTok(''); me=null;
-    // limpa o formulário
-    ['fName','fEmail','fPass','fPass2','fCode','lEmail','lPass'].forEach(id=>{ const el=$('#'+id); if(el) el.value=''; });
-    $('#fTerms').checked=false; pendingReg=null; verifyCode='';
-    showAuth(); toast('Sessão encerrada','info');
-  });
-
   /* ================= INIT ================= */
+  // Sessão válida → direto ao dashboard; sem sessão → telas de cadastro/login.
   (async function init(){
     if(!getTok()){ showAuth(); return; }
-    try{ const data=await api('/v1/portal/me'); showDash(data); }
+    try{ await api('/v1/portal/me'); goToMesa(); }
     catch(ex){ setTok(''); showAuth(); }
   })();
 })();

@@ -642,7 +642,7 @@ img,svg,canvas,video{max-width:100%}
   .op-steps{grid-template-columns:1fr 1fr!important;gap:14px}
   .op-step .line{display:none}
   /* Botão de inverter (⇄): entra no fluxo do grid de 1 coluna e, com margens
-     negativas, fica sobreposto na divisa entre os cards Entrega/Recebe —
+     negativas, fica sobreposto na divisa entre os cards Comprador/Vendedor —
      mesmo visual "flutuante" do tablet, sem abrir espaço extra entre eles. */
   .op-swap{position:relative;left:auto;top:auto;transform:none;justify-self:center;margin:-31px 0;z-index:3}
   .op-swap.spin{transform:rotate(180deg)}
@@ -678,7 +678,7 @@ img,svg,canvas,video{max-width:100%}
   <aside class="sidebar">
     <div class="logo">
       <div class="mark">
-        <svg viewBox="0 0 24 24" fill="none"><path d="M3 4l6 16 3-8 3 8 6-16" stroke="#4f9bff" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+        <svg viewBox="0 0 512 512" fill="none"><defs><linearGradient id="vmark" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#4f9bff"/><stop offset="1" stop-color="#22c55e"/></linearGradient></defs><path d="M140 150 L256 372 L372 150" stroke="url(#vmark)" stroke-width="46" stroke-linecap="round" stroke-linejoin="round"/><circle cx="256" cy="150" r="26" fill="#22c55e"/></svg>
       </div>
       <div>
         <div class="name">VERUM OTC</div>
@@ -687,11 +687,8 @@ img,svg,canvas,video{max-width:100%}
     </div>
 
     <nav class="nav">
-      <a href="#" class="active" data-view="dashboard"><svg viewBox="0 0 24 24"><rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="3" width="7" height="7" rx="1.5"/><rect x="3" y="14" width="7" height="7" rx="1.5"/><rect x="14" y="14" width="7" height="7" rx="1.5"/></svg>Dashboard</a>
-      <a href="#" data-view="operacoes"><svg viewBox="0 0 24 24"><rect x="4" y="4" width="16" height="16" rx="2"/><path d="M8 9h8M8 13h5"/></svg>Operações</a>
-      <a href="#" data-view="carteiras"><svg viewBox="0 0 24 24"><rect x="3" y="6" width="18" height="13" rx="2"/><path d="M16 12h2M3 10h18"/></svg>ABRIR MESA</a>
-      <a href="#" data-view="liquidez"><svg viewBox="0 0 24 24"><path d="M3 17l5-5 4 3 8-9"/><path d="M21 6v5h-5"/></svg>Liquidez</a>
-      <a href="#" data-view="relatorios"><svg viewBox="0 0 24 24"><path d="M6 3h9l5 5v13a1 1 0 01-1 1H6a1 1 0 01-1-1V4a1 1 0 011-1z"/><path d="M14 3v6h6M9 14h6M9 17h4"/></svg>Relatórios</a>
+      <a href="#" class="active" data-view="carteiras"><svg viewBox="0 0 24 24"><rect x="3" y="6" width="18" height="13" rx="2"/><path d="M16 12h2M3 10h18"/></svg>ABRIR MESA</a>
+      <a href="#" data-view="operacao"><svg viewBox="0 0 24 24"><rect x="4" y="4" width="16" height="16" rx="2"/><path d="M8 9h8M8 13h5"/></svg>Operações</a>
       <a href="#" data-view="seguranca"><svg viewBox="0 0 24 24"><path d="M12 3l7 3v5c0 5-3 8-7 10-4-2-7-5-7-10V6z"/><path d="M9 12l2 2 4-4"/></svg>Segurança</a>
       <a href="#" data-view="config"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3.2"/><path d="M19 12a7 7 0 00-.1-1.3l2-1.5-2-3.4-2.3 1a7 7 0 00-2.2-1.3L14 3h-4l-.4 2.5a7 7 0 00-2.2 1.3l-2.3-1-2 3.4 2 1.5A7 7 0 005 12c0 .4 0 .9.1 1.3l-2 1.5 2 3.4 2.3-1a7 7 0 002.2 1.3L10 21h4l.4-2.5a7 7 0 002.2-1.3l2.3 1 2-3.4-2-1.5c.1-.4.1-.9.1-1.3z"/></svg>Configurações</a>
     </nav>
@@ -741,71 +738,17 @@ img,svg,canvas,video{max-width:100%}
     <main class="page">
 
     <!-- ===================== VIEW: NOVA OPERAÇÃO ===================== -->
-    <!-- ===================== VIEW: DASHBOARD ===================== -->
-    <section class="view active" id="view-dashboard">
-      <div class="page-head">
-        <div>
-          <h1>Dashboard</h1>
-          <p>Visão geral da mesa de operação institucional.</p>
-        </div>
-        <div class="ph-actions">
-          <button class="btn btn-primary" data-goto="operacoes"><svg viewBox="0 0 24 24"><rect x="4" y="4" width="16" height="16" rx="2"/><path d="M8 9h8M8 13h5"/></svg>Operações</button>
+    <!-- ===================== VIEW: OPERAÇÕES (Negociação OTC — dados salvos da mesa) ===================== -->
+    <section class="view" id="view-operacao">
+      <div class="op-head">
+        <div class="titw"><h1>Operações</h1><p>Dados salvos da mesa criada: carteiras, taxas e detalhes da negociação.</p></div>
+        <div class="op-status">
+          <span class="op-badge run"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 8v4l2 2"/></svg>Em andamento</span>
+          <span class="op-exp">Expira em <b style="color:var(--ink-2)">00:45:32</b></span>
         </div>
       </div>
-      <div class="stats">
-        <div class="stat"><div class="sl"><svg viewBox="0 0 24 24"><path d="M3 3v18h18"/><path d="M7 14l4-4 3 3 5-6"/></svg>Volume liquidado (30d)</div><div class="sv">$312,4M</div><div class="sd up">▲ 8,2% vs. mês anterior</div></div>
-        <div class="stat"><div class="sl"><svg viewBox="0 0 24 24"><rect x="4" y="4" width="16" height="16" rx="2"/><path d="M8 9h8M8 13h5"/></svg>Operações ativas</div><div class="sv">14</div><div class="sd">6 aguardando assinatura</div></div>
-        <div class="stat"><div class="sl"><svg viewBox="0 0 24 24"><path d="M3 17l5-5 4 3 8-9"/></svg>Liquidez disponível</div><div class="sv">$48,7M</div><div class="sd up">Suficiente em 4 redes</div></div>
-        <div class="stat"><div class="sl"><svg viewBox="0 0 24 24"><circle cx="9" cy="8" r="3.5"/><path d="M3.5 20a5.5 5.5 0 0111 0"/></svg>Pay Masters ativos</div><div class="sv">7</div><div class="sd">2 online agora</div></div>
-      </div>
-      <!-- Carteiras da mesa: espelha o estado real das 4 carteiras (Vendedor, Comprador, Pay Masters) -->
-      <section class="card" style="margin-bottom:16px">
-        <div class="card-h"><div class="t"><svg viewBox="0 0 24 24" style="width:17px;height:17px;stroke:var(--blue);fill:none;stroke-width:2;vertical-align:-3px;margin-right:6px"><rect x="3" y="6" width="18" height="13" rx="2"/><path d="M16 12h2M3 10h18"/></svg>Carteiras da mesa</div><span class="badge info" id="dashMesaCount">0/4 conectadas</span></div>
-        <div class="op-parts" id="dashParts"><p style="color:var(--ink-3);font-size:12.5px;margin:0">Carregando estado da mesa…</p></div>
-      </section>
-      <div class="grid" style="grid-template-columns:1.4fr .9fr">
-        <section class="card">
-          <div class="card-h"><div class="t">Operações recentes</div><span class="badge info">Últimas 24h</span></div>
-          <div class="tbl-wrap"><table class="tbl">
-            <thead><tr><th>Deal ID</th><th>Par</th><th>Valor</th><th>Assinaturas</th><th>Status</th></tr></thead>
-            <tbody>
-              <tr><td class="mono">OTC-000481</td><td>BTC → USDT</td><td>$54,0M</td><td>3/4</td><td><span class="badge wait"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 8v4l2 2"/></svg>Aguardando</span></td></tr>
-              <tr><td class="mono">OTC-000480</td><td>ETH → USDC</td><td>$12,4M</td><td>4/4</td><td><span class="badge ok"><svg viewBox="0 0 24 24"><path d="M5 13l4 4L19 7"/></svg>Liquidado</span></td></tr>
-              <tr><td class="mono">OTC-000479</td><td>SOL → USDT</td><td>$3,1M</td><td>4/4</td><td><span class="badge ok"><svg viewBox="0 0 24 24"><path d="M5 13l4 4L19 7"/></svg>Liquidado</span></td></tr>
-              <tr><td class="mono">OTC-000478</td><td>BTC → USDC</td><td>$27,8M</td><td>2/4</td><td><span class="badge err"><svg viewBox="0 0 24 24"><path d="M18 6L6 18M6 6l12 12"/></svg>Cancelada</span></td></tr>
-              <tr><td class="mono">OTC-000477</td><td>ETH → USDT</td><td>$8,9M</td><td>4/4</td><td><span class="badge ok"><svg viewBox="0 0 24 24"><path d="M5 13l4 4L19 7"/></svg>Liquidado</span></td></tr>
-            </tbody>
-          </table></div>
-        </section>
-        <section class="card">
-          <div class="card-h"><div class="t">Redes conectadas</div></div>
-          <div class="kv">
-            <div class="r"><span class="k">Bitcoin</span><span class="v"><span class="badge ok">Online</span></span></div>
-            <div class="r"><span class="k">Ethereum</span><span class="v"><span class="badge ok">Online</span></span></div>
-            <div class="r"><span class="k">Solana</span><span class="v"><span class="badge ok">Online</span></span></div>
-            <div class="r"><span class="k">Zcash</span><span class="v"><span class="badge wait">Sincronizando</span></span></div>
-          </div>
-          <div class="mini-card" style="margin-top:16px">
-            <div class="mh"><span class="mt">Taxa de sucesso (30d)</span><span class="verified"><svg viewBox="0 0 24 24"><path d="M5 13l4 4L19 7"/></svg>99,4%</span></div>
-            <div class="progress" style="margin-top:12px"><span style="width:99%"></span></div>
-          </div>
-        </section>
-      </div>
-    </section>
 
-    <!-- ===================== VIEW: OPERAÇÕES (lista) ===================== -->
-    <section class="view" id="view-operacoes">
-      <div class="page-head">
-        <div>
-          <h1>Operações</h1>
-          <p>Todas as operações criadas na mesa.</p>
-        </div>
-        <div class="ph-actions">
-          <!-- Só aparece quando já existe pelo menos uma operação (senão o CTA fica no centro) -->
-          <button class="btn btn-primary" id="opsNewTop" type="button" data-goto="operacao" style="display:none"><svg viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg>Criar operação</button>
-        </div>
-      </div>
-      <!-- ===== Mesas v3: lista com badges, filtro e busca ===== -->
+      <!-- Mesas v3: lista com badges, filtro e busca -->
       <section class="card" id="m3OpsCard" style="display:none;margin-bottom:16px">
         <div class="card-h"><div class="t"><svg viewBox="0 0 24 24" style="width:17px;height:17px;stroke:var(--blue);fill:none;stroke-width:2;vertical-align:-3px;margin-right:6px"><rect x="3" y="6" width="18" height="13" rx="2"/><path d="M16 12h2M3 10h18"/></svg>Mesas</div>
           <div style="display:flex;gap:8px;align-items:center">
@@ -824,26 +767,6 @@ img,svg,canvas,video{max-width:100%}
           <tbody id="m3OpsRows"></tbody>
         </table></div>
       </section>
-      <section class="card" id="opsListCard" style="display:none">
-        <div class="card-h"><div class="t"><svg viewBox="0 0 24 24" style="width:17px;height:17px;stroke:var(--blue);fill:none;stroke-width:2;vertical-align:-3px;margin-right:6px"><rect x="4" y="4" width="16" height="16" rx="2"/><path d="M8 9h8M8 13h5"/></svg>Operações da mesa</div><span class="badge info" id="opsListCount">0</span></div>
-        <div class="op-deal-list" id="opsList"></div>
-      </section>
-      <div id="opsEmpty" style="display:flex;flex-direction:column;align-items:center;justify-content:center;gap:16px;padding:90px 20px;text-align:center">
-        <div style="color:var(--ink-3);font-size:13.5px">Nenhuma operação criada ainda.</div>
-        <button class="btn btn-primary" id="opsNewCenter" type="button" data-goto="operacao" style="height:52px;font-size:15px;padding:0 30px"><svg viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg>Criar operação</button>
-      </div>
-    </section>
-
-    <!-- ===================== VIEW: OPERAÇÃO (Negociação OTC) ===================== -->
-    <section class="view" id="view-operacao">
-      <div class="op-head">
-        <div class="back" data-goto="operacoes"><svg viewBox="0 0 24 24" style="width:20px;height:20px;stroke:currentColor;fill:none;stroke-width:2"><path d="M15 18l-6-6 6-6"/></svg></div>
-        <div class="titw"><h1>Negociação OTC</h1><p>Confirme os detalhes da operação e revise antes de assinar.</p></div>
-        <div class="op-status">
-          <span class="op-badge run"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 8v4l2 2"/></svg>Em andamento</span>
-          <span class="op-exp">Expira em <b style="color:var(--ink-2)">00:45:32</b></span>
-        </div>
-      </div>
 
       <div class="op-layout">
         <div class="op-main">
@@ -867,7 +790,7 @@ img,svg,canvas,video{max-width:100%}
             </div>
           </div>
 
-          <!-- Você Entrega / Você Recebe -->
+          <!-- Comprador / Vendedor -->
           <div class="op-flow">
             <section class="op-side op-deliver">
               <div class="sh"><div class="op-ic"><svg viewBox="0 0 24 24"><path d="M12 3v18M17 8l-5-5-5 5"/></svg></div><div><div class="st">Comprador</div><div class="ss">Toque no token para trocar o ativo</div></div><div class="tokfield" id="opDelField" style="margin-left:auto"></div></div>
@@ -879,7 +802,7 @@ img,svg,canvas,video{max-width:100%}
                 <div class="row"><span class="k">Valor líquido (USD)</span><span class="v" id="opDelNet">—</span></div>
               </div>
             </section>
-            <div class="op-swap" id="opSwap" title="Inverter entrega e recebimento"><svg viewBox="0 0 24 24"><path d="M7 10l-3 3 3 3M4 13h11M17 14l3-3-3-3M20 11H9"/></svg></div>
+            <div class="op-swap" id="opSwap" title="Inverter comprador e vendedor"><svg viewBox="0 0 24 24"><path d="M7 10l-3 3 3 3M4 13h11M17 14l3-3-3-3M20 11H9"/></svg></div>
             <section class="op-side op-receive">
               <div class="sh"><div class="op-ic"><svg viewBox="0 0 24 24"><circle cx="9" cy="8" r="3"/><path d="M3.5 19a5.5 5.5 0 0111 0M17 7a2.5 2.5 0 010 5"/></svg></div><div><div class="st">Vendedor</div><div class="ss">Toque no token para trocar o ativo</div></div><div class="tokfield" id="opRecvField" style="margin-left:auto"></div></div>
               <div class="op-assetbox"><div class="op-coin" id="opRecvIcon" style="background:var(--usdt)">₮</div><div><div class="nm" id="opRecvSym">USDT</div><div class="usd" style="font-size:12px;color:var(--ink-3)" id="opRecvName">Tether (Solana)</div></div><div class="amt" style="flex:1"><div class="big" id="opRecvAmt">0,00 USDT</div><div class="sub" id="opRecvUsd">≈ $0.00</div></div></div>
@@ -891,36 +814,6 @@ img,svg,canvas,video{max-width:100%}
               </div>
             </section>
           </div>
-
-          <!-- Configuração de Taxas -->
-          <section class="card" id="opFeesCard">
-            <div class="card-h"><div class="t"><svg viewBox="0 0 24 24" style="width:17px;height:17px;stroke:var(--blue);fill:none;stroke-width:2;vertical-align:-3px;margin-right:6px"><path d="M4 21v-7M4 10V3M12 21v-9M12 8V3M20 21v-5M20 12V3M1 14h6M9 8h6M17 16h6"/></svg>Configuração de Taxas</div><span class="badge info" id="opFeeSplitBadge">Vendedor 100%</span></div>
-            <div class="form-row">
-              <div><div class="fl">Comissão</div><div class="fh">% sobre o valor bruto da operação</div></div>
-              <div style="display:flex;align-items:center;gap:7px"><input class="inp" id="opFeeComm" type="number" min="0" max="100" step="0.1" value="2" inputmode="decimal" style="min-width:96px;text-align:right"><span style="color:var(--ink-3);font-weight:700">%</span></div>
-            </div>
-            <div class="form-row">
-              <div><div class="fl">Deságio</div><div class="fh">% de desconto aplicado no ativo escolhido</div></div>
-              <div style="display:flex;align-items:center;gap:7px"><input class="inp" id="opFeeDesc" type="number" min="0" max="100" step="0.1" value="3" inputmode="decimal" style="min-width:96px;text-align:right"><span style="color:var(--ink-3);font-weight:700">%</span></div>
-            </div>
-            <div class="form-row">
-              <div><div class="fl">Ativo de desconto</div><div class="fh">De qual ativo o deságio será deduzido</div></div>
-              <select class="op-sel" id="opFeeDiscFrom" style="max-width:230px"><option value="deliver">Ativo de entrega</option><option value="receive">Ativo de recebimento</option></select>
-            </div>
-            <div class="form-row" style="border-bottom:none">
-              <div><div class="fl">Quem paga a comissão</div><div class="fh">Se os dois estiverem ativos, divide 50/50</div></div>
-              <div style="display:flex;gap:20px;align-items:center">
-                <label style="display:flex;align-items:center;gap:9px;cursor:pointer"><span style="font-size:12.5px;color:var(--ink-2);font-weight:600">Vendedor</span><button class="sw on" id="opFeeSeller" type="button" role="switch" aria-checked="true"></button></label>
-                <label style="display:flex;align-items:center;gap:9px;cursor:pointer"><span style="font-size:12.5px;color:var(--ink-2);font-weight:600">Comprador</span><button class="sw" id="opFeeBuyer" type="button" role="switch" aria-checked="false"></button></label>
-              </div>
-            </div>
-          </section>
-
-          <!-- Operações da mesa: cada operação é um card; clicar abre na esteira -->
-          <section class="card">
-            <div class="card-h"><div class="t"><svg viewBox="0 0 24 24" style="width:17px;height:17px;stroke:var(--blue);fill:none;stroke-width:2;vertical-align:-3px;margin-right:6px"><rect x="4" y="4" width="16" height="16" rx="2"/><path d="M8 9h8M8 13h5"/></svg>Operações da mesa</div><span class="badge info" id="opListCount">0</span></div>
-            <div class="op-deal-list" id="opDealList"><p style="color:var(--ink-3);font-size:12.5px;margin:0">Nenhuma operação criada ainda. Use "Iniciar operação" abaixo.</p></div>
-          </section>
 
           <!-- Assinaturas Multisig -->
           <section class="card">
@@ -954,9 +847,9 @@ img,svg,canvas,video{max-width:100%}
         <aside class="op-aside">
           <section class="card">
             <div class="card-h"><div class="t"><svg viewBox="0 0 24 24" style="width:17px;height:17px;stroke:var(--blue);fill:none;stroke-width:2;vertical-align:-3px;margin-right:6px"><path d="M6 3h9l5 5v13a1 1 0 01-1 1H6a1 1 0 01-1-1V4a1 1 0 011-1z"/><path d="M14 3v6h6"/></svg>Resumo da Operação</div></div>
-            <div style="font-size:11px;color:var(--ink-3);margin-top:6px">Ativo de entrega</div>
+            <div style="font-size:11px;color:var(--ink-3);margin-top:6px">Ativo do comprador</div>
             <div class="op-sum-asset"><div class="op-coin" id="opSumDelIcon" style="background:var(--btc)">₿</div><div><div class="val" id="opSumDelVal">—</div><div class="sub" id="opSumDelUsd">—</div></div></div>
-            <div style="font-size:11px;color:var(--ink-3)">Ativo de recebimento</div>
+            <div style="font-size:11px;color:var(--ink-3)">Ativo do vendedor</div>
             <div class="op-sum-asset"><div class="op-coin" id="opSumRecvIcon" style="background:var(--usdt)">₮</div><div><div class="val" id="opSumRecvVal">—</div><div class="sub" id="opSumRecvUsd">—</div></div></div>
             <div class="op-rows" style="margin-top:6px">
               <div class="row"><span class="k">Valor base (bruto)</span><span class="v" id="opSumGross">—</span></div>
@@ -993,26 +886,69 @@ img,svg,canvas,video{max-width:100%}
     </section>
 
     <!-- ===================== VIEW: CARTEIRAS ===================== -->
-    <section class="view" id="view-carteiras">
+    <section class="view active" id="view-carteiras">
       <div class="page-head">
         <div><h1>ABRIR MESA</h1><p>Crie mesas com cadeiras e convites. A wallet de cada participante é identificada na conexão, com prova de posse — você nunca cadastra o endereço de ninguém.</p></div>
         <div class="ph-actions"><button class="btn btn-primary" id="m3New" type="button"><svg viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg>Criar mesa</button></div>
       </div>
 
-      <!-- ===== Mesas v3: criação ===== -->
+      <!-- ===== Cadastro da mesa: wizard em 4 passos curtos ===== -->
+      <!-- Passo 1 — Mesa e cadeiras -->
       <section class="card" id="m3Create" style="display:none;margin-bottom:16px">
-        <div class="card-h"><div class="t">Nova mesa</div><span class="badge info">Validade: 60 minutos</span></div>
+        <div class="card-h"><div class="t">Nova mesa · Passo 1 de 4 — Mesa e cadeiras</div><span class="badge info">Validade: 60 minutos</span></div>
         <div class="form-row"><div class="fl">Rótulo (opcional)</div><input class="inp" id="m3cLabel" maxlength="120" placeholder="Ex.: Mesa BTC — cliente institucional"></div>
-        <div class="form-row"><div class="fl">Rede da mesa</div>
-          <select class="inp" id="m3cNet">
+        <div class="form-row"><div><div class="fl">Rede principal</div><div class="fh">Rede padrão das pernas — cada lado pode trocar a sua no passo 2 (bridge/HTLC cuidam do resto)</div></div>
+          <select class="inp" id="m3cNet" style="max-width:230px">
             <option value="solana">Solana</option><option value="ethereum">Ethereum</option><option value="tron">Tron</option><option value="bsc">BNB Smart Chain</option><option value="polygon">Polygon</option><option value="base">Base</option><option value="arbitrum">Arbitrum One</option>
           </select>
         </div>
-        <div class="form-row"><div><div class="fl">Cadeiras</div><div class="fh">Pay Master 2 é opcional (4ª cadeira)</div></div><button class="sw" id="m3cPm2" type="button"></button></div>
+        <div class="form-row"><div><div class="fl">Cadeiras</div><div class="fh">Bilateral (2), com Pay Master (3) ou dois Pay Masters (4) — escrow dinâmico</div></div>
+          <select class="inp" id="m3cMode" style="max-width:260px">
+            <option value="4" selected>4 — Vendedor, Comprador, PM 1 e 2</option>
+            <option value="3">3 — Vendedor, Comprador e Pay Master 1</option>
+            <option value="2">2 — Bilateral (Vendedor e Comprador)</option>
+          </select>
+        </div>
         <div id="m3cChairs"></div>
         <div style="display:flex;gap:10px;margin-top:14px">
-          <button class="btn btn-primary" id="m3cSubmit" type="button">Criar mesa e cadeiras</button>
+          <button class="btn btn-primary" id="m3cNext" type="button">Continuar: Ativos<svg viewBox="0 0 24 24"><path d="M5 12h14M13 6l6 6-6 6"/></svg></button>
           <button class="btn" id="m3cCancel" type="button">Cancelar</button>
+        </div>
+      </section>
+
+      <!-- Passo 2 — Ativos (tokens do registro oficial; contrato/decimais preenchidos sozinhos) -->
+      <section class="card" id="m3s2" style="display:none;margin-bottom:16px">
+        <div class="card-h"><div class="t">Nova mesa · Passo 2 de 4 — Ativos</div><span class="badge info" id="m3s2Net">—</span></div>
+        <p class="fh" style="margin:0 0 10px">Escolha rede e token de CADA lado no registro oficial — contrato/mint e decimais são preenchidos automaticamente. Redes diferentes liquidam via bridge (CCIP); BTC nativo liquida via HTLC (swap atômico).</p>
+        <div class="form-row"><div><div class="fl">Vendedor — rede e token</div><div class="fh">O que o Vendedor entrega</div></div>
+          <div style="display:flex;gap:8px;flex-wrap:wrap;justify-content:flex-end">
+            <select class="inp" id="m3cSellNet" style="max-width:170px"></select>
+            <select class="inp" id="m3cSellTok" style="max-width:260px"></select>
+          </div>
+        </div>
+        <div class="form-row"><div><div class="fl">Comprador — rede e token</div><div class="fh">O que o Comprador entrega (lado ≠ do Vendedor)</div></div>
+          <div style="display:flex;gap:8px;flex-wrap:wrap;justify-content:flex-end">
+            <select class="inp" id="m3cBuyNet" style="max-width:170px"></select>
+            <select class="inp" id="m3cBuyTok" style="max-width:260px"></select>
+          </div>
+        </div>
+        <div class="fh" id="m3cPlanHint" style="margin:4px 0 2px;color:var(--blue)"></div>
+        <div style="margin:6px 0 2px"><a href="#" id="m3cAdvLink" style="color:var(--blue);font-size:12px;text-decoration:none">Avançado: informar token fora da lista…</a></div>
+        <div id="m3cAdv" style="display:none">
+          <div class="form-row"><div class="fl">Vendedor (manual)</div>
+            <input class="inp" data-m3adv="sellSym" placeholder="Símbolo" style="width:110px">
+            <input class="inp" data-m3adv="sellContract" placeholder="Contrato/mint" style="flex:1;min-width:180px">
+            <input class="inp" data-m3adv="sellDec" type="number" min="0" max="30" placeholder="Decimais" style="width:90px">
+          </div>
+          <div class="form-row"><div class="fl">Comprador (manual)</div>
+            <input class="inp" data-m3adv="buySym" placeholder="Símbolo" style="width:110px">
+            <input class="inp" data-m3adv="buyContract" placeholder="Contrato/mint" style="flex:1;min-width:180px">
+            <input class="inp" data-m3adv="buyDec" type="number" min="0" max="30" placeholder="Decimais" style="width:90px">
+          </div>
+        </div>
+        <div style="display:flex;gap:10px;margin-top:14px">
+          <button class="btn" id="m3cBack2" type="button"><svg viewBox="0 0 24 24"><path d="M19 12H5M11 6l-6 6 6 6"/></svg>Voltar</button>
+          <button class="btn btn-primary" id="m3cNext2" type="button">Continuar: Valores e taxas<svg viewBox="0 0 24 24"><path d="M5 12h14M13 6l6 6-6 6"/></svg></button>
         </div>
       </section>
 
@@ -1027,16 +963,20 @@ img,svg,canvas,video{max-width:100%}
         <div class="card-h"><div class="t" id="m3dTitle">Mesa</div><span class="badge info" id="m3dStatus">—</span></div>
         <div style="display:flex;gap:14px;flex-wrap:wrap;align-items:center;margin-bottom:12px">
           <span class="mono" id="m3dCode" style="font-size:13px"></span>
+          <span class="mono" id="m3dOpCode" style="font-size:13px;color:var(--blue)" title="Código único da operação"></span>
           <span class="badge wait" id="m3dTtl" title="Tempo restante da mesa">—</span>
           <span class="badge wait" id="m3dTurn" style="display:none" title="Tempo para assinaturas">—</span>
+          <div class="fh" id="m3dPlan" style="flex-basis:100%;color:var(--blue)"></div>
         </div>
         <div class="op-parts" id="m3dChairs"></div>
         <div class="grid" style="grid-template-columns:1fr 1fr;margin-top:14px">
           <div>
             <div class="card-h" style="margin-bottom:6px"><div class="t" style="font-size:13.5px">Configuração da operação</div></div>
-            <div class="form-row"><div class="fl">Quantidade (unidades base)</div><input class="inp" id="m3dAmount" inputmode="numeric" placeholder="Ex.: 250000000000"></div>
-            <div class="form-row"><div class="fl">Deságio (bps)</div><input class="inp" id="m3dDiscount" type="number" min="0" max="2000" value="0"></div>
-            <div class="form-row"><div class="fl">Comissão (bps)</div><input class="inp" id="m3dCommission" type="number" min="0" max="5000" value="0"></div>
+            <div class="form-row"><div><div class="fl">Quantidade do Vendedor</div><div class="fh" id="m3dAmountHint">Em unidades do token</div></div><div style="text-align:right"><input class="inp" id="m3dAmount" inputmode="decimal" placeholder="Ex.: 250" style="text-align:right"><div class="fh mono" id="m3dAmountBase" style="margin-top:3px"></div></div></div>
+            <div class="form-row"><div><div class="fl">Quantidade do Comprador</div><div class="fh" id="m3dBuyAmountHint">Em unidades do token</div></div><div style="text-align:right"><input class="inp" id="m3dBuyAmount" inputmode="decimal" placeholder="Ex.: 250000" style="text-align:right"><div class="fh mono" id="m3dBuyAmountBase" style="margin-top:3px"></div></div></div>
+            <div class="form-row"><div class="fl">Deságio (%)</div><input class="inp" id="m3dDiscount" type="number" min="0" max="20" step="0.1" value="0" style="text-align:right"></div>
+            <div class="form-row"><div class="fl">Comissão (%)</div><input class="inp" id="m3dCommission" type="number" min="0" max="50" step="0.1" value="0" style="text-align:right"></div>
+            <div class="form-row"><div class="fl">Quem paga a comissão</div><select class="inp" id="m3dPayer" style="max-width:180px"><option value="SELLER">Vendedor</option><option value="BUYER">Comprador</option><option value="SPLIT">Dividir 50/50</option></select></div>
             <button class="btn btn-block" id="m3dSaveCfg" type="button" style="margin-top:8px">Salvar configuração</button>
           </div>
           <div>
@@ -1050,38 +990,64 @@ img,svg,canvas,video{max-width:100%}
         </div>
       </section>
 
+      <!-- Passo 3 — Valores e taxas (grava na mesa via /config: humano→unidades base, %→bps) -->
+      <section class="card" id="opFeesCard" style="display:none;margin-bottom:16px">
+        <div class="card-h"><div class="t"><svg viewBox="0 0 24 24" style="width:17px;height:17px;stroke:var(--blue);fill:none;stroke-width:2;vertical-align:-3px;margin-right:6px"><path d="M4 21v-7M4 10V3M12 21v-9M12 8V3M20 21v-5M20 12V3M1 14h6M9 8h6M17 16h6"/></svg>Nova mesa · Passo 3 de 4 — Valores e taxas</div><span class="badge info" id="opFeeSplitBadge">Vendedor 100%</span></div>
+        <div class="form-row">
+          <div><div class="fl">Quantidade do Vendedor</div><div class="fh" id="m3cSellAmtHint">Em unidades do token escolhido</div></div>
+          <div style="text-align:right"><input class="inp" id="m3cSellAmt" inputmode="decimal" placeholder="Ex.: 250" style="min-width:150px;text-align:right"><div class="fh mono" id="m3cSellBase" style="margin-top:4px"></div></div>
+        </div>
+        <div class="form-row">
+          <div><div class="fl">Quantidade do Comprador</div><div class="fh" id="m3cBuyAmtHint">Em unidades do token escolhido</div></div>
+          <div style="text-align:right"><input class="inp" id="m3cBuyAmt" inputmode="decimal" placeholder="Ex.: 250000" style="min-width:150px;text-align:right"><div class="fh mono" id="m3cBuyBase" style="margin-top:4px"></div></div>
+        </div>
+        <div class="form-row">
+          <div><div class="fl">Comissão</div><div class="fh">% sobre o valor bruto da operação</div></div>
+          <div style="display:flex;align-items:center;gap:7px"><input class="inp" id="opFeeComm" type="number" min="0" max="100" step="0.1" value="2" inputmode="decimal" style="min-width:96px;text-align:right"><span style="color:var(--ink-3);font-weight:700">%</span></div>
+        </div>
+        <div class="form-row">
+          <div><div class="fl">Deságio</div><div class="fh">% de desconto aplicado no ativo escolhido</div></div>
+          <div style="display:flex;align-items:center;gap:7px"><input class="inp" id="opFeeDesc" type="number" min="0" max="100" step="0.1" value="3" inputmode="decimal" style="min-width:96px;text-align:right"><span style="color:var(--ink-3);font-weight:700">%</span></div>
+        </div>
+        <div class="form-row">
+          <div><div class="fl">Ativo de desconto</div><div class="fh">De qual ativo o deságio será deduzido</div></div>
+          <select class="op-sel" id="opFeeDiscFrom" style="max-width:230px"><option value="deliver">Ativo do comprador</option><option value="receive">Ativo do vendedor</option></select>
+        </div>
+        <div class="form-row" style="border-bottom:none">
+          <div><div class="fl">Quem paga a comissão</div><div class="fh">Se os dois estiverem ativos, divide 50/50</div></div>
+          <div style="display:flex;gap:20px;align-items:center">
+            <label style="display:flex;align-items:center;gap:9px;cursor:pointer"><span style="font-size:12.5px;color:var(--ink-2);font-weight:600">Vendedor</span><button class="sw on" id="opFeeSeller" type="button" role="switch" aria-checked="true"></button></label>
+            <label style="display:flex;align-items:center;gap:9px;cursor:pointer"><span style="font-size:12.5px;color:var(--ink-2);font-weight:600">Comprador</span><button class="sw" id="opFeeBuyer" type="button" role="switch" aria-checked="false"></button></label>
+          </div>
+        </div>
+        <div style="display:flex;gap:10px;margin-top:14px">
+          <button class="btn" id="m3cBack" type="button"><svg viewBox="0 0 24 24"><path d="M19 12H5M11 6l-6 6 6 6"/></svg>Voltar</button>
+          <button class="btn btn-primary" id="m3cNext3" type="button">Continuar: Revisão<svg viewBox="0 0 24 24"><path d="M5 12h14M13 6l6 6-6 6"/></svg></button>
+        </div>
+      </section>
+
+      <!-- Passo 4 — Revisão e criação -->
+      <section class="card" id="m3s4" style="display:none;margin-bottom:16px">
+        <div class="card-h"><div class="t">Nova mesa · Passo 4 de 4 — Revisão</div><span class="badge info">Confira antes de criar</span></div>
+        <div class="kv" id="m3rSummary"></div>
+        <div style="display:flex;gap:10px;margin-top:14px">
+          <button class="btn" id="m3cBack4" type="button"><svg viewBox="0 0 24 24"><path d="M19 12H5M11 6l-6 6 6 6"/></svg>Voltar</button>
+          <button class="btn btn-primary" id="m3cSubmit" type="button">Criar mesa e cadeiras</button>
+        </div>
+      </section>
+
+      <!-- Operações da mesa (movida da página Operação): cada operação é um card; clicar abre na esteira -->
+      <section class="card" style="margin-bottom:16px">
+        <div class="card-h"><div class="t"><svg viewBox="0 0 24 24" style="width:17px;height:17px;stroke:var(--blue);fill:none;stroke-width:2;vertical-align:-3px;margin-right:6px"><rect x="4" y="4" width="16" height="16" rx="2"/><path d="M8 9h8M8 13h5"/></svg>Operações da mesa</div><span class="badge info" id="opListCount">0</span></div>
+        <div class="op-deal-list" id="opDealList"><p style="color:var(--ink-3);font-size:12.5px;margin:0">Nenhuma operação criada ainda. Use "Iniciar operação" abaixo.</p></div>
+      </section>
+
       <div class="page-head" style="margin-top:8px">
         <div><h2 style="font-size:17px;margin:0">Mesa rápida (legada)</h2><p>Fluxo anterior com 4 carteiras fixas da conta.</p></div>
         <div class="ph-actions"><span class="badge info" id="mesaCount">—</span></div>
       </div>
       <div class="vgrid wide" id="mesaSlots">
         <section class="card"><div class="state" style="padding:8px 0"><div class="spin" style="width:22px;height:22px;border:2px solid rgba(255,255,255,.25);border-top-color:#fff;border-radius:50%;animation:sp .7s linear infinite;margin:0 auto"></div></div></section>
-      </div>
-    </section>
-
-    <!-- ===================== VIEW: LIQUIDEZ ===================== -->
-    <section class="view" id="view-liquidez">
-      <div class="page-head">
-        <div><h1>Liquidez</h1><p>Pools disponíveis por rede e ativo.</p></div>
-        <div class="ph-actions"><span class="pill ok"><svg viewBox="0 0 24 24"><path d="M5 13l4 4L19 7"/></svg>$48,7M disponível</span></div>
-      </div>
-      <div class="vgrid">
-        <section class="card"><div class="card-h"><div class="t">BTC · Bitcoin</div></div><div class="sv" style="font-family:var(--f-head);font-size:24px;font-weight:700">1.250 BTC</div><div class="liq-bar" style="margin:12px 0"><span style="width:40%"></span></div><div class="liq-row"><span class="k">Alocado</span><span class="v">500 BTC</span></div></section>
-        <section class="card"><div class="card-h"><div class="t">ETH · Ethereum</div></div><div class="sv" style="font-family:var(--f-head);font-size:24px;font-weight:700">820 ETH</div><div class="liq-bar" style="margin:12px 0"><span style="width:22%"></span></div><div class="liq-row"><span class="k">Alocado</span><span class="v">180 ETH</span></div></section>
-        <section class="card"><div class="card-h"><div class="t">USDT · Solana</div></div><div class="sv" style="font-family:var(--f-head);font-size:24px;font-weight:700">24,3M USDT</div><div class="liq-bar" style="margin:12px 0"><span style="width:64%"></span></div><div class="liq-row"><span class="k">Alocado</span><span class="v">15,5M USDT</span></div></section>
-        <section class="card"><div class="card-h"><div class="t">USDC · Ethereum</div></div><div class="sv" style="font-family:var(--f-head);font-size:24px;font-weight:700">9,8M USDC</div><div class="liq-bar" style="margin:12px 0"><span style="width:31%"></span></div><div class="liq-row"><span class="k">Alocado</span><span class="v">3,0M USDC</span></div></section>
-      </div>
-    </section>
-
-    <!-- ===================== VIEW: RELATÓRIOS ===================== -->
-    <section class="view" id="view-relatorios">
-      <div class="page-head">
-        <div><h1>Relatórios</h1><p>Exportações e análises da atividade da mesa.</p></div>
-      </div>
-      <div class="vgrid">
-        <section class="card"><div class="card-h"><div class="t">Volume mensal</div></div><p style="color:var(--ink-3);font-size:13px;margin:0 0 14px">Consolidado de liquidações por mês.</p><button class="btn btn-block" data-toast="Gerando relatório de volume…"><svg viewBox="0 0 24 24"><path d="M12 3v12M8 11l4 4 4-4M5 21h14"/></svg>Exportar CSV</button></section>
-        <section class="card"><div class="card-h"><div class="t">Comissões por Pay Master</div></div><p style="color:var(--ink-3);font-size:13px;margin:0 0 14px">Divisão de comissões no período.</p><button class="btn btn-block" data-toast="Gerando relatório de comissões…"><svg viewBox="0 0 24 24"><path d="M12 3v12M8 11l4 4 4-4M5 21h14"/></svg>Exportar CSV</button></section>
-        <section class="card"><div class="card-h"><div class="t">Auditoria de assinaturas</div></div><p style="color:var(--ink-3);font-size:13px;margin:0 0 14px">Trilha de assinaturas e nonces.</p><button class="btn btn-block" data-toast="Gerando trilha de auditoria…"><svg viewBox="0 0 24 24"><path d="M12 3v12M8 11l4 4 4-4M5 21h14"/></svg>Exportar PDF</button></section>
       </div>
     </section>
 
@@ -1211,13 +1177,11 @@ img,svg,canvas,video{max-width:100%}
     if(!target) return;
     $$('.view').forEach(v=>v.classList.remove('active'));
     target.classList.add('active');
-    // A página de operação (detalhe) pertence à aba "Operações" no menu.
-    const navKey = view==='operacao' ? 'operacoes' : view;
-    $$('.nav a').forEach(x=>x.classList.toggle('active', x.dataset.view===navKey));
+    $$('.nav a').forEach(x=>x.classList.toggle('active', x.dataset.view===view));
     const main=document.querySelector('.content .page'); if(main) main.scrollTop=0;
     window.scrollTo(0,0);
-    if(view==='operacoes'){ try{ updateDraft(); refreshMesaDeals(); renderDealList(opDealsCache,opDeal&&opDeal.id); }catch(e){} }
-    if(view==='operacao'){ try{ opRenderInfo(); }catch(e){} }
+    // A aba "Operações" abre direto a negociação com os dados salvos da mesa.
+    if(view==='operacao'){ try{ updateDraft(); refreshMesaDeals(); renderDealList(opDealsCache,opDeal&&opDeal.id); opRenderInfo(); if(typeof m3LoadList==='function') m3LoadList(); }catch(e){} }
   }
   // ── Sidebar responsiva (mobile): gaveta aberta pelo hambúrguer ──────────────
   function setNav(open){
@@ -1686,7 +1650,7 @@ img,svg,canvas,video{max-width:100%}
     return (w.network===network)?w.address:null;
   }
   // ── Modelo de ativo (nativo OU stablecoin) p/ os dois lados da operação ──
-  // opPay = "Você Entrega" (com o campo de valor editável); opRecv = "Você Recebe".
+  // opPay = lado do Comprador (campo de valor editável); opRecv = lado do Vendedor.
   // O botão central (⇄) inverte os dois lados.
   //   nativo:     {kind:'native', chainKey}
   //   stablecoin: {kind:'stable', token:'USDT'|'USDC', net:<chainKey de liquidação>}
@@ -1725,7 +1689,7 @@ img,svg,canvas,video{max-width:100%}
   const opSameAsset=(a,b)=> a&&b&&a.kind===b.kind&&(a.kind==='stable'?a.token===b.token:a.chainKey===b.chainKey);
   function openTokenModal(side){
     const cur=side==='pay'?opPay:opRecv;
-    const title=side==='pay'?'Token que você entrega':'Token que você recebe';
+    const title=side==='pay'?'Token do comprador':'Token do vendedor';
     const list=opAllAssets();
     const rows=list.map((a,i)=>'<div class="netrow'+(opSameAsset(a,cur)?' sel':'')+'" data-ai="'+i+'">'+netBadge({icon:a.icon,glyph:a.sym,color:a.color},32)+'<div><div class="nm">'+esc(a.sym)+'</div><div class="sub">'+esc(a.name)+'</div></div></div>').join('');
     $('#modalRoot').innerHTML='<div class="modal-back" id="tkBack"><div class="modal"><h3>'+esc(title)+'</h3><p style="color:var(--ink-3);font-size:13px;margin:4px 0 2px">Escolha qualquer moeda nativa ou stablecoin.</p><div class="netlist">'+rows+'</div><div class="modal-actions" style="margin-top:14px"><button class="btn" id="tkCancel">Fechar</button></div></div></div>';
@@ -1774,7 +1738,7 @@ img,svg,canvas,video{max-width:100%}
     const df=$('#opFeeDiscFrom'); if(df) df.addEventListener('change',()=>{ opFees.discountFrom=df.value; opRecalc(); });
     const bindTog=(id,who)=>{ const el=$(id); if(!el) return; el.addEventListener('click',()=>{ opFees.payer[who]=!opFees.payer[who]; el.classList.toggle('on',opFees.payer[who]); el.setAttribute('aria-checked',String(opFees.payer[who])); opRecalc(); }); };
     bindTog('#opFeeSeller','seller'); bindTog('#opFeeBuyer','buyer');
-    // Botão central: inverte "Você Entrega" ⇄ "Você Recebe".
+    // Botão central: inverte Comprador ⇄ Vendedor.
     const swap=$('#opSwap'); if(swap) swap.addEventListener('click',()=>{
       const t=opPay; opPay=opRecv; opRecv=t;
       swap.classList.toggle('spin');
@@ -1807,12 +1771,12 @@ img,svg,canvas,video{max-width:100%}
     const net=Math.max(0,gross-desc-comm-fee-platformFee), delNet=Math.max(0,gross-desc);
     const recvAmt=recvPrice?net/recvPrice:0;
     const recvDp=opRecv.kind==='stable'?2:8, paySym=assetSym(opPay), recvSym=assetSym(opRecv);
-    // Deságio deduzido do ativo escolhido (entrega ou recebimento).
+    // Deságio deduzido do ativo escolhido (comprador ou vendedor).
     const discAsset=opFees.discountFrom==='deliver'?opPay:opRecv;
     const discPrice=assetPrice(discAsset), discSym=assetSym(discAsset);
     const discAmt=discPrice?desc/discPrice:0, discDp=discAsset.kind==='stable'?2:8;
     const split=opCommissionSplit();
-    // Lado ENTREGA (topo, editável).
+    // Lado COMPRADOR (topo, editável).
     opSetCoin($('#opDelIcon'),paySym,assetColor(opPay),assetIcon(opPay));
     $('#opDelSym').textContent=paySym;
     $('#opDelName').textContent=assetName(opPay);
@@ -1822,7 +1786,7 @@ img,svg,canvas,video{max-width:100%}
     $('#opDelDesc').textContent=opMoney(desc);
     $('#opDelNet').textContent=opMoney(delNet);
     $('#opDelAvail').style.display=opPay.kind==='native'?'flex':'none';
-    // Lado RECEBE (base, calculado).
+    // Lado VENDEDOR (base, calculado).
     opSetCoin($('#opRecvIcon'),recvSym,assetColor(opRecv),assetIcon(opRecv));
     $('#opRecvSym').textContent=recvSym;
     $('#opRecvName').textContent=assetName(opRecv);
@@ -1878,7 +1842,7 @@ img,svg,canvas,video{max-width:100%}
     const exp=$('#opInfoExp');
     if(exp) exp.textContent=sim?(created?('simulada: '+fdt(created+45*60000)+' (45 min)'):'45 min após iniciar'):(d.turnExpiresAt?('turno atual: '+fmtCountdown(d.turnExpiresAt)):'—');
     if($('#opInfoComm')) $('#opInfoComm').textContent=opNum(opFees.commissionPct,2)+'% · '+(($('#opFeeSplitBadge')&&$('#opFeeSplitBadge').textContent)||'—');
-    if($('#opInfoDesc')) $('#opInfoDesc').textContent=opNum(opFees.discountPct,2)+'% ('+(opFees.discountFrom==='receive'?'ativo de recebimento':'ativo de entrega')+')';
+    if($('#opInfoDesc')) $('#opInfoDesc').textContent=opNum(opFees.discountPct,2)+'% ('+(opFees.discountFrom==='receive'?'ativo do vendedor':'ativo do comprador')+')';
     if($('#opInfoSlip')) $('#opInfoSlip').textContent=opNum(opFees.maxSlippagePct,2)+'%';
     const on=OP_ROLES.filter(r=>{ const s=opSlot(r.role); return s&&s.wallet&&s.status==='confirmed'; }).length;
     if($('#opInfoWallets')) $('#opInfoWallets').textContent=on+'/4 conectadas';
@@ -2030,9 +1994,10 @@ img,svg,canvas,video{max-width:100%}
   function startDealPolling(){ if(opDealTimer) clearInterval(opDealTimer); opDealTimer=setInterval(refreshMesaDeal,5000); }
   /* ---------- Rascunhos locais: criar operação já salva na lista, sem backend ---------- */
   const DRAFTS_KEY='verum_op_drafts';
+  const MAX_DRAFTS=2; // a lista "Operações da mesa" mantém só os 2 rascunhos mais recentes
   let opDraftId=null; // rascunho aberto na página de operação
-  function loadDrafts(){ try{ return JSON.parse(localStorage.getItem(DRAFTS_KEY)||'[]')||[]; }catch(e){ return []; } }
-  function saveDrafts(l){ try{ localStorage.setItem(DRAFTS_KEY,JSON.stringify(l)); }catch(e){} }
+  function loadDrafts(){ try{ return (JSON.parse(localStorage.getItem(DRAFTS_KEY)||'[]')||[]).slice(0,MAX_DRAFTS); }catch(e){ return []; } }
+  function saveDrafts(l){ try{ localStorage.setItem(DRAFTS_KEY,JSON.stringify((l||[]).slice(0,MAX_DRAFTS))); }catch(e){} }
   function draftSnapshot(){
     const del=$('#opDelSym'), rec=$('#opRecvSym'), amt=$('#opDelAmt');
     return { pair:((del&&del.textContent)||'—')+' → '+((rec&&rec.textContent)||'—'), amount:(amt&&amt.value)||'' };
@@ -2075,7 +2040,7 @@ img,svg,canvas,video{max-width:100%}
     $$('#opDealList .op-deal-card, #opsList .op-deal-card').forEach(c=>{
       const open=()=>{
         if(c.dataset.draft){ opDraftId=c.dataset.draft; showView('operacao'); renderDealList(opDealsCache,opDeal&&opDeal.id); return; }
-        if(c.closest('#view-operacoes')) showView('operacao');
+        if(c.closest('#view-carteiras')) showView('operacao');
         openMesaDeal(c.dataset.deal);
       };
       c.addEventListener('click',open); c.addEventListener('keydown',e=>{ if(e.key==='Enter'||e.key===' '){ e.preventDefault(); open(); } });
@@ -2149,25 +2114,8 @@ img,svg,canvas,video{max-width:100%}
       const usdEl=box.querySelector('[data-opusd="'+r.role+'"]'); if(usdEl&&usdEl.isConnected&&amt!=null&&price) usdEl.textContent='≈ '+opMoney(amt*price);
     });
   }
-  // Dashboard: espelha as 4 carteiras da mesa (sem consultar saldo — só papel, rede, endereço e status).
-  function dashRenderMesa(){
-    const box=$('#dashParts'); if(!box||!opMesa) return;
-    const chainName=k=>{ const c=opChains.find(x=>x.chainKey===k); return c?c.nativeSymbol:(k||'').toUpperCase(); };
-    let on=0;
-    box.innerHTML=OP_ROLES.map(r=>{
-      const s=opSlot(r.role); const w=s&&s.wallet;
-      if(!w||s.status!=='confirmed'){
-        const st=s?s.status:'empty'; const txt=st==='pending'?'Aguardando confirmação':'Não conectada';
-        return '<div class="op-part"><div class="ph"><div class="op-coin" style="background:#243357">?</div><div><div class="nm">'+r.label+'</div><div class="addr">'+txt+'</div></div></div><div class="foot"><div></div><span class="op-conn" style="color:var(--ink-3)"><i style="background:var(--ink-3);box-shadow:none"></i>Off</span></div></div>';
-      }
-      on++;
-      const sym=chainName(w.network); const color=OP_COLORS[w.network]||'#3b4a68';
-      return '<div class="op-part"><div class="ph">'+opCoinBadge(sym,color,opChainIcon(w.network),'data-opc="'+w.network+'"')+'<div><div class="nm">'+r.label+' <span class="op-tag">'+esc(sym)+'</span></div><div class="addr">'+esc(shortAddr(w.address))+'</div></div></div><div class="foot"><div></div><span class="op-conn"><i></i>Conectado</span></div></div>';
-    }).join('');
-    const c=$('#dashMesaCount'); if(c) c.textContent=on+'/4 conectadas';
-  }
   // Chamado quando a mesa é (re)carregada.
-  function opOnMesa(){ dashRenderMesa(); if(!$('#opParts')) return; opRenderParticipants(); opUpdateSellerCap().then(()=>{ if(typeof opRecalc==='function') opRecalc(); }); }
+  function opOnMesa(){ if(!$('#opParts')) return; opRenderParticipants(); opUpdateSellerCap().then(()=>{ if(typeof opRecalc==='function') opRecalc(); }); }
 
   /* ---------- Configurações da mesa (persistentes em localStorage) ---------- */
   // A aba Configurações passa a ter estado real: os campos são restaurados ao
@@ -2301,32 +2249,142 @@ img,svg,canvas,video{max-width:100%}
   const m3Badge=s=>{ const b=M3_STATUS[s]||['info',s]; return '<span class="badge '+b[0]+'">'+esc(b[1])+'</span>'; };
   const M3_ROLE={SELLER:'Vendedor',BUYER:'Comprador',PAYMASTER_1:'Pay Master 1',PAYMASTER_2:'Pay Master 2'};
   let m3Sel=null, m3Cache=null, m3Timer=null, m3TickT=null, m3Bal=null;
+  /* ---------- Conversões do cadastro: valor humano → unidades base, % → bps ---------- */
+  function pctToBps(v){ const n=parseFloat(String(v==null?'':v).replace(',','.')); return isFinite(n)&&n>=0?Math.round(n*100):null; }
+  function bpsToPct(bps){ return (Number(bps||0)/100); }
+  // "250,5" + 6 decimais → "250500000" (BigInt, sem float). Retorna null se inválido ou zero.
+  function humanToBase(q,dec){
+    const s=String(q==null?'':q).trim().replace(',','.');
+    if(!/^\d+(\.\d+)?$/.test(s)) return null;
+    const [i,f='']=s.split('.');
+    if(f.length>dec) return null; // mais casas que o token suporta
+    try{ const v=BigInt(i+f.padEnd(dec,'0')); return v>0n?v.toString():null; }catch(e){ return null; }
+  }
+  function baseToHuman(base,dec){
+    try{ const s=String(BigInt(base)).padStart(dec+1,'0'); const i=s.slice(0,s.length-dec)||'0'; const f=s.slice(s.length-dec).replace(/0+$/,''); return f?i+','+f:i; }catch(e){ return String(base); }
+  }
+  /* ---------- Tokens autorizados por rede (registro oficial via /v1/tokens) ---------- */
+  const M3_GAS={ solana:{symbol:'SOL',decimals:9}, ethereum:{symbol:'ETH',decimals:18}, tron:{symbol:'TRX',decimals:6}, bsc:{symbol:'BNB',decimals:18}, polygon:{symbol:'POL',decimals:18}, base:{symbol:'ETH',decimals:18}, arbitrum:{symbol:'ETH',decimals:18}, bitcoin:{symbol:'BTC',decimals:8} };
+  const M3_NETS=[['solana','Solana'],['ethereum','Ethereum'],['tron','Tron'],['bsc','BNB Smart Chain'],['polygon','Polygon'],['base','Base'],['arbitrum','Arbitrum One'],['bitcoin','Bitcoin (BTC nativo · HTLC)']];
+  // BTC NATIVO: não é token — liquida via HTLC (swap atômico com hash secret compartilhado com o escrow).
+  const M3_BTC_NATIVE={ symbol:'BTC', contractOrMint:null, decimals:8, representationOf:'BTC nativo — fluxo HTLC (atomic swap)' };
+  const m3TokLists={ sell:[], buy:[] };
+  async function m3LoadTokensSide(side,net){
+    let list=[];
+    if(net==='bitcoin') list=[M3_BTC_NATIVE];
+    else{ try{ const r=await fetch(API+'/v1/tokens?network='+encodeURIComponent(net)); const j=await r.json(); list=(j&&j.tokens)||[]; }catch(e){ list=[]; } }
+    m3TokLists[side]=list;
+    const sel=$(side==='sell'?'#m3cSellTok':'#m3cBuyTok');
+    sel.innerHTML=list.map((t,i)=>'<option value="'+i+'">'+esc(t.symbol)+(t.representationOf?(' — '+t.representationOf):'')+'</option>').join('')
+      ||'<option value="">(nenhum token no registro desta rede — use o modo avançado)</option>';
+  }
+  async function m3LoadTokens(net){
+    const nets=M3_NETS.map(n=>'<option value="'+n[0]+'"'+(n[0]===net?' selected':'')+'>'+n[1]+'</option>').join('');
+    $('#m3cSellNet').innerHTML=nets; $('#m3cBuyNet').innerHTML=nets;
+    await Promise.all([m3LoadTokensSide('sell',net),m3LoadTokensSide('buy',net)]);
+    if(m3TokLists.buy.length>1) $('#m3cBuyTok').value='1'; // sugere par distinto
+    $('#m3s2Net').textContent=($('#m3cNet').selectedOptions[0]||{}).textContent||net;
+    m3PlanHint();
+  }
+  // Token efetivo por lado: dropdown do registro ou campos manuais do modo avançado.
+  function m3TokenOf(side){
+    const adv=$('#m3cAdv').style.display!=='none';
+    const a=k=>{ const el=document.querySelector('[data-m3adv="'+k+'"]'); return el?el.value.trim():''; };
+    const net=$(side==='sell'?'#m3cSellNet':'#m3cBuyNet').value||$('#m3cNet').value;
+    if(adv&&a(side+'Contract')){ return { network:net, symbol:(a(side+'Sym')||'TOKEN').toUpperCase(), contractOrMint:a(side+'Contract'), decimals:Number(a(side+'Dec')||'18'), representationOf:null }; }
+    const sel=$(side==='sell'?'#m3cSellTok':'#m3cBuyTok'); const t=m3TokLists[side][Number(sel.value)];
+    return t?{network:net,symbol:t.symbol,contractOrMint:t.contractOrMint,decimals:t.decimals,representationOf:t.representationOf}:null;
+  }
+  // Plano de liquidação derivado dos lados — espelha deriveSettlementPlan do backend.
+  function m3Plan(sell,buy){
+    if(!sell||!buy) return null;
+    const btc=s=>s.network==='bitcoin'&&s.contractOrMint==null;
+    if(btc(sell)||btc(buy)) return { mode:'HTLC_BTC', txt:'BTC nativo via HTLC — swap atômico: BTC trancado na rede Bitcoin, a outra perna no escrow com o mesmo hash secret' };
+    if(sell.network!==buy.network) return { mode:'CROSS_CHAIN', txt:'Redes diferentes ('+sell.network+' ↔ '+buy.network+') — escrow em cada rede + liberação atômica via Chainlink CCIP' };
+    return { mode:'ESCROW_DIRECT', txt:'Liquidação direta no VerumOtcEscrow ('+sell.network+')' };
+  }
+  function m3PlanHint(){ const p=m3Plan(m3TokenOf('sell'),m3TokenOf('buy')); $('#m3cPlanHint').textContent=p?('Liquidação: '+p.txt):''; }
+  // No passo 1 as cadeiras são só rótulos — os ativos vêm do passo 2 (Vendedor/Comprador) e do gás da rede (PMs).
   function m3cChairRow(role){
     const fixed=role==='PAYMASTER_1';
     return '<div class="form-row" data-m3-chair="'+role+'" style="gap:8px;flex-wrap:wrap">'
-      +'<div style="min-width:120px"><div class="fl">'+M3_ROLE[role]+'</div>'+(fixed?'<div class="fh">Sua cadeira (wallet já conectada)</div>':'')+'</div>'
-      +'<input class="inp" data-m3f="symbol" placeholder="Ativo (ex.: SOL, USDT)" style="width:130px" value="'+(role==='BUYER'?'USDT':'SOL')+'">'
-      +'<input class="inp" data-m3f="contract" placeholder="Contrato/mint (vazio = nativo)" style="flex:1;min-width:160px">'
-      +'<input class="inp" data-m3f="decimals" type="number" min="0" max="30" placeholder="Decimais" style="width:90px" value="'+(role==='BUYER'?'6':'9')+'">'
-      +(fixed?'':'<input class="inp" data-m3f="label" placeholder="Rótulo interno (opcional)" style="flex:1;min-width:150px">')
+      +'<div style="min-width:140px"><div class="fl">'+M3_ROLE[role]+'</div>'+(fixed?'<div class="fh">Sua cadeira (wallet já conectada)</div>':'')+'</div>'
+      +(fixed?'':'<input class="inp" data-m3f="label" placeholder="Rótulo interno (opcional — só você vê)" style="flex:1;min-width:180px">')
       +'</div>';
   }
-  function m3OpenCreate(){ const c=$('#m3Create'); if(!c) return; c.style.display=''; $('#m3cChairs').innerHTML=['SELLER','BUYER','PAYMASTER_1'].map(m3cChairRow).join(''); $('#m3cPm2').classList.remove('on'); }
-  async function m3SubmitCreate(){
+  /* ---------- Wizard: 1) mesa e cadeiras · 2) ativos · 3) valores e taxas · 4) revisão → criar ---------- */
+  const M3_STEPS=['#m3Create','#m3s2','#opFeesCard','#m3s4'];
+  function m3Step(n){ M3_STEPS.forEach((sel,i)=>{ const el=$(sel); if(el) el.style.display=(n===i+1)?'':'none'; }); }
+  function m3OpenCreate(){
+    const c=$('#m3Create'); if(!c) return; m3Step(1);
+    m3RenderChairRows();
+  }
+  function m3Roles(){ const n=Number($('#m3cMode').value||'4'); return n===2?['SELLER','BUYER']:n===3?['SELLER','BUYER','PAYMASTER_1']:['SELLER','BUYER','PAYMASTER_1','PAYMASTER_2']; }
+  function m3RenderChairRows(){ $('#m3cChairs').innerHTML=m3Roles().map(m3cChairRow).join(''); }
+  function m3AmtPreview(){
+    const sell=m3TokenOf('sell'), buy=m3TokenOf('buy');
+    if(sell){ $('#m3cSellAmtHint').textContent='Em '+sell.symbol+' ('+sell.decimals+' decimais)'; const b=humanToBase($('#m3cSellAmt').value,sell.decimals); $('#m3cSellBase').textContent=b?('= '+b+' unidades base'):''; }
+    if(buy){ $('#m3cBuyAmtHint').textContent='Em '+buy.symbol+' ('+buy.decimals+' decimais)'; const b=humanToBase($('#m3cBuyAmt').value,buy.decimals); $('#m3cBuyBase').textContent=b?('= '+b+' unidades base'):''; }
+  }
+  // Dados consolidados do wizard (validados a cada transição de passo).
+  function m3WizardData(){
     const net=$('#m3cNet').value;
-    const roles=['SELLER','BUYER','PAYMASTER_1']; if($('#m3cPm2').classList.contains('on')) roles.push('PAYMASTER_2');
-    const chairs=[];
-    for(const role of roles){
-      const row=document.querySelector('[data-m3-chair="'+role+'"]');
-      if(!row && role==='PAYMASTER_2'){ chairs.push({role,expectedAsset:{network:net,contractOrMint:null,decimals:9,symbol:'SOL'}}); continue; }
-      const f=k=>{ const el=row?row.querySelector('[data-m3f="'+k+'"]'):null; return el?el.value.trim():''; };
-      chairs.push({ role, expectedAsset:{ network:net, contractOrMint:f('contract')||null, decimals:Number(f('decimals')||'9'), symbol:(f('symbol')||'SOL').toUpperCase() }, label:f('label')||undefined });
-    }
+    const sell=m3TokenOf('sell'), buy=m3TokenOf('buy');
+    if(!sell||!buy) return { err:'Escolha rede e token do Vendedor e do Comprador (ou preencha o modo avançado).' };
+    if(sell.network===buy.network&&(sell.contractOrMint||'')===(buy.contractOrMint||'')&&sell.symbol===buy.symbol) return { err:'Os ativos do Vendedor e do Comprador devem ser diferentes.' };
+    const amountInBase=humanToBase($('#m3cSellAmt').value,sell.decimals);
+    const buyerAmountInBase=humanToBase($('#m3cBuyAmt').value,buy.decimals);
+    const discountBps=pctToBps($('#opFeeDesc').value), commissionBps=pctToBps($('#opFeeComm').value);
+    if(discountBps==null||discountBps>2000) return { err:'Deságio inválido (máx. 20%).' };
+    if(commissionBps==null||commissionBps>5000) return { err:'Comissão inválida (máx. 50%).' };
+    if(discountBps+commissionBps>10000) return { err:'Deságio + comissão não podem passar de 100%.' };
+    const s=$('#opFeeSeller').classList.contains('on'), b=$('#opFeeBuyer').classList.contains('on');
+    const commissionPayer=s&&b?'SPLIT':(b?'BUYER':'SELLER');
+    const roles=m3Roles();
+    const gas=M3_GAS[net]||{symbol:'GAS',decimals:18};
+    const lbl=r=>{ const el=document.querySelector('[data-m3-chair="'+r+'"] [data-m3f="label"]'); const v=el?el.value.trim():''; return v||undefined; };
+    const chairs=[
+      { role:'SELLER', expectedAsset:{ network:sell.network, contractOrMint:sell.contractOrMint, decimals:sell.decimals, symbol:sell.symbol }, label:lbl('SELLER') },
+      { role:'BUYER',  expectedAsset:{ network:buy.network,  contractOrMint:buy.contractOrMint,  decimals:buy.decimals,  symbol:buy.symbol  }, label:lbl('BUYER') },
+    ];
+    if(roles.includes('PAYMASTER_1')) chairs.push({ role:'PAYMASTER_1', expectedAsset:{ network:net, contractOrMint:null, decimals:gas.decimals, symbol:gas.symbol } });
+    if(roles.includes('PAYMASTER_2')) chairs.push({ role:'PAYMASTER_2', expectedAsset:{ network:net, contractOrMint:null, decimals:gas.decimals, symbol:gas.symbol }, label:lbl('PAYMASTER_2') });
+    const plan=m3Plan(sell,buy);
+    return { net, sell, buy, amountInBase, buyerAmountInBase, discountBps, commissionBps, commissionPayer, roles, chairs, plan };
+  }
+  function m3RenderReview(){
+    const d=m3WizardData();
+    const row=(k,v)=>'<div class="r"><span class="k">'+k+'</span><span class="v">'+v+'</span></div>';
+    if(d.err){ $('#m3rSummary').innerHTML=row('Atenção','<span style="color:#fecaca">'+esc(d.err)+'</span>'); return false; }
+    const payerTxt={SELLER:'Vendedor',BUYER:'Comprador',SPLIT:'Dividido 50/50'}[d.commissionPayer];
+    const chairsTxt={2:'2 — Bilateral (Vendedor e Comprador)',3:'3 — Vendedor, Comprador e Pay Master 1',4:'4 — Vendedor, Comprador, Pay Master 1 e 2'}[d.roles.length];
+    $('#m3rSummary').innerHTML=[
+      row('Rede principal',esc(($('#m3cNet').selectedOptions[0]||{}).textContent||d.net)),
+      row('Cadeiras',chairsTxt),
+      row('Liquidação','<span style="color:var(--blue)">'+esc(d.plan.txt)+'</span>'),
+      row('Vendedor entrega',esc(d.sell.symbol)+' em '+esc(d.sell.network)+(d.sell.representationOf?' <span style="color:var(--ink-3)">· '+esc(d.sell.representationOf)+'</span>':'')),
+      row('Quantidade do Vendedor',d.amountInBase?esc($('#m3cSellAmt').value.trim())+' '+esc(d.sell.symbol)+' <span class="mono" style="color:var(--ink-3)">('+d.amountInBase+' base)</span>':'<span style="color:#fecaca">não informada</span>'),
+      row('Comprador entrega',esc(d.buy.symbol)+' em '+esc(d.buy.network)+(d.buy.representationOf?' <span style="color:var(--ink-3)">· '+esc(d.buy.representationOf)+'</span>':'')),
+      row('Quantidade do Comprador',d.buyerAmountInBase?esc($('#m3cBuyAmt').value.trim())+' '+esc(d.buy.symbol)+' <span class="mono" style="color:var(--ink-3)">('+d.buyerAmountInBase+' base)</span>':'<span style="color:#fecaca">não informada</span>'),
+      row('Deságio',bpsToPct(d.discountBps)+'% ('+d.discountBps+' bps)'),
+      row('Comissão',bpsToPct(d.commissionBps)+'% ('+d.commissionBps+' bps) · paga por: '+payerTxt),
+      row('Validade da mesa','60 minutos · janela on-chain da operação: 40 minutos'),
+    ].join('');
+    return true;
+  }
+  async function m3SubmitCreate(){
+    const d=m3WizardData();
+    if(d.err){ toast(d.err,'err'); return; }
+    if(!d.amountInBase||!d.buyerAmountInBase){ toast('Informe as quantidades do Vendedor e do Comprador.','err'); return; }
+    const btn=$('#m3cSubmit'); btn.disabled=true;
     try{
-      const mesa=await pmApi('/v1/portal/mesas',{method:'POST',body:{ label:$('#m3cLabel').value.trim()||undefined, network:net, chairs }});
-      toast('Mesa '+mesa.code+' criada','ok'); $('#m3Create').style.display='none';
+      const mesa=await pmApi('/v1/portal/mesas',{method:'POST',body:{ label:$('#m3cLabel').value.trim()||undefined, network:d.net, chairs:d.chairs }});
+      // Config salva na sequência — a mesa já nasce pronta para convidar e aprovar.
+      await pmApi('/v1/portal/mesas/'+mesa.mesaId+'/config',{method:'PATCH',body:{ amountInBase:d.amountInBase, buyerAmountInBase:d.buyerAmountInBase, discountBps:d.discountBps, commissionBps:d.commissionBps, commissionPayer:d.commissionPayer }});
+      toast('Mesa '+mesa.code+' criada · operação '+(mesa.operationCode||''),'ok'); m3Step(0);
       await m3LoadList(); m3Open(mesa.mesaId);
     }catch(e){ toast(e.message||'Falha ao criar mesa','err'); }
+    finally{ btn.disabled=false; }
   }
   async function m3LoadList(){
     try{
@@ -2334,7 +2392,7 @@ img,svg,canvas,video{max-width:100%}
       const cEl=$('#m3Count'); if(cEl) cEl.textContent=String(mesas.length);
       const box=$('#m3List'); if(box){
         box.innerHTML = mesas.length? mesas.map(m=>'<div class="r" style="display:flex;gap:10px;align-items:center;justify-content:space-between;padding:10px 0;border-bottom:1px solid var(--line)">'
-          +'<div><span class="mono" style="font-size:12.5px">'+esc(m.code)+'</span>'+(m.label?' <span style="color:var(--ink-3);font-size:12px">· '+esc(m.label)+'</span>':'')+'<div style="font-size:12px;color:var(--ink-3)">'+m.chairs.map(c=>esc((M3_ROLE[c.role]||c.role)+(c.firstName?(' · '+c.firstName):''))+(c.connected?' ✓':'')).join(' · ')+'</div></div>'
+          +'<div><span class="mono" style="font-size:12.5px">'+esc(m.code)+'</span>'+(m.operationCode?' <span class="mono" style="color:var(--blue);font-size:12px">· '+esc(m.operationCode)+'</span>':'')+(m.label?' <span style="color:var(--ink-3);font-size:12px">· '+esc(m.label)+'</span>':'')+'<div style="font-size:12px;color:var(--ink-3)">'+m.chairs.map(c=>esc((M3_ROLE[c.role]||c.role)+(c.firstName?(' · '+c.firstName):''))+(c.connected?' ✓':'')).join(' · ')+'</div></div>'
           +'<div style="display:flex;gap:8px;align-items:center">'+m3Badge(m.status)+'<button class="btn" data-m3-open="'+esc(m.mesaId)+'" style="height:34px;font-size:12.5px">Ver mesa</button></div></div>').join('')
           : '<p style="color:var(--ink-3);font-size:12.5px;margin:0">Nenhuma mesa criada ainda. Toque em "Criar mesa".</p>';
         box.querySelectorAll('[data-m3-open]').forEach(b=>b.addEventListener('click',()=>m3Open(b.dataset.m3Open)));
@@ -2350,7 +2408,7 @@ img,svg,canvas,video{max-width:100%}
     const list=(mesas||[]).filter(m=>(!q||m.code.toUpperCase().includes(q))&&(!f||m.status===f));
     card.style.display=(mesas&&mesas.length)?'':'none';
     const rows=$('#m3OpsRows'); if(!rows) return;
-    rows.innerHTML=list.map(m=>'<tr><td class="mono">'+esc(m.code)+'</td>'
+    rows.innerHTML=list.map(m=>'<tr><td class="mono">'+esc(m.code)+(m.operationCode?'<br><span style="color:var(--blue);font-size:11px">'+esc(m.operationCode)+'</span>':'')+'</td>'
       +'<td style="font-size:12px">'+m.chairs.map(c=>esc((M3_ROLE[c.role]||c.role)+(c.firstName?(': '+c.firstName):''))).join('<br>')+'</td>'
       +'<td class="mono">'+esc(m.amount||'—')+'</td><td>'+m3Badge(m.status)+'</td>'
       +'<td><button class="btn" data-m3-goto="'+esc(m.mesaId)+'" style="height:32px;font-size:12px">Ver mesa</button></td></tr>').join('')||'<tr><td colspan="5" style="color:var(--ink-3)">Nenhuma mesa com esse filtro.</td></tr>';
@@ -2381,9 +2439,23 @@ img,svg,canvas,video{max-width:100%}
       }).join('');
       chairs.querySelectorAll('[data-m3-inv]').forEach(b=>b.addEventListener('click',()=>m3Invite(b.dataset.m3Inv)));
       chairs.querySelectorAll('[data-m3-rvk]').forEach(b=>b.addEventListener('click',async()=>{ if(!confirm('Revogar a conexão desta cadeira? O participante precisará de um novo convite.')) return; try{ await pmApi('/v1/portal/mesas/'+m3Sel+'/chairs/'+b.dataset.m3Rvk+'/revoke',{method:'POST',body:{}}); m3Refresh(); }catch(e){ toast(e.message,'err'); } }));
-      if(m.config){ if(document.activeElement!==$('#m3dAmount')) $('#m3dAmount').value=m.config.amountInBase||''; if(document.activeElement!==$('#m3dDiscount')) $('#m3dDiscount').value=m.config.discountBps; if(document.activeElement!==$('#m3dCommission')) $('#m3dCommission').value=m.config.commissionBps; }
+      $('#m3dOpCode').textContent=m.operationCode?('Operação '+m.operationCode):'';
+      $('#m3dPlan').textContent=m.settlement?('Liquidação: '+m.settlement.summary):'';
+      // Config em valores humanos: converte unidades base/bps usando os decimais das cadeiras.
+      const sellCh=(m.chairs||[]).find(c=>c.role==='SELLER'), buyCh=(m.chairs||[]).find(c=>c.role==='BUYER');
+      if(sellCh) $('#m3dAmountHint').textContent='Em '+sellCh.expectedAsset.symbol+' ('+sellCh.expectedAsset.decimals+' decimais)';
+      if(buyCh) $('#m3dBuyAmountHint').textContent='Em '+buyCh.expectedAsset.symbol+' ('+buyCh.expectedAsset.decimals+' decimais)';
+      if(m.config){
+        const setIf=(id,v)=>{ const el=$(id); if(el&&document.activeElement!==el) el.value=v; };
+        setIf('#m3dAmount',m.config.amountInBase&&sellCh?baseToHuman(m.config.amountInBase,sellCh.expectedAsset.decimals):'');
+        setIf('#m3dBuyAmount',m.config.buyerAmountInBase&&buyCh?baseToHuman(m.config.buyerAmountInBase,buyCh.expectedAsset.decimals):'');
+        setIf('#m3dDiscount',bpsToPct(m.config.discountBps)); setIf('#m3dCommission',bpsToPct(m.config.commissionBps));
+        setIf('#m3dPayer',m.config.commissionPayer||'SELLER');
+        if(sellCh&&m.config.amountInBase) $('#m3dAmountBase').textContent='= '+m.config.amountInBase+' base';
+        if(buyCh&&m.config.buyerAmountInBase) $('#m3dBuyAmountBase').textContent='= '+m.config.buyerAmountInBase+' base';
+      }
       const frozen=!!m.approvedAt;
-      ['m3dAmount','m3dDiscount','m3dCommission'].forEach(id=>{ const el=document.getElementById(id); if(el) el.disabled=frozen; });
+      ['m3dAmount','m3dBuyAmount','m3dDiscount','m3dCommission','m3dPayer'].forEach(id=>{ const el=document.getElementById(id); if(el) el.disabled=frozen; });
       $('#m3dSaveCfg').style.display=frozen?'none':'';
       $('#m3dApprove').style.display=frozen?'none':'';
       $('#m3dSign').style.display=(m.deal&&m.deal.state==='AWAITING_SIGNATURES')?'':'none';
@@ -2431,9 +2503,17 @@ img,svg,canvas,video{max-width:100%}
   }
   function m3ShowMotivos(list){ const el=$('#m3dMotivos'); if(!el) return; if(!list||!list.length){ el.style.display='none'; return; } el.style.display=''; el.innerHTML='<b>Não foi possível aprovar:</b><br>'+list.map(esc).join('<br>'); }
   async function m3SaveCfg(){
+    const m=m3Cache||{}; const chairs=m.chairs||[];
+    const sellCh=chairs.find(c=>c.role==='SELLER'), buyCh=chairs.find(c=>c.role==='BUYER');
     const body={};
-    const a=$('#m3dAmount').value.trim(); if(a) body.amountInBase=a;
-    body.discountBps=Number($('#m3dDiscount').value||'0'); body.commissionBps=Number($('#m3dCommission').value||'0');
+    const a=$('#m3dAmount').value.trim();
+    if(a){ const base=sellCh?humanToBase(a,sellCh.expectedAsset.decimals):null; if(!base){ toast('Quantidade do Vendedor inválida para '+(sellCh?sellCh.expectedAsset.symbol:'o token'),'err'); return; } body.amountInBase=base; }
+    const ba=$('#m3dBuyAmount').value.trim();
+    if(ba){ const base=buyCh?humanToBase(ba,buyCh.expectedAsset.decimals):null; if(!base){ toast('Quantidade do Comprador inválida para '+(buyCh?buyCh.expectedAsset.symbol:'o token'),'err'); return; } body.buyerAmountInBase=base; }
+    const d=pctToBps($('#m3dDiscount').value), c=pctToBps($('#m3dCommission').value);
+    if(d==null||d>2000){ toast('Deságio inválido (máx. 20%)','err'); return; }
+    if(c==null||c>5000){ toast('Comissão inválida (máx. 50%)','err'); return; }
+    body.discountBps=d; body.commissionBps=c; body.commissionPayer=$('#m3dPayer').value||'SELLER';
     try{ await pmApi('/v1/portal/mesas/'+m3Sel+'/config',{method:'PATCH',body}); toast('Configuração salva','ok'); m3Refresh(); }
     catch(e){ toast(e.message,'err'); }
   }
@@ -2456,9 +2536,23 @@ img,svg,canvas,video{max-width:100%}
   }
   function m3Init(){
     const nb=$('#m3New'); if(nb) nb.addEventListener('click',m3OpenCreate);
-    const cc=$('#m3cCancel'); if(cc) cc.addEventListener('click',()=>{ $('#m3Create').style.display='none'; });
-    const cs=$('#m3cSubmit'); if(cs) cs.addEventListener('click',m3SubmitCreate);
-    const p2=$('#m3cPm2'); if(p2) p2.addEventListener('click',()=>{ p2.classList.toggle('on'); const on=p2.classList.contains('on'); const box=$('#m3cChairs'); const has=box.querySelector('[data-m3-chair="PAYMASTER_2"]'); if(on&&!has) box.insertAdjacentHTML('beforeend',m3cChairRow('PAYMASTER_2')); if(!on&&has) has.remove(); });
+    const cc=$('#m3cCancel'); if(cc) cc.addEventListener('click',()=>m3Step(0));
+    // Navegação do wizard: 1 Mesa → 2 Ativos → 3 Valores/taxas → 4 Revisão.
+    const on=(id,fn)=>{ const el=$(id); if(el) el.addEventListener('click',fn); };
+    on('#m3cNext',async()=>{ await m3LoadTokens($('#m3cNet').value); m3Step(2); });
+    on('#m3cBack2',()=>m3Step(1));
+    on('#m3cNext2',()=>{ const d=m3WizardData(); if(d.err){ toast(d.err,'err'); return; } m3AmtPreview(); m3Step(3); });
+    on('#m3cBack',()=>m3Step(2));
+    on('#m3cNext3',()=>{ if(m3RenderReview()) m3Step(4); else toast('Revise os campos destacados','err'); });
+    on('#m3cBack4',()=>m3Step(3));
+    on('#m3cSubmit',m3SubmitCreate);
+    ['#m3cSellAmt','#m3cBuyAmt'].forEach(id=>{ const el=$(id); if(el) el.addEventListener('input',m3AmtPreview); });
+    const adv=$('#m3cAdvLink'); if(adv) adv.addEventListener('click',e=>{ e.preventDefault(); const box=$('#m3cAdv'); box.style.display=box.style.display==='none'?'':'none'; });
+    const md=$('#m3cMode'); if(md) md.addEventListener('change',m3RenderChairRows);
+    // Troca de rede por lado recarrega os tokens daquele lado e atualiza o plano de liquidação.
+    const sn=$('#m3cSellNet'); if(sn) sn.addEventListener('change',async()=>{ await m3LoadTokensSide('sell',sn.value); m3PlanHint(); });
+    const bn=$('#m3cBuyNet'); if(bn) bn.addEventListener('change',async()=>{ await m3LoadTokensSide('buy',bn.value); m3PlanHint(); });
+    ['#m3cSellTok','#m3cBuyTok'].forEach(id=>{ const el=$(id); if(el) el.addEventListener('change',m3PlanHint); });
     const sc=$('#m3dSaveCfg'); if(sc) sc.addEventListener('click',m3SaveCfg);
     const ap=$('#m3dApprove'); if(ap) ap.addEventListener('click',m3Approve);
     const sg=$('#m3dSign'); if(sg) sg.addEventListener('click',m3Sign);

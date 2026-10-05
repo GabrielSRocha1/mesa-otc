@@ -18,6 +18,7 @@ import type { Deal } from '../domain/types.js';
 import { verifySolana, verifyTron, verifyBitcoin } from '../engines/signature.js';
 import { getChain } from '../chains/registry.js';
 import { deriveMesaStatus } from './status.js';
+import { deriveSettlementPlan } from './settlementPlan.js';
 import { INVITABLE_CHAIR_ROLES, type ChairAsset, type MesaChair, type MesaChairRole, type MesaOperationConfig, type MesaRecord, type MesaStatus } from './types.js';
 
 export const CHAIR_ROLE_LABEL: Record<MesaChairRole, string> = { SELLER: 'Vendedor', BUYER: 'Comprador', PAYMASTER_1: 'Pay Master 1', PAYMASTER_2: 'Pay Master 2' };
@@ -79,10 +80,11 @@ export class MesaService {
   createMesa(portalToken: string | undefined, input: CreateMesaInput): MesaRecord {
     const pm = this.d.portal.requirePayMaster(portalToken);
     const roles = input.chairs.map(c => c.role);
-    if (input.chairs.length < 3 || input.chairs.length > 4) throw new DomainError('INVALID_INPUT', 'A mesa precisa de 3 ou 4 cadeiras');
+    // Escrow dinâmico (v4): 2 cadeiras (bilateral), 3 (com Pay Master) ou 4 (dois Pay Masters).
+    if (input.chairs.length < 2 || input.chairs.length > 4) throw new DomainError('INVALID_INPUT', 'A mesa precisa de 2 a 4 cadeiras');
     if (new Set(roles).size !== roles.length) throw new DomainError('INVALID_INPUT', 'Cada função aparece no máximo uma vez');
-    for (const r of ['SELLER', 'BUYER', 'PAYMASTER_1'] as MesaChairRole[]) if (!roles.includes(r)) throw new DomainError('INVALID_INPUT', `A mesa precisa da cadeira ${CHAIR_ROLE_LABEL[r]}`);
-    if (input.chairs.length === 4 && !roles.includes('PAYMASTER_2')) throw new DomainError('INVALID_INPUT', 'A 4ª cadeira deve ser o Pay Master 2');
+    for (const r of ['SELLER', 'BUYER'] as MesaChairRole[]) if (!roles.includes(r)) throw new DomainError('INVALID_INPUT', `A mesa precisa da cadeira ${CHAIR_ROLE_LABEL[r]}`);
+    if (roles.includes('PAYMASTER_2') && !roles.includes('PAYMASTER_1')) throw new DomainError('INVALID_INPUT', 'Pay Master 2 exige a cadeira Pay Master 1');
     if (!input.network || typeof input.network !== 'string') throw new DomainError('INVALID_INPUT', 'Rede da mesa obrigatória (uma mesa = uma rede)');
     const t = this.now();
     const chairs: MesaChair[] = input.chairs.map(c => {
@@ -93,7 +95,7 @@ export class MesaService {
       if (c.role === 'PAYMASTER_1' && pm.wallet) { chair.wallet = pm.wallet; chair.firstName = pm.name.split(/\s+/)[0]; chair.connectedAt = t; }
       return chair;
     });
-    const mesa: MesaRecord = { mesaId: 'mesa_' + randomUUID(), payMasterId: pm.id, code: this.d.portal.newMesaCode(), label: input.label?.trim() || undefined, network: input.network, chairs, approvals: {}, dealId: null, dealIds: [], createdAt: t, expiresAt: t + TABLE_TTL_MS };
+    const mesa: MesaRecord = { mesaId: 'mesa_' + randomUUID(), payMasterId: pm.id, code: this.d.portal.newMesaCode(), operationCode: `OP-${newInviteCode()}`, label: input.label?.trim() || undefined, network: input.network, chairs, approvals: {}, dealId: null, dealIds: [], createdAt: t, expiresAt: t + TABLE_TTL_MS };
     this.d.portal.mesas()[mesa.mesaId] = mesa;
     this.d.portal.persistMesas();
     void this.audit('mesa.criada', pm.id, { mesaId: mesa.mesaId, code: mesa.code, network: mesa.network, chairs: chairs.map(c => ({ chairId: c.chairId, role: c.role })) });
@@ -109,13 +111,13 @@ export class MesaService {
   /** Mesa por id (participante já autorizado pela sessão). */
   mesaById(mesaId: string): MesaRecord | null { return this.d.portal.mesas()[mesaId] ?? null; }
 
-  async listMesas(portalToken: string | undefined): Promise<{ mesaId: string; code: string; label?: string; network: string; status: MesaStatus; chairs: { role: MesaChairRole; firstName: string | null; connected: boolean }[]; amount: string | null; createdAt: number; expiresAt: number }[]> {
+  async listMesas(portalToken: string | undefined): Promise<{ mesaId: string; code: string; operationCode: string | null; label?: string; network: string; status: MesaStatus; chairs: { role: MesaChairRole; firstName: string | null; connected: boolean }[]; amount: string | null; createdAt: number; expiresAt: number }[]> {
     const pm = this.d.portal.requirePayMaster(portalToken, false);
     const mesas = Object.values(this.d.portal.mesas()).filter(m => m.payMasterId === pm.id).sort((a, b) => b.createdAt - a.createdAt);
     const out = [];
     for (const m of mesas) {
       const status = await this.statusOf(m);
-      out.push({ mesaId: m.mesaId, code: m.code, label: m.label, network: m.network, status, chairs: m.chairs.map(c => ({ role: c.role, firstName: c.firstName ?? null, connected: !!c.wallet })), amount: m.config?.amountInBase ?? null, createdAt: m.createdAt, expiresAt: m.expiresAt });
+      out.push({ mesaId: m.mesaId, code: m.code, operationCode: m.operationCode ?? null, label: m.label, network: m.network, status, chairs: m.chairs.map(c => ({ role: c.role, firstName: c.firstName ?? null, connected: !!c.wallet })), amount: m.config?.amountInBase ?? null, createdAt: m.createdAt, expiresAt: m.expiresAt });
     }
     return out;
   }
@@ -316,6 +318,7 @@ export class MesaService {
     if (next.discountBps < 0 || next.discountBps > 2000) throw new DomainError('INVALID_INPUT', 'Deságio fora do intervalo permitido');
     if (next.commissionBps < 0 || next.commissionBps > 5000) throw new DomainError('INVALID_INPUT', 'Comissão fora do intervalo permitido');
     if (next.amountInBase !== undefined && !/^[1-9][0-9]*$/.test(next.amountInBase)) throw new DomainError('INVALID_INPUT', 'Quantidade inválida');
+    if (next.buyerAmountInBase !== undefined && !/^[1-9][0-9]*$/.test(next.buyerAmountInBase)) throw new DomainError('INVALID_INPUT', 'Quantidade do comprador inválida');
     mesa.config = next;
     this.d.portal.persistMesas();
     void this.audit('mesa.operacao.configurada', pm.id, { mesaId, config: { ...next, notes: undefined } });
@@ -355,7 +358,8 @@ export class MesaService {
     const deal = mesa.dealId ? await this.d.getDeal(mesa.dealId) : null;
     const status = deriveMesaStatus(mesa, invites, deal, now);
     const base = {
-      mesaId: mesa.mesaId, code: mesa.code, network: mesa.network, networkLabel: getChain(mesa.network)?.displayName ?? mesa.network,
+      mesaId: mesa.mesaId, code: mesa.code, operationCode: mesa.operationCode ?? null, network: mesa.network, networkLabel: getChain(mesa.network)?.displayName ?? mesa.network,
+      settlement: deriveSettlementPlan(mesa.chairs),
       status, createdAt: mesa.createdAt, expiresAt: mesa.expiresAt, serverTime: now,
       approvedAt: mesa.approvedAt ?? null, termsHash: mesa.termsHash ?? null,
       deal: deal ? { id: deal.id, state: deal.state, requiredSignatures: deal.requiredSignatures, validSignatures: deal.validSignatures, turnRole: deal.turnRole ?? null, turnExpiresAt: deal.turnExpiresAt ?? null, expiresAt: deal.expiresAt, signed: deal.signatures.filter(s => s.status === 'valid' && s.revision === deal.revision).map(s => s.role) } : null,

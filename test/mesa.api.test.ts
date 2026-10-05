@@ -188,4 +188,49 @@ describe('API mesa v3 — fluxo completo', () => {
     expect(status.status).toBe('SIGNATURE_TIMEOUT');
     await app.close();
   }, 120_000);
+
+  it('cadastro alinhado aos contratos: operationCode, /v1/tokens, buyerAmountInBase e saldo do Comprador no approve', async () => {
+    // Gás sempre rico; saldo de token (lado Comprador) alternável para isolar o motivo nominal.
+    const tokenAmount = { value: 10 };
+    const readers: BalanceReaders = {
+      native: async () => ({ amount: 1000 }),
+      tokens: async () => [{ symbol: 'USDC', contract: USDC_ASSET.contractOrMint, amount: tokenAmount.value }],
+      priceUsdOf: async () => 150,
+    };
+    const { app } = await makeApp({ balanceReaders: readers });
+    const pm = await registerPm(app, uniqueEmail('contratos'));
+    const mesa = await createMesa(app, pm);
+
+    // Código único de operação gerado na criação e exposto na view e na lista.
+    const view = (await app.api.inject({ method: 'GET', url: `/v1/portal/mesas/${mesa.mesaId}`, headers: pmHeaders(pm) })).json<{ operationCode: string }>();
+    expect(view.operationCode).toMatch(/^OP-[A-Z0-9]{4}-[A-Z0-9]{4}$/);
+    const list = (await app.api.inject({ method: 'GET', url: '/v1/portal/mesas', headers: pmHeaders(pm) })).json<{ mesas: { mesaId: string; operationCode: string | null }[] }>();
+    expect(list.mesas.find(m => m.mesaId === mesa.mesaId)?.operationCode).toBe(view.operationCode);
+
+    // Registro oficial de tokens por rede (alimenta o dropdown do wizard).
+    const toks = (await app.api.inject({ method: 'GET', url: '/v1/tokens?network=ethereum' })).json<{ tokens: { symbol: string; contractOrMint: string; decimals: number }[] }>();
+    expect(toks.tokens.some(t => t.symbol === 'USDT' && t.decimals === 6)).toBe(true);
+    expect(toks.tokens.some(t => t.symbol === 'WBTC' && t.decimals === 8)).toBe(true);
+
+    // Config com as duas pernas (Vendedor 250 SOL; Comprador 250.000 USDC em unidades base).
+    const seller = solWallet(); const buyer = solWallet();
+    await inviteAndJoin(app, pm, mesa.mesaId, mesa.chairs.find(c => c.role === 'SELLER')!.chairId, 'Ana', seller);
+    await inviteAndJoin(app, pm, mesa.mesaId, mesa.chairs.find(c => c.role === 'BUYER')!.chairId, 'Beto', buyer);
+    const cfg = await app.api.inject({ method: 'PATCH', url: `/v1/portal/mesas/${mesa.mesaId}/config`, headers: pmHeaders(pm), payload: { amountInBase: '250000000000', buyerAmountInBase: '250000000000', discountBps: 100, commissionBps: 200, commissionPayer: 'SPLIT' } });
+    expect(cfg.statusCode).toBe(200);
+    expect(cfg.json<{ buyerAmountInBase: string; commissionPayer: string }>().buyerAmountInBase).toBe('250000000000');
+
+    // Comprador com só 10 USDC (precisa de 250.000) → approve 409 com motivo nominal do Comprador.
+    const blocked = await app.api.inject({ method: 'POST', url: `/v1/portal/mesas/${mesa.mesaId}/approve`, headers: pmHeaders(pm), payload: {} });
+    expect(blocked.statusCode).toBe(409);
+    const motivos = blocked.json<{ details: { motivos: string[] } }>().details.motivos.join(' | ');
+    expect(motivos).toContain('Comprador');
+    expect(motivos).toContain('USDC insuficiente');
+
+    // Com saldo suficiente o approve passa.
+    tokenAmount.value = 10 ** 9;
+    const ok = await app.api.inject({ method: 'POST', url: `/v1/portal/mesas/${mesa.mesaId}/approve`, headers: pmHeaders(pm), payload: {} });
+    expect(ok.statusCode, ok.body).toBe(201);
+    await app.close();
+  }, 120_000);
 });

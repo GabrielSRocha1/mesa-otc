@@ -26,7 +26,10 @@ export interface MesaChair {
 
 /** Configuração da operação (editável só pelo admin; congelada na aprovação). */
 export interface MesaOperationConfig {
+  /** Quantidade do VENDEDOR em unidades base do ativo da cadeira SELLER. */
   amountInBase?: string;
+  /** Quantidade do COMPRADOR em unidades base do ativo da cadeira BUYER — o escrow exige as duas pernas. */
+  buyerAmountInBase?: string;
   discountBps: number;
   commissionBps: number;
   commissionPayer?: 'SELLER' | 'BUYER' | 'SPLIT';
@@ -37,6 +40,8 @@ export interface MesaRecord {
   mesaId: string;
   payMasterId: string;
   code: string;                       // gerador existente MESA-XXXX-XXXX-XXXX
+  /** Código único da OPERAÇÃO (OP-XXXX-XXXX), gerado na criação da mesa; opcional em mesas antigas. */
+  operationCode?: string;
   label?: string;
   network: string;                    // uma mesa = uma rede
   chairs: MesaChair[];                // 3–4
