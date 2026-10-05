@@ -53,7 +53,11 @@ export function evmTermsHash(t: Omit<EvmDealTerms, 'termsHash'>, chainId: bigint
 /** Deriva os termos EVM (RegisterInput + termsHash) dos termos congelados da Deal. Uma única função de verdade para backend, testes e keeper. */
 export function evmDealTerms(t: Terms, dealHash: string, routeHash: string, chainId: bigint, contract: Hex): EvmDealTerms {
   const legIn = t.legs[0]; const legOut = t.legs[1]; if (!legIn || !legOut) throw new DomainError('INVALID_INPUT', 'legs incompletas');
-  const parts = [...t.participants].sort((x, y) => ROLE_CODE[x.role] - ROLE_CODE[y.role]).map(p => p.address as Hex);
+  // Participante fora da EVM (ex.: vendedor de BTC nativo, tb1q…) não cabe num ABI `address`:
+  // entra como surrogate determinístico de 20 bytes (keccak do texto). O envelope é auditoria da
+  // mesa — builder e verificador derivam igual; a identidade plena segue em sellerHash/counterpartyHash.
+  const addr20 = (a: string): Hex => /^0x[0-9a-fA-F]{40}$/.test(a) ? a as Hex : ('0x' + keccak256(stringToHex(a)).slice(-40)) as Hex;
+  const parts = [...t.participants].sort((x, y) => ROLE_CODE[x.role] - ROLE_CODE[y.role]).map(p => addr20(p.address));
   const split: [number, number] = [t.pricing.commissionSplitBps[0] ?? t.pricing.commissionBps, t.pricing.commissionSplitBps[1] ?? 0];
   const base: Omit<EvmDealTerms, 'termsHash'> = {
     dealId: t.dealId, revision: t.revision, dealHash: ('0x' + dealHash) as Hex, expiresAtMs: BigInt(t.expiresAt), participants: parts,
