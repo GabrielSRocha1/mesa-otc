@@ -65,8 +65,8 @@ describe('transação de gasto do HTLC (BIP-143 + witness)', () => {
     let i = 12; // version + marker/flag
     expect(hex.slice(i, i + 2)).toBe('01'); i += 2;          // 1 input
     i += 64 + 8 + 2 + 8;                                     // outpoint + scriptSig vazio + sequence
+    expect(hex.slice(i, i + 2)).toBe('01'); i += 2;          // 1 output (contagem fica FORA do hashOutputs)
     const outStart = i;
-    expect(hex.slice(i, i + 2)).toBe('01'); i += 2;          // 1 output
     i += 16;                                                 // value
     const scriptLen = parseInt(hex.slice(i, i + 2), 16); i += 2 + scriptLen * 2;
     const outputs = hexToBytes(hex.slice(outStart, i));

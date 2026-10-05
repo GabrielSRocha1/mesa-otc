@@ -42,18 +42,18 @@ function sellerWallet(): Wallet {
 function buildLockTx(utxo: { txid: string; vout: number; value: number }, htlcScriptPubKeyHash: Uint8Array, sats: bigint): string {
   const feeSat = 1000n; const change = BigInt(utxo.value) - sats - feeSat;
   const sellerH160 = ripemd160(sha256(sellerPub));
-  const outputs = concatBytes(
-    varint(2),
+  // Corpo dos outputs SEM varint de contagem — o hashOutputs do BIP-143 não o inclui.
+  const outputsBody = concatBytes(
     u64le(sats), varint(34), Uint8Array.of(0x00, 0x20), htlcScriptPubKeyHash,                                      // cofre HTLC
     u64le(change), varint(22), Uint8Array.of(0x00, 0x14), sellerH160,                                              // troco do vendedor
   );
   // scriptCode do P2WPKH = P2PKH do hash160 da pubkey (BIP-143)
   const scriptCode = concatBytes(Uint8Array.of(0x76, 0xa9, 0x14), sellerH160, Uint8Array.of(0x88, 0xac));
-  const sighash = bip143Sighash({ utxos: [{ txid: utxo.txid, vout: utxo.vout, valueSat: BigInt(utxo.value), confirmations: 150 } as HtlcUtxo], witnessScript: scriptCode }, 0, 0xfffffffd, outputs);
+  const sighash = bip143Sighash({ utxos: [{ txid: utxo.txid, vout: utxo.vout, valueSat: BigInt(utxo.value), confirmations: 150 } as HtlcUtxo], witnessScript: scriptCode }, 0, 0xfffffffd, outputsBody);
   const sig = concatBytes(secp256k1.sign(sighash, sellerPriv, { prehash: false, format: 'der' }), Uint8Array.of(0x01));
   const ins = concatBytes(varint(1), hexToBytes(utxo.txid).reverse(), u32le(utxo.vout), varint(0), u32le(0xfffffffd));
   const wit = concatBytes(varint(2), varint(sig.length), sig, varint(sellerPub.length), sellerPub);
-  return bytesToHex(concatBytes(u32le(2), Uint8Array.of(0x00, 0x01), ins, outputs, wit, u32le(0)));
+  return bytesToHex(concatBytes(u32le(2), Uint8Array.of(0x00, 0x01), ins, varint(2), outputsBody, wit, u32le(0)));
 }
 
 describe('E2E — BTC nativo via HTLC com Esplora regtest e carteira financiando o lock', () => {

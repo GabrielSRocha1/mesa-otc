@@ -119,7 +119,11 @@ interface SpendPlan { utxos: HtlcUtxo[]; witnessScript: Uint8Array; payoutScript
 
 const outpoint = (u: HtlcUtxo): Uint8Array => concatBytes(hexToBytes(u.txid).reverse(), u32le(u.vout));
 
-/** sighash BIP-143 (SIGHASH_ALL) do input `idx` gastando P2WSH com `witnessScript`. */
+/**
+ * sighash BIP-143 (SIGHASH_ALL) do input `idx` gastando P2WSH com `witnessScript`.
+ * `outputs` = concatenação dos outputs serializados (valor + script) SEM o varint de contagem —
+ * o hashOutputs da spec NÃO inclui a contagem (um nó real rejeita com NULLFAIL se incluir).
+ */
 export function bip143Sighash(plan: Pick<SpendPlan, 'utxos' | 'witnessScript'>, idx: number, sequence: number, outputs: Uint8Array): Uint8Array {
   const hashPrevouts = dsha256(concatBytes(...plan.utxos.map(outpoint)));
   const hashSequence = dsha256(concatBytes(...plan.utxos.map(() => u32le(sequence))));
@@ -140,7 +144,8 @@ export function buildHtlcSpend(plan: SpendPlan): { hex: string; txid: string; vs
   const witnessOf = (sig: Uint8Array): Uint8Array[] => plan.path === 'claim'
     ? [sig, hexToBytes(plan.preimage as string), Uint8Array.of(0x01), plan.witnessScript]
     : [sig, new Uint8Array(0), plan.witnessScript];
-  const outputsFor = (value: bigint): Uint8Array => concatBytes(varint(1), u64le(value), varint(plan.payoutScript.length), plan.payoutScript);
+  // Corpo dos outputs SEM varint de contagem: é o que o hashOutputs do BIP-143 cobre.
+  const outputsFor = (value: bigint): Uint8Array => concatBytes(u64le(value), varint(plan.payoutScript.length), plan.payoutScript);
   // 1ª passada com assinatura dummy (72 bytes DER máx) só para medir o vsize e fixar a fee.
   const dummy = new Uint8Array(72);
   const draft = assemble(plan, outputsFor(total), plan.utxos.map(() => witnessOf(dummy)), sequence);
@@ -160,7 +165,7 @@ export function buildHtlcSpend(plan: SpendPlan): { hex: string; txid: string; vs
 
 function assemble(plan: SpendPlan, outputs: Uint8Array, witnesses: Uint8Array[][], sequence: number): { withWitness: Uint8Array; noWitness: Uint8Array } {
   const ins = concatBytes(varint(plan.utxos.length), ...plan.utxos.map(u => concatBytes(outpoint(u), varint(0), u32le(sequence))));
-  const core = concatBytes(ins, outputs);
+  const core = concatBytes(ins, varint(1), outputs); // contagem de outputs só na serialização (nunca no sighash)
   const wit = concatBytes(...witnesses.map(items => concatBytes(varint(items.length), ...items.map(i => concatBytes(varint(i.length), i)))));
   return { withWitness: concatBytes(u32le(2), Uint8Array.of(0x00, 0x01), core, wit, u32le(0)), noWitness: concatBytes(u32le(2), core, u32le(0)) };
 }

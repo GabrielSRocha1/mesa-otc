@@ -76,15 +76,16 @@ function buildLockTx(utxos: HtlcUtxo[], vaultScriptHash: Uint8Array, sats: bigin
   const h160 = ripemd160(sha256(sellerBtcPub));
   const outs: Uint8Array[] = [u64le(sats), varint(34), Uint8Array.of(0x00, 0x20), vaultScriptHash];
   if (change >= 546n) outs.push(u64le(change), varint(22), Uint8Array.of(0x00, 0x14), h160);
-  const outputs = concatBytes(varint(change >= 546n ? 2 : 1), ...outs);
+  const outputsBody = concatBytes(...outs); // SEM varint de contagem: o hashOutputs do BIP-143 não o inclui
+  const nOut = varint(change >= 546n ? 2 : 1);
   const scriptCode = concatBytes(Uint8Array.of(0x76, 0xa9, 0x14), h160, Uint8Array.of(0x88, 0xac));
   const ins = concatBytes(varint(utxos.length), ...utxos.map(u => concatBytes(hexToBytes(u.txid).reverse(), u32le(u.vout), varint(0), u32le(0xfffffffd))));
   const wits = utxos.map((_, i) => {
-    const sighash = bip143Sighash({ utxos, witnessScript: scriptCode }, i, 0xfffffffd, outputs);
+    const sighash = bip143Sighash({ utxos, witnessScript: scriptCode }, i, 0xfffffffd, outputsBody);
     const sig = concatBytes(secp256k1.sign(sighash, sellerBtcPriv, { prehash: false, format: 'der' }), Uint8Array.of(0x01));
     return concatBytes(varint(2), varint(sig.length), sig, varint(sellerBtcPub.length), sellerBtcPub);
   });
-  return bytesToHex(concatBytes(u32le(2), Uint8Array.of(0x00, 0x01), ins, outputs, concatBytes(...wits), u32le(0)));
+  return bytesToHex(concatBytes(u32le(2), Uint8Array.of(0x00, 0x01), ins, nOut, outputsBody, concatBytes(...wits), u32le(0)));
 }
 
 log(`Subindo o app (escrow V2 ${evmCfg.escrowV2} · Bitcoin ${net} via ${btcCfg.esploraUrl})…`);
