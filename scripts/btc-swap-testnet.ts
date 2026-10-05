@@ -123,7 +123,9 @@ const participants = [
 let deal = await app.deals.create({
   assetIn: { network: 'bitcoin', chainId: net, contractOrMint: null },
   assetOut: { network: 'ethereum', chainId: String(evmCfg.chainId), contractOrMint: evmCfg.tusdt },
-  amountInBase: SATS.toString(), discountBps: 0, maxSlippageBps: 100, maxPriceDriftBps: 500, expiresInSec: 3600, participants,
+  // 24h de validade da deal: a testnet4 pode levar HORAS para incluir o lock; as janelas curtas
+  // (40 min on-chain + 5 min por turno) continuam começando só no open, depois do lock confirmado.
+  amountInBase: SATS.toString(), discountBps: 0, maxSlippageBps: 100, maxPriceDriftBps: 500, expiresInSec: 24 * 3600, participants,
 }, sellerBtcAddr);
 for (const p of participants) if (p.role !== 'SELLER') deal = await app.deals.connectWallet(deal.id, p.role, p.address, p.address);
 deal = await app.deals.get(deal.id);
