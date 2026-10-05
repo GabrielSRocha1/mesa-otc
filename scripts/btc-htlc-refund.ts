@@ -7,6 +7,7 @@
  * Uso: npx tsx --env-file=.env scripts/btc-htlc-refund.ts <tradeId-sepolia> [payout-btc]
  *      payout padrão: endereço P2WPKH de BTC_SELLER_KEY do .env.
  */
+import { readFileSync } from 'node:fs';
 import { createPublicClient, http } from 'viem';
 import { secp256k1 } from '@noble/curves/secp256k1.js';
 import { hexToBytes, bytesToHex } from '@noble/hashes/utils.js';
@@ -14,18 +15,28 @@ import { loadConfig, bitcoinConfig, verumEvmConfig } from '../src/config.js';
 import { htlcWitnessScript, p2wshAddress, p2wpkhAddress, outputScriptOf, buildHtlcSpend, EsploraClient, type HtlcUtxo, type BitcoinNet } from '../src/adapters/bitcoin.js';
 import ABI from '../src/onchain/router/abi/verumOtcEscrowV2.js';
 
-const [tradeId, payoutArg] = process.argv.slice(2);
-if (!/^0x[0-9a-f]{64}$/i.test(tradeId ?? '')) { console.error('Uso: npx tsx --env-file=.env scripts/btc-htlc-refund.ts <tradeId-sepolia> [payout-btc]'); process.exit(1); }
+const [target, payoutArg] = process.argv.slice(2);
+const isTradeId = /^0x[0-9a-f]{64}$/i.test(target ?? '');
+const isVault = /^(tb1|bc1|bcrt1)[0-9a-z]{20,80}$/.test(target ?? '');
+if (!isTradeId && !isVault) { console.error('Uso: npx tsx --env-file=.env scripts/btc-htlc-refund.ts <tradeId-sepolia | endereço-do-cofre> [payout-btc]\n(endereço do cofre usa .data/btc-swap-recovery.jsonl)'); process.exit(1); }
 const config = loadConfig(process.env);
 const btcCfg = bitcoinConfig(config); const evmCfg = verumEvmConfig(config);
 if (!btcCfg || !evmCfg?.escrowV2) { console.error('exige BITCOIN_* + VERUM_EVM_V2_ESCROW_ADDRESS no .env'); process.exit(1); }
 const net = btcCfg.network as BitcoinNet;
 const esplora = new EsploraClient(btcCfg.esploraUrl);
 
-const pub = createPublicClient({ transport: http(evmCfg.rpcUrl) });
-const trade = await pub.readContract({ address: evmCfg.escrowV2, abi: ABI as never, functionName: 'getTradeV2', args: [tradeId as `0x${string}`] }) as { htlcHash: `0x${string}` };
-const htlcHash = trade.htlcHash.slice(2).toLowerCase();
-if (!/^[0-9a-f]{64}$/.test(htlcHash) || /^0+$/.test(htlcHash)) { console.error(`trade ${tradeId} sem htlcHash no escrow V2`); process.exit(1); }
+let htlcHash: string;
+if (isTradeId) {
+  const pub = createPublicClient({ transport: http(evmCfg.rpcUrl) });
+  const trade = await pub.readContract({ address: evmCfg.escrowV2, abi: ABI as never, functionName: 'getTradeV2', args: [target as `0x${string}`] }) as { htlcHash: `0x${string}` };
+  htlcHash = trade.htlcHash.slice(2).toLowerCase();
+  if (!/^[0-9a-f]{64}$/.test(htlcHash) || /^0+$/.test(htlcHash)) { console.error(`trade ${target} sem htlcHash no escrow V2`); process.exit(1); }
+} else {
+  // Cofre que nunca chegou à Sepolia: o htlcHash vem do arquivo de recuperação gravado ANTES do lock.
+  const line = readFileSync('.data/btc-swap-recovery.jsonl', 'utf8').split('\n').filter(Boolean).map(l => JSON.parse(l) as { vault: string; htlcHash: string }).reverse().find(r => r.vault === target);
+  if (!line) { console.error(`cofre ${target} não encontrado em .data/btc-swap-recovery.jsonl`); process.exit(1); }
+  htlcHash = line.htlcHash.toLowerCase();
+}
 
 const claimPub = secp256k1.getPublicKey(hexToBytes(btcCfg.claimKey.replace(/^0x/, '')), true);
 const refundPriv = hexToBytes(btcCfg.refundKey.replace(/^0x/, ''));

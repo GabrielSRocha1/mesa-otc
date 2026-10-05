@@ -17,7 +17,7 @@
  * dela (testnet4 tem blocos irregulares). Se expirar: tUSDT reembolsa na hora; BTC volta pelo
  * timelock de 144 blocos.
  */
-import { appendFileSync } from 'node:fs';
+import { appendFileSync, mkdirSync } from 'node:fs';
 import { randomBytes } from 'node:crypto';
 import { secp256k1 } from '@noble/curves/secp256k1.js';
 import { sha256 } from '@noble/hashes/sha2.js';
@@ -137,6 +137,10 @@ const htlcHash = deal.terms!.route.htlcHash as string;
 const witnessScript = htlcWitnessScript(htlcHash, secp256k1.getPublicKey(hexToBytes(btcCfg.claimKey.replace(/^0x/, '')), true), secp256k1.getPublicKey(hexToBytes(btcCfg.refundKey.replace(/^0x/, '')), true), btcCfg.csvBlocks);
 const vault = p2wshAddress(witnessScript, net);
 log(`COFRE HTLC (P2WSH ${net}): ${vault}`);
+console.log(`  htlcHash completo: ${htlcHash}`);
+// Recuperação ANTES do lock: se o processo morrer, o refund pós-timelock reconstrói o script daqui.
+mkdirSync('.data', { recursive: true });
+appendFileSync('.data/btc-swap-recovery.jsonl', JSON.stringify({ at: new Date().toISOString(), dealId: deal.id, net, vault, htlcHash, witnessScript: bytesToHex(witnessScript), csvBlocks: btcCfg.csvBlocks }) + '\n');
 const alreadyLocked = (await esplora.utxos(vault).catch(() => [])).reduce((s, u) => s + BigInt(u.value), 0n);
 if (alreadyLocked < SATS) {
   const utxos: HtlcUtxo[] = (await esplora.utxos(sellerBtcAddr)).map(u => ({ txid: u.txid, vout: u.vout, valueSat: BigInt(u.value), confirmations: 1 }));
