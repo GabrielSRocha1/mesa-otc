@@ -167,7 +167,9 @@ export class DealEngine {
       const terms: Terms = { schemaVersion: 1, environment: this.d.config.env, dealId: deal.id, revision: deal.revision, createdAt: deal.createdAt, expiresAt: deal.expiresAt, participants: dr.participants, requiredSignatures: deal.requiredSignatures, legs, pricing: econ.pricing, route: { routeId: route.routeId, kind: route.kind, legs: route.legs, ...(htlc ? { htlcHash: htlcHashOf(htlc.preimage) } : {}) }, dealNonce: randomHex(16) };
       deal.terms = terms; deal.hash = computeDealHash(terms); (deal as Deal & { htlcPreimage?: string }).htlcPreimage = htlc?.preimage;
       await this.transition(deal, 'LIQUIDITY_VERIFIED', actor, { dealHash: deal.hash.dealHash, routeId: route.routeId, priceSnapshotId: snapshot.id, liquidity: { depthUsd: liq.depthUsd, slippageBps: liq.slippageBps } });
-      await this.registerOnChain(deal);
+      // O registro on-chain acontece no OPEN (não aqui): escrow real tem janela FIXA de 40 min a
+      // partir do createTrade — registrá-la no congelamento dos termos queimava a janela antes de
+      // o fluxo começar (fatal na rota HTLC, em que o lock BTC confirma ANTES da abertura).
       return deal;
     } finally { end(); }
   }
@@ -175,6 +177,7 @@ export class DealEngine {
   private async registerOnChain(deal: Deal): Promise<void> {
     const c = this.commitment(deal);
     for (const chain of new Set(c.legs.map(l => l.escrowChain))) {
+      if (deal.onChain[chain]?.registered && deal.onChain[chain]?.revision === deal.revision) continue; // retry de open idempotente
       try {
         const tx = await this.d.adapters.require(chain).registerDeal(c);
         deal.onChain[chain] = { registered: true, revision: deal.revision, ...(tx.meta ? { meta: tx.meta } : {}) };
@@ -188,7 +191,7 @@ export class DealEngine {
   }
 
   /* ---------- 7. abertura para assinaturas ---------- */
-  async open(dealId: string, actor: string): Promise<Deal> { return this.withDeal(dealId, async deal => { this.assertCreator(deal, actor); await this.transition(deal, 'AWAITING_SIGNATURES', actor); this.startTurn(deal); await this.persist(deal, 'turn.started', 'system', { turnRole: deal.turnRole, turnExpiresAt: deal.turnExpiresAt }); return deal; }); }
+  async open(dealId: string, actor: string): Promise<Deal> { return this.withDeal(dealId, async deal => { this.assertCreator(deal, actor); await this.registerOnChain(deal); await this.transition(deal, 'AWAITING_SIGNATURES', actor); this.startTurn(deal); await this.persist(deal, 'turn.started', 'system', { turnRole: deal.turnRole, turnExpiresAt: deal.turnExpiresAt }); return deal; }); }
 
   /* ---------- 8. funding (dev: simulador; prod: indexer reporta) ---------- */
   async fund(dealId: string, role: Role, actor: string): Promise<Deal> {

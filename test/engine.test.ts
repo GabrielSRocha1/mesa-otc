@@ -13,7 +13,9 @@ describe('Deal Engine — criação e verificações', () => {
     expect(d.state).toBe('LIQUIDITY_VERIFIED'); expect(d.terms).not.toBeNull(); expect(d.hash!.dealHash).toHaveLength(64);
     const t = d.terms!; expect(t.dealId).toBe(d.id); expect(t.participants).toHaveLength(3); expect(t.requiredSignatures).toBe(3); expect(t.legs[0]!.amountBase).toBe('250000000000'); expect(BigInt(t.legs[1]!.amountBase)).toBeGreaterThan(0n);
     expect(t.pricing.discountBps).toBe(150); expect(t.pricing.platformFeeBps).toBe(3); expect(t.route.routeId).toMatch(/^RT-ESCROW_NN/); expect(t.expiresAt).toBe(d.expiresAt); expect(t.dealNonce).toHaveLength(32);
-    expect(d.onChain.solana?.registered).toBe(true); await app.close();
+    expect(d.onChain.solana?.registered).toBeUndefined(); // registro on-chain só no OPEN (janela de 40 min do escrow)
+    const opened = await app.deals.open(d.id, parts.SELLER.address);
+    expect(opened.onChain.solana?.registered).toBe(true); await app.close();
   });
   it('4 participantes ⇒ 4 assinaturas obrigatórias; 3 assinaturas não liquidam', async () => {
     const { app } = await makeApp({ autoSettle: false }); const parts: Parts = { ...solParts(), PAYMASTER_2: solWallet() }; const d = await prepareDeal(app, parts);

@@ -17,7 +17,7 @@ describe('Tron — rede de liquidação (simulador, TIP-191)', () => {
     const { app } = await makeApp(); const parts = tronParts();
     const d = await prepareDeal(app, parts, { assetIn: ASSETS.USDT_TRON, assetOut: ASSETS.BTC_TRON, amountInBase: '50000000000' }); // 50.000 USDT
     expect(d.state).toBe('LIQUIDITY_VERIFIED');
-    expect(d.onChain.tron?.registered).toBe(true);
+    expect(d.onChain.tron?.registered).toBeUndefined(); // registro on-chain só no OPEN (janela de 40 min do escrow)
     const done = await fullySign(app, d.id, parts);
     expect(['SETTLEMENT_VALIDATION', 'SETTLING', 'SETTLED']).toContain(done.state);
     await app.settlement.settle(d.id).catch(() => undefined);
