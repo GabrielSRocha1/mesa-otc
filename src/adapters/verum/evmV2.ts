@@ -23,6 +23,7 @@ import type { CanonicalAsset, ChainRef, Role } from '../../domain/types.js';
 import { DomainError } from '../../domain/errors.js';
 import { Role as OnchainRole, type WalletAttestation } from '../../onchain/types.js';
 import { signApprovalEvm, signWalletAttestationEvm, computeTradeIdEvm, evmDomain, APPROVAL_TYPES } from '../../onchain/crypto/index.js';
+import { commissionAmountOf } from '../../engines/signature.js';
 import ESCROW_V2_ABI_JSON from '../../onchain/router/abi/verumOtcEscrowV2.js';
 import type { AdapterCapabilities, ApprovalSignature, AssetVerification, DealCommitment, OnChainDealState, OnChainDealStatus, ParticipantStepProvider, RegisterResult, SettlementAdapter, TxRef, TxStatus } from '../types.js';
 import { deriveNonce, ROLE_TO_ONCHAIN, bindingOf, type VerumAdapterDeps, type VerumMeta } from './common.js';
@@ -52,13 +53,15 @@ export interface TermsV2Call {
   sellerAsset: Hex; sellerAmount: bigint; buyerAsset: Hex; buyerAmount: bigint;
   platformFeeBps: number; commissionBps: number; discountBps: number; slippageBps: number;
   createdAt: bigint; expiresAt: bigint; termsVersion: number; nonce: bigint; htlcHash: Hex;
+  /** Comissão ON-CHAIN dos PMs (unidades do buyerAsset) — split explícito calculado aqui e assinado por todos. */
+  commissionPm1: bigint; commissionPm2: bigint;
 }
 interface RawTradeV2 {
   termsHash: Hex; state: number; nextIdx: number; sellerExternal: boolean; sellerDeposited: boolean; buyerDeposited: boolean;
   feeCollected: boolean; feeAmount: bigint; settledAt: bigint; expiredAt: bigint;
   seller: Hex; paymaster01: Hex; paymaster02: Hex; buyer: Hex;
   sellerAsset: Hex; sellerAmount: bigint; buyerAsset: Hex; buyerAmount: bigint;
-  expiresAt: bigint; htlcHash: Hex; revealedPreimage: Hex;
+  expiresAt: bigint; htlcHash: Hex; commissionPm1: bigint; commissionPm2: bigint; revealedPreimage: Hex;
 }
 
 /** Legs EVM do commitment: índice da leg do vendedor/comprador NESTA rede (null = perna externa). */
@@ -102,6 +105,14 @@ export function buildVerumTermsV2(c: DealCommitment, chainNow: number, sellerEvm
   const buyerLeg = legOf(map.buyerLegIndex) as NonNullable<ReturnType<typeof legOf>>;
   const btcLeg = map.external ? c.legs.find(l => l.escrowChain === 'bitcoin') : null;
   const clamp = (n: number) => Math.min(Math.max(0, n), 10000);
+  // Comissão ON-CHAIN: total em unidades do buyerAsset (commissionAmountOf = amountOut·c/(1−d−c))
+  // repartido pelo split assinado; resto da divisão inteira fica com o PM1. Tudo explícito nos termos.
+  const commissionBps = clamp(c.terms.pricing.commissionBps);
+  const cTotal = commissionAmountOf(BigInt(buyerLeg.amountBase), clamp(c.terms.pricing.discountBps), commissionBps);
+  const split = c.terms.pricing.commissionSplitBps ?? [];
+  const pm2Bps = split[1] ?? 0;
+  const commissionPm2 = commissionBps > 0 ? cTotal * BigInt(clamp(pm2Bps)) / BigInt(commissionBps) : 0n;
+  const commissionPm1 = cTotal - commissionPm2;
   return {
     participants: present.map(p => ({ wallet: walletOf(p), role: ROLE_TO_ONCHAIN[p.role] })),
     sellerAsset: (sellerLeg?.asset.contractOrMint ?? zeroAddress) as Hex,
@@ -112,6 +123,7 @@ export function buildVerumTermsV2(c: DealCommitment, chainNow: number, sellerEvm
     createdAt: BigInt(chainNow), expiresAt: BigInt(chainNow + 2400), termsVersion: 2,
     nonce: deriveNonce(c.dealId, c.revision, c.dealNonce),
     htlcHash: map.external ? ('0x' + c.htlcHash) as Hex : ZERO32,
+    commissionPm1, commissionPm2,
   };
 }
 
@@ -252,7 +264,8 @@ export class VerumEvmV2Adapter implements SettlementAdapter, ParticipantStepProv
       const isSellerLeg = Number(b.meta.sellerLegIndex) === legIndex && Number(b.meta.sellerLegIndex) >= 0;
       const owner = isSellerLeg ? t.seller : t.buyer;
       const token = isSellerLeg ? t.sellerAsset : t.buyerAsset;
-      const base = isSellerLeg ? t.sellerAmount : t.buyerAmount;
+      // Comprador deposita líquido + comissões on-chain dos PMs (pagas no settle).
+      const base = isSellerLeg ? t.sellerAmount : t.buyerAmount + t.commissionPm1 + t.commissionPm2;
       // Fee acompanha a perna que a paga: vendedor on-chain OU comprador quando a perna do vendedor é externa.
       const paysFee = isSellerLeg ? !t.sellerExternal : t.sellerExternal;
       const due = base + (paysFee ? t.feeAmount : 0n);
@@ -371,7 +384,7 @@ export class VerumEvmV2Adapter implements SettlementAdapter, ParticipantStepProv
       const allowance = await this.pub.readContract({ address: t.sellerAsset, abi: ERC20_ABI, functionName: 'allowance', args: [signer as Hex, this.escrowV2] }) as bigint;
       if (allowance < due) approve = { token: t.sellerAsset, spender: this.escrowV2, amount: due.toString() };
     } else if (onRole === OnchainRole.BUYER) {
-      const due = t.buyerAmount + (t.sellerExternal ? t.feeAmount : 0n);
+      const due = t.buyerAmount + t.commissionPm1 + t.commissionPm2 + (t.sellerExternal ? t.feeAmount : 0n);
       const allowance = await this.pub.readContract({ address: t.buyerAsset, abi: ERC20_ABI, functionName: 'allowance', args: [signer as Hex, this.escrowV2] }) as bigint;
       if (allowance < due) approve = { token: t.buyerAsset, spender: this.escrowV2, amount: due.toString() };
     }

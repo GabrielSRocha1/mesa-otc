@@ -684,6 +684,16 @@ export default [
             "name": "htlcHash",
             "type": "bytes32",
             "internalType": "bytes32"
+          },
+          {
+            "name": "commissionPm1",
+            "type": "uint256",
+            "internalType": "uint256"
+          },
+          {
+            "name": "commissionPm2",
+            "type": "uint256",
+            "internalType": "uint256"
           }
         ]
       },
@@ -1114,6 +1124,16 @@ export default [
             "internalType": "bytes32"
           },
           {
+            "name": "commissionPm1",
+            "type": "uint256",
+            "internalType": "uint256"
+          },
+          {
+            "name": "commissionPm2",
+            "type": "uint256",
+            "internalType": "uint256"
+          },
+          {
             "name": "revealedPreimage",
             "type": "bytes",
             "internalType": "bytes"
@@ -1358,6 +1378,16 @@ export default [
             "name": "htlcHash",
             "type": "bytes32",
             "internalType": "bytes32"
+          },
+          {
+            "name": "commissionPm1",
+            "type": "uint256",
+            "internalType": "uint256"
+          },
+          {
+            "name": "commissionPm2",
+            "type": "uint256",
+            "internalType": "uint256"
           }
         ]
       }
@@ -1803,6 +1833,37 @@ export default [
         "type": "address",
         "indexed": true,
         "internalType": "address"
+      }
+    ],
+    "anonymous": false
+  },
+  {
+    "type": "event",
+    "name": "CommissionPaid",
+    "inputs": [
+      {
+        "name": "tradeId",
+        "type": "bytes32",
+        "indexed": true,
+        "internalType": "bytes32"
+      },
+      {
+        "name": "paymaster",
+        "type": "address",
+        "indexed": true,
+        "internalType": "address"
+      },
+      {
+        "name": "asset",
+        "type": "address",
+        "indexed": true,
+        "internalType": "address"
+      },
+      {
+        "name": "amount",
+        "type": "uint256",
+        "indexed": false,
+        "internalType": "uint256"
       }
     ],
     "anonymous": false
@@ -2462,6 +2523,11 @@ export default [
   {
     "type": "error",
     "name": "BadPreimage",
+    "inputs": []
+  },
+  {
+    "type": "error",
+    "name": "CommissionWithoutPaymaster",
     "inputs": []
   },
   {

@@ -29,7 +29,7 @@ function commitment(opts: { htlc?: boolean; roles?: string[]; btcBuyer?: boolean
     dealId: 'OTC-v2-1', revision: 1, dealHash: 'h', expiresAt: Date.now() + 2400_000, participants, legs,
     pricingHash: '', routeHash: '', domainHash: '', dealNonce: 'n1', feeBps: 3, treasury: '0x' + '9'.repeat(40),
     htlcHash: opts.htlc ? htlcHash : undefined,
-    terms: { pricing: { commissionBps: 200, discountBps: 300, maxSlippageBps: 50 } },
+    terms: { pricing: { commissionBps: 200, discountBps: 300, maxSlippageBps: 50, commissionSplitBps: [150, 50] } },
   } as unknown as DealCommitment;
 }
 
@@ -63,5 +63,23 @@ describe('evmLegMapOf / buildVerumTermsV2', () => {
   it('mesa de 4 cadeiras mantém a ordem canônica dos participantes', () => {
     const t = buildVerumTermsV2(commitment({ roles: ['SELLER', 'PAYMASTER_1', 'PAYMASTER_2', 'BUYER'] }), 1_800_000_000);
     expect(t.participants.map(p => p.role)).toEqual([0, 1, 2, 3]);
+  });
+
+  it('comissão ON-CHAIN: split explícito em unidades do buyerAsset, resto da divisão com o PM1', () => {
+    // amountOut 1e9 · c=200bps · d=300bps → total = 1e9·200/9500 = 21_052_631 (piso)
+    const t = buildVerumTermsV2(commitment({ roles: ['SELLER', 'PAYMASTER_1', 'PAYMASTER_2', 'BUYER'] }), 1_800_000_000);
+    const total = 21_052_631n;
+    const pm2 = total * 50n / 200n; // split [150, 50] bps
+    expect(t.commissionPm2).toBe(pm2);
+    expect(t.commissionPm1).toBe(total - pm2); // resto inteiro fica com o PM1
+    expect(t.commissionPm1 + t.commissionPm2).toBe(total);
+  });
+
+  it('sem comissão → campos zerados', () => {
+    const c = commitment({});
+    (c.terms as { pricing: { commissionBps: number } }).pricing.commissionBps = 0;
+    const t = buildVerumTermsV2(c, 1_800_000_000);
+    expect(t.commissionPm1).toBe(0n);
+    expect(t.commissionPm2).toBe(0n);
   });
 });
