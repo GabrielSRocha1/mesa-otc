@@ -37,7 +37,8 @@ import { readTokenBalances } from '../chains/tokenBalances.js';
 import { stablecoinNetworks } from '../chains/tokens.js';
 import { getIconMap } from '../chains/icons.js';
 import type { MesaService, AuthNetwork } from '../mesa/mesaService.js';
-import { validateChairBalances, defaultBalanceReaders, type BalanceReaders } from '../mesa/balances.js';
+import { validateChairBalances, defaultBalanceReaders, addressOn, type BalanceReaders } from '../mesa/balances.js';
+import { deriveSettlementPlan } from '../mesa/settlementPlan.js';
 import type { MesaChair, MesaRecord } from '../mesa/types.js';
 import registryData from '../onchain/registry/registryData.js';
 import { registryChecker, verumWalletChecker, composeCheckers, validateMesaTokens } from '../mesa/antiscam.js';
@@ -377,6 +378,63 @@ export async function buildApi(deps: ApiDeps): Promise<FastifyInstance> {
     await deps.audit.append({ actorType: 'user', actorId: seller.address, category: 'portal.mesa.deal.created', dealId: created.id, payload: { participants: parts.length } });
     return mesaDealView(opened);
   };
+  /**
+   * Criação da Deal HTLC REAL a partir das CADEIRAS da mesa (v4): vendedor entrega BTC NATIVO
+   * (lock no HTLC P2WSH da rede Bitcoin) e o comprador deposita o token no escrow V2 da perna
+   * EVM. Usa os endereços MULTICHAIN das carteiras conectadas — cada papel na rede da sua perna.
+   * O funding do vendedor é o lock externo: o fund devolve FUNDING_REQUIRED com o endereço do
+   * cofre, exposto na resposta (`htlcFunding`) para a UI instruir a carteira.
+   */
+  const createMesaHtlcDeal = async (mesa: MesaRecord, b: MesaDealBody, onCreated: (dealId: string) => void) => {
+    const adapters = deps.adapters;
+    if (!adapters) throw new DomainError('SETTLEMENT_NOT_ALLOWED', 'Operação HTLC indisponível: adaptadores de rede não configurados');
+    const plan = deriveSettlementPlan(mesa.chairs);
+    if (plan?.mode !== 'HTLC_BTC') throw new DomainError('INVALID_INPUT', 'Mesa sem perna de BTC nativo');
+    if (plan.htlc?.btcSide !== 'SELLER') throw new DomainError('SETTLEMENT_NOT_ALLOWED', 'BTC nativo do lado COMPRADOR ainda não é suportado (a perna externa do escrow V2 é a do vendedor)');
+    const sellerChair = mesa.chairs.find(c => c.role === 'SELLER') as MesaChair;
+    const buyerChair = mesa.chairs.find(c => c.role === 'BUYER') as MesaChair;
+    const pm1Chair = mesa.chairs.find(c => c.role === 'PAYMASTER_1');
+    if (!pm1Chair?.wallet) throw new DomainError('SETTLEMENT_NOT_ALLOWED', 'Operação HTLC pela mesa exige a cadeira Pay Master 1 conectada (o motor pede no mínimo 3 papéis)');
+    const tokenNet = buyerChair.expectedAsset.network;
+    if (tokenNet !== 'ethereum') throw new DomainError('SETTLEMENT_NOT_ALLOWED', `Perna de contrato em ${tokenNet} ainda não é suportada no fluxo HTLC da mesa (comece por Ethereum/Sepolia)`);
+    const btcAdapter = adapters.get('bitcoin'); const evmAdapter = adapters.get('ethereum');
+    if (!btcAdapter || !evmAdapter) throw new DomainError('SETTLEMENT_NOT_ALLOWED', 'Adaptadores bitcoin/ethereum ausentes');
+    // Endereços por perna, vindos da carteira multichain de cada cadeira.
+    const motivos: string[] = [];
+    const sellerBtc = addressOn(sellerChair, 'bitcoin'); if (!sellerBtc || !btcAdapter.validateAddress(sellerBtc)) motivos.push('Vendedor: carteira sem endereço Bitcoin válido');
+    const buyerEvm = addressOn(buyerChair, 'ethereum'); if (!buyerEvm || !evmAdapter.validateAddress(buyerEvm)) motivos.push('Comprador: carteira sem endereço Ethereum válido');
+    const pm1Evm = addressOn(pm1Chair, 'ethereum'); if (!pm1Evm || !evmAdapter.validateAddress(pm1Evm)) motivos.push('Pay Master 1: carteira sem endereço Ethereum válido');
+    if (!mesa.config?.amountInBase) motivos.push('Configuração: quantidade do Vendedor (sats) não definida');
+    if (motivos.length) throw new DomainError('VERSION_CONFLICT', 'Não foi possível criar a operação HTLC', { motivos });
+    const input = {
+      assetIn: { network: 'bitcoin', chainId: btcAdapter.chain.chainId, contractOrMint: null },
+      assetOut: { network: 'ethereum', chainId: evmAdapter.chain.chainId, contractOrMint: buyerChair.expectedAsset.contractOrMint },
+      amountInBase: mesa.config!.amountInBase as string, discountBps: b.discountBps, commissionBps: b.commissionBps, commissionSplitBps: b.commissionSplitBps,
+      maxSlippageBps: b.maxSlippageBps, maxPriceDriftBps: 500, expiresInSec: b.expiresInSec,
+      participants: [
+        { role: 'SELLER', network: 'bitcoin', chainId: btcAdapter.chain.chainId, address: sellerBtc },
+        { role: 'PAYMASTER_1', network: 'ethereum', chainId: evmAdapter.chain.chainId, address: pm1Evm },
+        { role: 'BUYER', network: 'ethereum', chainId: evmAdapter.chain.chainId, address: buyerEvm },
+      ],
+    };
+    const created = await deps.deals.create(input, sellerBtc as string);
+    for (const p of input.participants) if (p.role !== 'SELLER') await deps.deals.connectWallet(created.id, p.role as Role, p.address as string, p.address as string);
+    await deps.deals.open(created.id, sellerBtc as string); // registra: createTradeV2 (EVM) + derivação do cofre (BTC)
+    // Funding: comprador (approve ERC-20 — melhor esforço: carteira real completa via /onchain-tx);
+    // vendedor é o LOCK EXTERNO — o fund devolve o endereço do cofre, que vai na resposta.
+    let htlcFunding: { address: string; requiredSat: string } | null = null;
+    try { await deps.deals.fund(created.id, 'BUYER', buyerEvm as string); } catch (e) { logger.warn({ dealId: created.id, err: (e as Error).message }, 'funding do comprador pendente (carteira real completa via /onchain-tx)'); }
+    try { await deps.deals.fund(created.id, 'SELLER', sellerBtc as string); }
+    catch (e) {
+      const err = e as DomainError;
+      if (err.code === 'FUNDING_REQUIRED' && err.details?.address) htlcFunding = { address: String(err.details.address), requiredSat: String(err.details.requiredSat ?? mesa.config!.amountInBase) };
+      else logger.warn({ dealId: created.id, err: err.message }, 'funding do vendedor pendente');
+    }
+    onCreated(created.id);
+    await deps.audit.append({ actorType: 'user', actorId: mesa.payMasterId, category: 'portal.mesa.deal.created', dealId: created.id, payload: { mode: 'htlc-btc', vault: htlcFunding?.address ?? null } });
+    return { ...await mesaDealView(await deps.deals.get(created.id)), htlcFunding };
+  };
+
   app.post('/v1/portal/mesa/deal', async (req, reply) => {
     const token = portalToken(req);
     const b = parse(MesaDealBodyZ, req.body ?? {});
@@ -638,13 +696,17 @@ export async function buildApi(deps: ApiDeps): Promise<FastifyInstance> {
       throw new DomainError('VERSION_CONFLICT', 'Não foi possível aprovar a operação', { motivos });
     }
     deps.mesa.markApproved(mesa, pm.id);
-    // Deal real criada pelo serviço blockchain existente (participantes = cadeiras da mesa, base Solana).
-    const parts = mesa.chairs.filter(c => c.wallet).map(c => {
-      const w = c.wallet!;
-      const sol = (w.addresses ?? []).find(a => a.network === 'solana')?.address ?? (w.network === 'solana' ? w.address : null);
-      return { role: c.role as Role, address: sol ?? w.address };
-    });
-    const view = await createMesaDealForParts(parts, { ...b, amountInBase: mesa.config?.amountInBase ?? b.amountInBase, discountBps: mesa.config?.discountBps ?? b.discountBps, commissionBps: mesa.config?.commissionBps ?? b.commissionBps }, id => deps.mesa.attachDeal(mesa, id));
+    const body = { ...b, amountInBase: mesa.config?.amountInBase ?? b.amountInBase, discountBps: mesa.config?.discountBps ?? b.discountBps, commissionBps: mesa.config?.commissionBps ?? b.commissionBps };
+    // Plano HTLC_BTC → deal REAL com os ativos das CADEIRAS (BTC nativo ↔ token no escrow V2).
+    // Demais planos seguem o caminho legado (base dev) até o wiring ESCROW_DIRECT/CROSS_CHAIN.
+    const plan = deriveSettlementPlan(mesa.chairs);
+    const view = plan?.mode === 'HTLC_BTC'
+      ? await createMesaHtlcDeal(mesa, body, id => deps.mesa.attachDeal(mesa, id))
+      : await createMesaDealForParts(mesa.chairs.filter(c => c.wallet).map(c => {
+        const w = c.wallet!;
+        const sol = (w.addresses ?? []).find(a => a.network === 'solana')?.address ?? (w.network === 'solana' ? w.address : null);
+        return { role: c.role as Role, address: sol ?? w.address };
+      }), body, id => deps.mesa.attachDeal(mesa, id));
     void reply.code(201);
     return { approved: true, termsHash: mesa.termsHash, deal: view };
   });

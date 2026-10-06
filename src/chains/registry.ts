@@ -56,7 +56,17 @@ export const CHAINS: readonly ChainDef[] = [
   { chainKey: 'stellar',  family: 'stellar',  displayName: 'Stellar',           nativeSymbol: 'XLM',  nativeDecimals: 7,  coingeckoId: 'stellar',           endpoint: 'https://horizon.stellar.org',                    explorer: 'https://stellar.expert/explorer/public' },
 ];
 
-const BY_KEY = new Map<string, ChainDef>(CHAINS.map(c => [c.chainKey, c]));
+/**
+ * Override de endpoint por env (testnets): CHAIN_ENDPOINT_<CHAVE> troca o endpoint de LEITURA
+ * da rede — ex.: CHAIN_ENDPOINT_BITCOIN=https://mempool.space/testnet4/api e
+ * CHAIN_ENDPOINT_ETHEREUM=https://ethereum-sepolia-rpc.publicnode.com fazem o precheck/saldos
+ * da mesa lerem as testnets em vez da mainnet. Sem a env, vale o endpoint público mainnet.
+ */
+const withEndpointOverride = (c: ChainDef): ChainDef => {
+  const o = process.env[`CHAIN_ENDPOINT_${c.chainKey.toUpperCase()}`];
+  return o ? { ...c, endpoint: o.replace(/\/$/, '') } : c;
+};
+const BY_KEY = new Map<string, ChainDef>(CHAINS.map(c => [c.chainKey, withEndpointOverride(c)]));
 
 /** Aliases tolerantes: nomes alternativos que já circulam na OTC/carteira. */
 const ALIASES: Record<string, string> = {

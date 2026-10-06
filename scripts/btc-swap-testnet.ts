@@ -40,7 +40,7 @@ function envKey(name: string): Uint8Array {
   const cur = process.env[name];
   if (cur && /^[0-9a-f]{64}$/i.test(cur)) return hexToBytes(cur.toLowerCase());
   const k = randomBytes(32);
-  appendFileSync('.env', `\n${name}=${k.toString('hex')}`);
+  appendFileSync('.env', `\n${name}=${k.toString('hex')}\n`); // \n dos dois lados: nunca cola na linha vizinha
   console.log(`  (gerada e salva no .env: ${name})`);
   return Uint8Array.from(k);
 }

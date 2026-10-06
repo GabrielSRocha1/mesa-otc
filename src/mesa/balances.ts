@@ -76,7 +76,7 @@ export async function validateChairBalances(mesa: MesaRecord, readers: BalanceRe
 }
 
 /** Endereço da cadeira na rede pedida (carteira multichain expõe vários endereços). */
-function addressOn(chair: MesaChair, network: string): string | null {
+export function addressOn(chair: MesaChair, network: string): string | null {
   const w = chair.wallet;
   if (!w) return null;
   const hit = (w.addresses ?? []).find(a => a.network === network);
