@@ -2656,15 +2656,36 @@ img,svg,canvas,video{max-width:100%}
     $('#pRvBack').addEventListener('click',e=>{ if(e.target.id==='pRvBack') closeModal(); });
     $('#pRvSign').addEventListener('click',pSign);
   }
+  // Assinatura POR ESQUEMA (v4): o envelope diz a rede/esquema do participante — Solana assina a
+  // mensagem (ed25519), EVM assina o typedData EIP-712 (eth_signTypedData_v4) e Bitcoin assina a
+  // mensagem em BIP-137 (ecdsa). O backend verifica cada esquema no submit (SignatureEngine).
+  async function pSignEnvelope(env){
+    const addr=env.payload&&env.payload.signer;
+    if(env.network==='solana'){
+      const prov=solProvider(); if(!prov) throw new Error('Abra esta mesa dentro da Verum Wallet para assinar.');
+      try{ await prov.connect(); }catch(e){}
+      return solSignMessage(prov,env.message);
+    }
+    if(env.network==='ethereum'){
+      const p=await findVerumEthProvider(); if(!p) throw new Error('Provider EVM da Verum Wallet não foi injetado nesta aba.');
+      const td=env.typedData; if(!td) throw new Error('Envelope EVM sem typedData — recarregue e tente de novo.');
+      try{ await p.request({method:'eth_requestAccounts'}); }catch(e){}
+      const payload={ types:{ EIP712Domain:[{name:'name',type:'string'},{name:'version',type:'string'},{name:'chainId',type:'uint256'},{name:'verifyingContract',type:'address'}], ...td.types }, domain:td.domain, primaryType:td.primaryType, message:td.message };
+      return p.request({ method:'eth_signTypedData_v4', params:[addr, JSON.stringify(payload)] });
+    }
+    if(env.network==='bitcoin'){
+      const w=window; const u=w.unisat||(w.verum&&w.verum.bitcoin)||null;
+      if(!u||!u.signMessage) throw new Error('A Verum Wallet desta aba não expõe assinatura Bitcoin (BIP-137). Atualize a carteira.');
+      return u.signMessage(env.message,'ecdsa');
+    }
+    throw new Error('Rede de assinatura não suportada nesta tela: '+env.network);
+  }
   async function pSign(){
     const btn=$('#pRvSign'); if(btn){ btn.disabled=true; btn.textContent='Assinando na Verum Wallet…'; }
     try{
       const d=pDto.deal;
       const env=await pApi('/v1/deals/'+encodeURIComponent(d.id)+'/approval-envelope');
-      const prov=solProvider();
-      if(!prov) throw new Error('Abra esta mesa dentro da Verum Wallet para assinar.');
-      try{ await prov.connect(); }catch(e){}
-      const signature=await solSignMessage(prov,env.message);
+      const signature=await pSignEnvelope(env);
       await pApi('/v1/deals/'+encodeURIComponent(d.id)+'/approvals',{method:'POST',idem:'mesa-sign-'+d.id+'-'+(pDto.viewer&&pDto.viewer.role),body:{ role:pDto.viewer.role, signature, nonce:env.payload.nonce }});
       closeModal(); toast('Assinatura registrada ✓','ok'); pRefresh();
     }catch(e){ toast(e.message||'Falha ao assinar','err'); if(btn){ btn.disabled=false; btn.textContent='Assinar e continuar'; } }
