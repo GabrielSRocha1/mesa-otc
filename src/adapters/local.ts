@@ -74,6 +74,20 @@ export class LocalChainAdapter implements SettlementAdapter {
     return sha256Hex([c.domainHash, c.dealId, String(c.revision), participantsRoot, legsRoot, c.pricingHash, c.routeHash, String(c.expiresAt), c.dealNonce].join('|'));
   }
   private legOf(d: StoredDeal, idx: number) { const leg = d.commit.legs.find(l => l.index === idx); if (!leg || leg.escrowChain !== this.chain.network) throw new DomainError('SETTLEMENT_FAILED', `leg ${idx} não pertence a ${this.chain.network}`); return leg; }
+  /**
+   * Paridade com o VerumOTCEscrowV2: comissão dos PMs ON-CHAIN em unidades do ativo da leg do
+   * COMPRADOR (total = out·c/(1−d−c), split pelos commissionSplitBps assinados; resto → PM1).
+   * null quando a leg do comprador não é desta cadeia ou a comissão é zero.
+   */
+  private commissionPlan(c: DealCommitment): { leg: DealCommitment['legs'][number]; pm1: bigint; pm2: bigint; pm1Addr: string | null; pm2Addr: string | null } | null {
+    const leg = c.legs.find(l => l.from === 'BUYER' && l.escrowChain === this.chain.network);
+    const p = c.terms?.pricing; if (!leg || !p || !p.commissionBps) return null;
+    const rest = 10000 - p.discountBps - p.commissionBps; if (rest <= 0) return null;
+    const total = BigInt(leg.amountBase) * BigInt(p.commissionBps) / BigInt(rest);
+    const pm2Bps = p.commissionSplitBps?.[1] ?? 0;
+    const pm2 = total * BigInt(Math.min(pm2Bps, p.commissionBps)) / BigInt(p.commissionBps);
+    return { leg, pm1: total - pm2, pm2, pm1Addr: c.participants.find(x => x.role === 'PAYMASTER_1')?.address ?? null, pm2Addr: c.participants.find(x => x.role === 'PAYMASTER_2')?.address ?? null };
+  }
   private addrOf(d: StoredDeal, role: Role): string { const p = d.commit.participants.find(x => x.role === role); if (!p) throw new DomainError('SETTLEMENT_FAILED', 'papel ausente'); return p.address; }
 
   async deposit(dealId: string, legIndex: number, from: string): Promise<TxRef> {
@@ -82,7 +96,10 @@ export class LocalChainAdapter implements SettlementAdapter {
     if (this.now() >= d.commit.expiresAt) throw new DomainError('DEAL_EXPIRED', 'deal expirada on-chain');
     const leg = this.legOf(d, legIndex); if (this.addrOf(d, leg.from) !== from) throw new DomainError('SETTLEMENT_FAILED', 'depositante não é a carteira da leg');
     if (d.deposits[legIndex]) return { chain: this.chain.network, ref: d.depositTx[legIndex] as string, submittedAt: this.now() }; // idempotente
-    this.move(leg.asset.contractOrMint, from, this.escrow, BigInt(leg.amountBase));
+    // Comprador deposita o LÍQUIDO + comissões dos PMs (pagas no settle) — como no signV2 do V2.
+    const plan = this.commissionPlan(d.commit);
+    const extra = plan && plan.leg.index === legIndex ? plan.pm1 + plan.pm2 : 0n;
+    this.move(leg.asset.contractOrMint, from, this.escrow, BigInt(leg.amountBase) + extra);
     d.deposits[legIndex] = leg.amountBase; const t = this.tx(); d.depositTx[legIndex] = t.ref; if (d.htlc && leg.mode === 'HTLC') d.htlc.locked = true;
     const myLegs = d.commit.legs.filter(l => l.escrowChain === this.chain.network); if (myLegs.every(l => d.deposits[l.index])) d.status = 'FUNDED';
     return t;
@@ -114,6 +131,12 @@ export class LocalChainAdapter implements SettlementAdapter {
     d.status = 'SETTLED'; d.settledTx = t.ref;
     for (const l of myLegs) { const amount = BigInt(l.amountBase); const fee = l.from === 'BUYER' ? amount * BigInt(d.commit.feeBps) / 10000n : 0n; // fee só na leg de pagamento (ADR-005)
       this.move(l.asset.contractOrMint, this.escrow, this.addrOf(d, l.to), amount - fee); if (fee > 0n) this.move(l.asset.contractOrMint, this.escrow, d.commit.treasury, fee); }
+    // Comissões dos PMs na MESMA liquidação atômica (paridade com o settleV2 + CommissionPaid).
+    const plan = this.commissionPlan(d.commit);
+    if (plan && myLegs.some(l => l.index === plan.leg.index)) {
+      if (plan.pm1 > 0n && plan.pm1Addr) this.move(plan.leg.asset.contractOrMint, this.escrow, plan.pm1Addr, plan.pm1);
+      if (plan.pm2 > 0n && plan.pm2Addr) this.move(plan.leg.asset.contractOrMint, this.escrow, plan.pm2Addr, plan.pm2);
+    }
     void leg;
     if (this.faults.reorgAfterSettle) { const st = this.txs.get(t.ref); if (st) { st.status = 'reverted'; st.error = 'reorg'; } }
     return t;
@@ -125,7 +148,10 @@ export class LocalChainAdapter implements SettlementAdapter {
     if (d.settledLegs[legIndex]) throw new DomainError('SETTLEMENT_NOT_ALLOWED', 'leg já liquidada');
     if (!expired && !superseded) throw new DomainError('SETTLEMENT_NOT_ALLOWED', 'reembolso só após expiração ou revisão superseded');
     const leg = this.legOf(d, legIndex); const dep = d.deposits[legIndex]; if (!dep) throw new DomainError('SETTLEMENT_NOT_ALLOWED', 'nada depositado nesta leg');
-    this.move(leg.asset.contractOrMint, this.escrow, this.addrOf(d, leg.from), BigInt(dep)); delete d.deposits[legIndex];
+    // Refund devolve TUDO que entrou: principal + comissões não pagas (paridade com o refundV2).
+    const plan = this.commissionPlan(d.commit);
+    const extra = plan && plan.leg.index === legIndex ? plan.pm1 + plan.pm2 : 0n;
+    this.move(leg.asset.contractOrMint, this.escrow, this.addrOf(d, leg.from), BigInt(dep) + extra); delete d.deposits[legIndex];
     const t = this.tx(); d.refundedTx = t.ref; if (Object.keys(d.deposits).length === 0 && !superseded) d.status = 'REFUNDED'; return t;
   }
   async supersede(dealId: string, revision: number): Promise<TxRef | null> { this.rpc(); const d = this.deals.get(dealId); if (!d || d.commit.revision !== revision || d.status === 'SETTLED') return null; d.status = 'SUPERSEDED'; return this.tx(); }

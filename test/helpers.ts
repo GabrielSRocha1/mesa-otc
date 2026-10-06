@@ -34,12 +34,12 @@ export type Parts = Partial<Record<Role, Wallet>> & { SELLER: Wallet; BUYER: Wal
 export const participantsOf = (p: Parts) => (Object.entries(p) as [Role, Wallet][]).map(([role, w]) => ({ role, network: w.network, chainId: w.chainId, address: w.address }));
 
 /** Cria e prepara a Deal até LIQUIDITY_VERIFIED (todas as carteiras conectadas, verificações feitas). */
-export async function prepareDeal(app: App, parts: Parts, opts: { assetIn?: AssetRef; assetOut?: AssetRef; amountInBase?: string; discountBps?: number; expiresInSec?: number; skipConnect?: Role[] } = {}): Promise<Deal> {
+export async function prepareDeal(app: App, parts: Parts, opts: { assetIn?: AssetRef; assetOut?: AssetRef; amountInBase?: string; discountBps?: number; commissionBps?: number; commissionSplitBps?: number[]; expiresInSec?: number; skipConnect?: Role[] } = {}): Promise<Deal> {
   const assetIn = opts.assetIn ?? ASSETS.SOL; const assetOut = opts.assetOut ?? ASSETS.USDC_SOL; const amount = opts.amountInBase ?? '250000000000'; // 250 SOL ≈ US$ 37,8k (abaixo do limite de risco)
   const local = app.local!; const chainOf = (n: Network) => n === 'ethereum' ? local.evm : n === 'solana' ? local.solana : n === 'tron' ? local.tron! : local.bitcoin;
   chainOf(assetIn.network).mint(parts.SELLER.address, assetIn.contractOrMint, BigInt(amount) * 2n);
   chainOf(assetOut.network).mint(parts.BUYER.address, assetOut.contractOrMint, 10n ** 15n);
-  let deal = await app.deals.create({ assetIn, assetOut, amountInBase: amount, discountBps: opts.discountBps ?? 150, maxSlippageBps: 50, maxPriceDriftBps: 100, expiresInSec: opts.expiresInSec ?? 3600, participants: participantsOf(parts) }, parts.SELLER.address);
+  let deal = await app.deals.create({ assetIn, assetOut, amountInBase: amount, discountBps: opts.discountBps ?? 150, commissionBps: opts.commissionBps, commissionSplitBps: opts.commissionSplitBps, maxSlippageBps: 50, maxPriceDriftBps: 100, expiresInSec: opts.expiresInSec ?? 3600, participants: participantsOf(parts) }, parts.SELLER.address);
   for (const [role, w] of Object.entries(parts) as [Role, Wallet][]) { if (role === 'SELLER' || opts.skipConnect?.includes(role)) continue; deal = await app.deals.connectWallet(deal.id, role, w.address, w.address); }
   return app.deals.get(deal.id);
 }
