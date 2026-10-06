@@ -231,15 +231,19 @@ export async function buildApi(deps: ApiDeps): Promise<FastifyInstance> {
    * POST devolve o relay (PMs), o txRequest/params p/ a carteira enviar (seller/buyer) ou faz o
    * broadcast da tx Solana assinada. Em modo simulado/dev-keyring o endpoint responde 400.
    */
+  /** Adapter do passo on-chain: a primeira leg cuja rede expõe participant-steps (na rota HTLC a
+   *  legs[0] é a BTC externa — o passo do participante vive na leg de CONTRATO). */
+  const stepAdapterOf = (d: Deal) => {
+    for (const leg of d.terms?.legs ?? []) { const a = deps.adapters?.get(leg.escrowChain); if (a && hasParticipantSteps(a)) return a; }
+    throw new DomainError('SETTLEMENT_NOT_ALLOWED', 'rede em modo simulado — o passo on-chain é automático');
+  };
   app.get('/v1/deals/:id/onchain-tx', async req => {
     const s = requireSession(req); const { id } = req.params as { id: string };
     const d = await deps.deals.get(id);
     const me = d.participants.find(p => p.address.toLowerCase() === s.address.toLowerCase());
     if (!me) throw new DomainError('NOT_PARTICIPANT', 'não é participante');
-    const leg = d.terms?.legs[0]; if (!leg) throw new DomainError('SETTLEMENT_NOT_ALLOWED', 'termos não congelados');
-    const a = deps.adapters?.get(leg.escrowChain);
-    if (!a || !hasParticipantSteps(a)) throw new DomainError('SETTLEMENT_NOT_ALLOWED', 'rede em modo simulado — o passo on-chain é automático');
-    return a.buildParticipantStep(id, me.role, s.address);
+    if (!d.terms?.legs.length) throw new DomainError('SETTLEMENT_NOT_ALLOWED', 'termos não congelados');
+    return stepAdapterOf(d).buildParticipantStep(id, me.role, s.address);
   });
   app.post('/v1/deals/:id/onchain-tx', async (req, reply) => {
     const s = requireSession(req); const { id } = req.params as { id: string };
@@ -247,9 +251,8 @@ export async function buildApi(deps: ApiDeps): Promise<FastifyInstance> {
     const d = await deps.deals.get(id);
     const me = d.participants.find(p => p.address.toLowerCase() === s.address.toLowerCase());
     if (!me) throw new DomainError('NOT_PARTICIPANT', 'não é participante');
-    const leg = d.terms?.legs[0]; if (!leg) throw new DomainError('SETTLEMENT_NOT_ALLOWED', 'termos não congelados');
-    const a = deps.adapters?.get(leg.escrowChain);
-    if (!a || !hasParticipantSteps(a)) throw new DomainError('SETTLEMENT_NOT_ALLOWED', 'rede em modo simulado — o passo on-chain é automático');
+    if (!d.terms?.legs.length) throw new DomainError('SETTLEMENT_NOT_ALLOWED', 'termos não congelados');
+    const a = stepAdapterOf(d);
     return idempotent(req, reply, async () => a.submitParticipantStep(id, me.role, s.address, b as Record<string, unknown>));
   });
 
@@ -722,6 +725,40 @@ export async function buildApi(deps: ApiDeps): Promise<FastifyInstance> {
     await deps.audit.append({ actorType: 'user', actorId: pm.id, category: 'mesa.saldos.revalidados', dealId: mesa.dealId, payload: { mesaId, ok: report.ok, failures: report.failures } });
     if (!report.ok) throw new DomainError('VERSION_CONFLICT', 'Assinatura bloqueada: saldos insuficientes', { motivos: report.failures });
     return signTurnOfDeal(mesa.dealId);
+  });
+  /**
+   * CARTEIRA REAL do admin (PM1): quando o keyring dev não tem a chave do admin, a assinatura do
+   * turno acontece pela PRÓPRIA wallet — GET step (typedData Approval on-chain), POST step
+   * (relay do signV2 pelo keeper), GET envelope (DealApproval da mesa) e POST approval (registro).
+   */
+  const mesaDealOf = async (req: FastifyRequest, mesaId: string) => {
+    const { mesa } = adminMesa(req, mesaId, false);
+    if (!mesa.dealId) throw new DomainError('INVALID_INPUT', 'Nenhuma operação ativa nesta mesa');
+    const d = await deps.deals.get(mesa.dealId);
+    const pm1 = d.participants.find(p => p.role === 'PAYMASTER_1');
+    if (!pm1) throw new DomainError('NOT_PARTICIPANT', 'operação sem Pay Master 1');
+    return { mesa, d, pm1 };
+  };
+  app.get('/v1/portal/mesas/:mesaId/deal/step', async req => {
+    const { d, pm1 } = await mesaDealOf(req, (req.params as { mesaId: string }).mesaId);
+    return stepAdapterOf(d).buildParticipantStep(d.id, 'PAYMASTER_1', pm1.address);
+  });
+  app.post('/v1/portal/mesas/:mesaId/deal/step', async req => {
+    const b = parse(z.object({ signature: z.string().min(20), deadline: z.number().int() }), req.body);
+    const { d, pm1 } = await mesaDealOf(req, (req.params as { mesaId: string }).mesaId);
+    return stepAdapterOf(d).submitParticipantStep(d.id, 'PAYMASTER_1', pm1.address, b as Record<string, unknown>);
+  });
+  app.get('/v1/portal/mesas/:mesaId/deal/envelope', async req => {
+    const { d, pm1 } = await mesaDealOf(req, (req.params as { mesaId: string }).mesaId);
+    const env = await deps.deals.envelope(d.id, 'PAYMASTER_1', pm1.address);
+    return { scheme: env.scheme, network: env.network, payload: env.payload, message: env.message, typedData: env.typedData ? { ...env.typedData, message: Object.fromEntries(Object.entries(env.typedData.message).map(([k, v]) => [k, typeof v === 'bigint' ? v.toString() : v])) } : undefined };
+  });
+  app.post('/v1/portal/mesas/:mesaId/deal/approval', async req => {
+    const b = parse(z.object({ signature: z.string().min(20), nonce: z.string().min(8) }), req.body);
+    const { d, pm1 } = await mesaDealOf(req, (req.params as { mesaId: string }).mesaId);
+    // Autoridade: sessão do portal (dono da mesa) + a assinatura é criptograficamente do pm1.address.
+    const r = await deps.deals.submitSignature(d.id, { role: 'PAYMASTER_1', signer: pm1.address, scheme: 'secp256k1', signature: b.signature, nonce: b.nonce }, pm1.address);
+    return { count: r.count, required: r.deal.requiredSignatures, state: r.deal.state };
   });
   app.post('/v1/portal/mesas/:mesaId/cancel', async req => {
     const { mesaId } = req.params as { mesaId: string };

@@ -1388,6 +1388,25 @@ img,svg,canvas,video{max-width:100%}
       },350);
     });
   }
+  /* ---- Passo on-chain pela CARTEIRA REAL (escrow V2): approve + signV2 assinados/enviados pela wallet ---- */
+  function evmTypedPayload(td){ return JSON.stringify({ types:{ EIP712Domain:[{name:'name',type:'string'},{name:'version',type:'string'},{name:'chainId',type:'uint256'},{name:'verifyingContract',type:'address'}], ...td.types }, domain:td.domain, primaryType:td.primaryType, message:td.message }); }
+  async function evmWaitReceipt(p,hash){ for(let i=0;i<60;i++){ const r=await p.request({method:'eth_getTransactionReceipt',params:[hash]}); if(r){ if(r.status==='0x0') throw new Error('Transação revertida on-chain'); return r; } await new Promise(z=>setTimeout(z,3000)); } throw new Error('Timeout aguardando a confirmação da transação'); }
+  /** Executa o passo da vez devolvido por /onchain-tx|/deal/step: approve ERC-20 (se pendente) +
+   *  assinatura EIP-712 do Approval; `submit(body)` envia ao backend — PMs são relayados pelo
+   *  keeper, Vendedor/Comprador recebem o txRequest e a própria carteira envia o signV2. */
+  async function evmOnchainStep(step, submit){
+    const p=await findVerumEthProvider(); if(!p) throw new Error('Provider EVM da Verum Wallet não foi injetado nesta aba.');
+    const accs=await p.request({method:'eth_requestAccounts'}); const from=accs&&accs[0];
+    if(!from) throw new Error('Nenhuma conta EVM na carteira.');
+    if(step.approve){
+      const data='0x095ea7b3'+step.approve.spender.slice(2).toLowerCase().padStart(64,'0')+BigInt(step.approve.amount).toString(16).padStart(64,'0');
+      const h=await p.request({method:'eth_sendTransaction',params:[{from,to:step.approve.token,data}]});
+      await evmWaitReceipt(p,h);
+    }
+    const sig=await p.request({method:'eth_signTypedData_v4',params:[from,evmTypedPayload(step.typedData)]});
+    const res=await submit({signature:sig,deadline:step.deadline});
+    if(res&&res.kind==='txRequest'&&res.txRequest){ const h=await p.request({method:'eth_sendTransaction',params:[{from,to:res.txRequest.to,data:res.txRequest.data}]}); await evmWaitReceipt(p,h); }
+  }
   async function connectWallet(network){
     const w=window;
     if(network==='ethereum'){ const p=await findVerumEthProvider(); if(!p){ const temVerum=typeof w.verum!=='undefined'; throw walletErr(temVerum?'A Verum Wallet está ativa, mas o provider EVM não foi injetado nesta aba. Recarregue a extensão (pasta extension-dist) em chrome://extensions e dê Ctrl+Shift+R aqui.':'Verum Wallet não detectada nesta aba. Instale/desbloqueie a extensão (extension-dist) e recarregue a página.','NO_WALLET'); } const accs=await p.request({method:'eth_requestAccounts'}); const address=accs&&accs[0]; if(!address) throw walletErr('Nenhuma conta EVM retornada.','NO_WALLET'); return {address,network}; }
@@ -2532,10 +2551,33 @@ img,svg,canvas,video{max-width:100%}
       if(det) m3ShowMotivos(det); else toast(e.message||'Falha na aprovação','err');
     }finally{ btn.disabled=false; btn.textContent='Aprovar operação'; }
   }
+  /** PM1 com CARTEIRA REAL: passo on-chain (relay do signV2 pelo keeper) + envelope da mesa, ambos
+   *  assinados na própria wallet — usado quando o backend não tem chave dev para o admin. */
+  async function m3SignWallet(){
+    try{
+      const step=await pmApi('/v1/portal/mesas/'+m3Sel+'/deal/step');
+      if(step&&step.kind==='evm') await evmOnchainStep(step, body=>pmApi('/v1/portal/mesas/'+m3Sel+'/deal/step',{method:'POST',body}));
+    }catch(e){ if(!/simulado|autom|done/i.test(e.message||'')) throw e; }
+    const env=await pmApi('/v1/portal/mesas/'+m3Sel+'/deal/envelope');
+    if(!env.typedData) throw new Error('Envelope do PM1 sem typedData.');
+    const p=await findVerumEthProvider(); if(!p) throw new Error('Provider EVM da Verum Wallet não foi injetado nesta aba.');
+    const accs=await p.request({method:'eth_requestAccounts'});
+    const sig=await p.request({method:'eth_signTypedData_v4',params:[accs[0],evmTypedPayload(env.typedData)]});
+    await pmApi('/v1/portal/mesas/'+m3Sel+'/deal/approval',{method:'POST',body:{signature:sig,nonce:env.payload.nonce}});
+  }
   async function m3Sign(){
     const btn=$('#m3dSign'); btn.disabled=true;
     try{ await pmApi('/v1/portal/mesas/'+m3Sel+'/deal/sign',{method:'POST',body:{}}); toast('Assinatura registrada','ok'); m3Refresh(); }
-    catch(e){ const det=(e&&e.details&&e.details.motivos)||null; if(det) m3ShowMotivos(det); else toast(e.message,'err'); }
+    catch(e){
+      const det=(e&&e.details&&e.details.motivos)||null;
+      if(det){ m3ShowMotivos(det); }
+      else if(/sem chave dev|dispon[ií]vel apenas/i.test(e.message||'')){
+        // Backend não assina por este admin → fluxo de carteira real.
+        try{ await m3SignWallet(); toast('Assinatura registrada pela sua carteira ✓','ok'); m3Refresh(); }
+        catch(e2){ toast(e2.message||'Falha ao assinar pela carteira','err'); }
+      }
+      else toast(e.message,'err');
+    }
     finally{ btn.disabled=false; }
   }
   function m3Init(){
@@ -2684,6 +2726,13 @@ img,svg,canvas,video{max-width:100%}
     const btn=$('#pRvSign'); if(btn){ btn.disabled=true; btn.textContent='Assinando na Verum Wallet…'; }
     try{
       const d=pDto.deal;
+      // 1) Passo ON-CHAIN pela própria carteira (escrow V2 real): approve + signV2. Em modo
+      //    simulado o endpoint responde 'automático' e seguimos direto para a assinatura da mesa.
+      try{
+        const step=await pApi('/v1/deals/'+encodeURIComponent(d.id)+'/onchain-tx');
+        if(step&&step.kind==='evm') await evmOnchainStep(step, body=>pApi('/v1/deals/'+encodeURIComponent(d.id)+'/onchain-tx',{method:'POST',body}));
+      }catch(e){ if(!/simulado|autom/i.test(e.message||'')) throw e; }
+      // 2) Assinatura da MESA (auditoria) no esquema da rede do papel.
       const env=await pApi('/v1/deals/'+encodeURIComponent(d.id)+'/approval-envelope');
       const signature=await pSignEnvelope(env);
       await pApi('/v1/deals/'+encodeURIComponent(d.id)+'/approvals',{method:'POST',idem:'mesa-sign-'+d.id+'-'+(pDto.viewer&&pDto.viewer.role),body:{ role:pDto.viewer.role, signature, nonce:env.payload.nonce }});
