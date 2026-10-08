@@ -23,6 +23,9 @@ export interface BalanceReaders {
   native(network: string, address: string): Promise<{ amount: number } | null>;
   tokens(network: string, address: string): Promise<{ symbol: string; contract: string | null; amount: number }[]>;
   priceUsdOf(network: string): Promise<number | null>;
+  /** Leitura DIRETA do contrato da cadeira (balanceOf) — tokens de teste/custom não estão no
+   *  catálogo público; sem isto o precheck reportava "insuficiente" com saldo real na carteira. */
+  tokenDirect?(network: string, contract: string, address: string, decimals: number): Promise<number | null>;
 }
 
 export function defaultBalanceReaders(): BalanceReaders {
@@ -30,6 +33,16 @@ export function defaultBalanceReaders(): BalanceReaders {
     native: async (network, address) => { const r = await readNativeBalance(network, address).catch(() => null); return r && r.amount != null ? { amount: r.amount } : null; },
     tokens: async (network, address) => (await readTokenBalances(network, address).catch(() => [])).map(t => ({ symbol: t.symbol, contract: t.contract, amount: t.amount })),
     priceUsdOf: async network => { const chain = getChain(network); if (!chain) return null; const byId = await getPricesById().catch(() => ({} as Record<string, { usd: number | null }>)); return byId[chain.coingeckoId]?.usd ?? null; },
+    tokenDirect: async (network, contract, address, decimals) => {
+      const c = getChain(network); if (!c || c.family !== 'evm') return null; // EVM por ora; demais caem no catálogo
+      try {
+        const data = '0x70a08231' + address.toLowerCase().replace(/^0x/, '').padStart(64, '0');
+        const r = await fetch(c.endpoint, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'eth_call', params: [{ to: contract, data }, 'latest'] }) });
+        const j = await r.json() as { result?: string };
+        if (!j?.result || j.result === '0x') return null;
+        return Number(BigInt(j.result)) / 10 ** decimals;
+      } catch { return null; }
+    },
   };
 }
 
@@ -66,7 +79,12 @@ export async function validateChairBalances(mesa: MesaRecord, readers: BalanceRe
     let assetAmount: number | null = null; let assetOk: boolean | null = null;
     if (required != null && address) {
       if (chair.expectedAsset.contractOrMint == null) assetAmount = native?.amount ?? null;
-      else { const toks = await readers.tokens(net, address); const hit = toks.find(t => t.contract?.toLowerCase() === chair.expectedAsset.contractOrMint?.toLowerCase() || t.symbol === chair.expectedAsset.symbol); assetAmount = hit?.amount ?? 0; }
+      else {
+        // 1º leitura DIRETA do contrato (cobre tokens de teste/custom fora do catálogo público).
+        const direct = await readers.tokenDirect?.(net, chair.expectedAsset.contractOrMint, address, chair.expectedAsset.decimals);
+        if (direct != null) assetAmount = direct;
+        else { const toks = await readers.tokens(net, address); const hit = toks.find(t => t.contract?.toLowerCase() === chair.expectedAsset.contractOrMint?.toLowerCase() || t.symbol === chair.expectedAsset.symbol); assetAmount = hit?.amount ?? 0; }
+      }
       if (assetAmount == null) { assetOk = false; failures.push(`${who}: não foi possível ler o saldo de ${chair.expectedAsset.symbol}`); }
       else { assetOk = assetAmount >= required; if (!assetOk) failures.push(`${who}: saldo de ${chair.expectedAsset.symbol} insuficiente (faltam ${fmt(required - assetAmount)})`); }
     }
