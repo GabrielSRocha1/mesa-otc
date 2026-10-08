@@ -195,7 +195,7 @@ h1{font-size:22px;margin-bottom:8px}
   // mais confiável); fonte 1: getAddresses() com timeout (o relay separado nem sempre responde).
   async function collectVerumAddresses(){
     const out=new Map();
-    const put=a=>{ if(a&&a.network&&a.address&&!out.has(String(a.network))) out.set(String(a.network),String(a.address)); };
+    const put=a=>{ if(!a) return; const n=String(a.network||'').trim(), ad=String(a.address||'').trim(); if(n.length>=2&&ad.length>=8&&ad.length<=120&&!out.has(n)) out.set(n,ad); };
     try{ (window.__verumConnectAddresses||[]).forEach(put); }catch(e){}
     try{
       const p=window.verum;

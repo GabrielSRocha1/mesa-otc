@@ -41,6 +41,15 @@ describe('balancePreCheck — rota e gate de assinatura', () => {
     expect(body.ok).toBe(false); // cadeiras ainda sem carteira → motivos nominais
     expect(body.failures.join(' | ')).toContain('carteira ainda não conectada');
 
+    // Lista multichain TOLERANTE: entrada malformada da wallet é descartada, nunca "Entrada inválida".
+    const wc = await app.api.inject({ method: 'POST', url: '/v1/portal/wallet/connect', headers: pmHeaders(token), payload: { address: 'FCK3dJUrJvG9WZhVsrQYVgzLzWxCpqmS27WNksavX41n', network: 'solana', addresses: [
+      { network: 'solana', address: 'FCK3dJUrJvG9WZhVsrQYVgzLzWxCpqmS27WNksavX41n' },
+      { network: 'xrp', address: '' },           // malformada (vazia) → descartada
+      { network: 'x', address: 'abcdefgh1234' }, // rede curta demais → descartada
+      null,                                       // lixo → descartado
+    ] } });
+    expect(wc.statusCode, wc.body).toBe(200);
+
     // Link do convite usa o HOST da requisição (deploy/local) — nunca o domínio fixo da config.
     const mesa = app.mesa.mesaById(mesaId)!;
     const buyerChair = mesa.chairs.find(c => c.role === 'BUYER')!;

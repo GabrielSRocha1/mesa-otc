@@ -56,8 +56,18 @@ export interface ApiDeps { deals: DealEngine; settlement: SettlementEngine; pric
 declare module 'fastify' { interface FastifyRequest { session: Session | null } }
 
 const NetworkZ = z.enum(['bitcoin', 'ethereum', 'solana', 'zcash', 'tron']); const RoleZ = z.enum(['SELLER', 'BUYER', 'PAYMASTER_1', 'PAYMASTER_2']);
-// Endereços multichain expostos por verum.getAddresses() (opcional em connect/confirm).
-const WalletAddressesZ = z.array(z.object({ network: z.string().min(2).max(40), address: z.string().min(8).max(120) })).max(30).optional();
+// Endereços multichain expostos pela carteira (opcional em connect/confirm/join). TOLERANTE:
+// entradas malformadas vindas da wallet (endereço curto/vazio, rede estranha) são DESCARTADAS em
+// vez de derrubar a requisição inteira com "Entrada inválida" — o dado é público/informativo;
+// a prova de posse continua sendo o challenge assinado.
+const WalletAddressesZ = z.array(z.unknown()).max(50).optional().transform(list =>
+  !list ? undefined : list.flatMap(a => {
+    const o = a as { network?: unknown; address?: unknown } | null;
+    const network = typeof o?.network === 'string' ? o.network.trim() : '';
+    const address = typeof o?.address === 'string' ? o.address.trim() : '';
+    return network.length >= 2 && network.length <= 40 && address.length >= 8 && address.length <= 120 ? [{ network, address }] : [];
+  }).slice(0, 30)
+);
 const short = (d: Deal) => ({ id: d.id, state: d.state, revision: d.revision, requiredSignatures: d.requiredSignatures, validSignatures: d.validSignatures, expiresAt: d.expiresAt, turnRole: d.turnRole ?? null, turnExpiresAt: d.turnExpiresAt ?? null, updatedAt: d.updatedAt, assetIn: d.draft.assetIn.assetId, assetOut: d.draft.assetOut.assetId, amountInBase: d.draft.amountInBase });
 
 /** Rate limiter token-bucket em memória (por chave). Em produção o edge (Cloudflare) e um bucket em Redis complementam. */

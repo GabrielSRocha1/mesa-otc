@@ -1438,7 +1438,7 @@ img,svg,canvas,video{max-width:100%}
   const EVM_NETS=['ethereum','bsc','polygon','arbitrum','base','optimism','avalanche','cronos'];
   async function collectVerumAddresses(solAddress){
     const out=new Map(); // network → address (primeira fonte vence)
-    const put=(network,address)=>{ if(network&&address&&!out.has(network)) out.set(String(network),String(address)); };
+    const put=(network,address)=>{ const n=String(network||'').trim(), a=String(address||'').trim(); if(n.length>=2&&a.length>=8&&a.length<=120&&!out.has(n)) out.set(n,a); };
     if(solAddress) put('solana',solAddress);
     // Fonte 0: a lista que a carteira EMBUTIU na resposta do connect (Caminho A) — mais confiável.
     try{ (window.__verumConnectAddresses||[]).forEach(a=>a&&put(a.network,a.address)); }catch(e){}
