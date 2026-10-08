@@ -1427,20 +1427,41 @@ img,svg,canvas,video{max-width:100%}
   function fmtAmount(n){ if(n==null) return '—'; const abs=Math.abs(n); const d=abs>=1?4:abs>=0.0001?6:8; return Number(n).toLocaleString('pt-BR',{maximumFractionDigits:d}); }
   function fmtUsd(n){ if(n==null) return ''; return '$'+Number(n).toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2}); }
   function fmtBrl(n){ if(n==null) return ''; return 'R$ '+Number(n).toLocaleString('pt-BR',{minimumFractionDigits:2,maximumFractionDigits:2}); }
-  // Coleta os endereços multichain que a Verum expõe (só funciona no navegador
-  // onde a extensão está — usado no connect direto do Pay Master).
-  async function collectVerumAddresses(){
+  // Coleta os endereços multichain que a Verum expõe (connect direto do Pay Master).
+  // Fonte primária: verum.getAddresses(). Quando ela falha/vem incompleta (extensão sem relay
+  // do VERUM_ADDRESSES_REQUEST), caímos para os providers POR FAMÍLIA — EVM (um endereço vale
+  // para todas as redes EVM), Bitcoin (unisat-style) e Tron — para a rede escolhida NUNCA
+  // degradar silenciosamente para Solana.
+  const EVM_NETS=['ethereum','bsc','polygon','arbitrum','base','optimism','avalanche','cronos'];
+  async function collectVerumAddresses(solAddress){
+    const out=new Map(); // network → address (primeira fonte vence)
+    const put=(network,address)=>{ if(network&&address&&!out.has(network)) out.set(String(network),String(address)); };
+    if(solAddress) put('solana',solAddress);
     try{
       const p=window.verum;
       if(p&&typeof p.getAddresses==='function'){
-        // getAddresses pode NÃO resolver (extensão sem relay p/ VERUM_ADDRESSES_REQUEST).
-        // Corremos contra um timeout p/ NUNCA travar a conexão.
-        const to=new Promise(res=>setTimeout(()=>res(null),2500));
-        const r=await Promise.race([Promise.resolve(p.getAddresses()).catch(()=>null),to]);
-        if(r&&Array.isArray(r.addresses)) return r.addresses.filter(a=>a&&a.network&&a.address).map(a=>({network:String(a.network),address:String(a.address)}));
+        // Timeout p/ NUNCA travar a conexão; 1 retry curto (o relay às vezes só responde na 2ª).
+        for(let i=0;i<2;i++){
+          const to=new Promise(res=>setTimeout(()=>res(null),i?2000:4000));
+          const r=await Promise.race([Promise.resolve(p.getAddresses()).catch(()=>null),to]);
+          const list=r&&Array.isArray(r.addresses)?r.addresses:(Array.isArray(r)?r:null);
+          if(list&&list.length){ list.forEach(a=>a&&put(a.network,a.address)); break; }
+        }
       }
     }catch(e){}
-    return [];
+    // Fallback por família — só para o que o getAddresses não trouxe.
+    if(!EVM_NETS.some(n=>out.has(n))){
+      try{ const p=await findVerumEthProvider(); if(p){ const accs=await p.request({method:'eth_requestAccounts'}); if(accs&&accs[0]) EVM_NETS.forEach(n=>put(n,accs[0])); } }catch(e){}
+    }
+    if(!out.has('bitcoin')){
+      try{ const u=window.unisat||(window.verum&&window.verum.bitcoin)||null;
+        if(u){ const accs=await (u.requestAccounts?u.requestAccounts():u.getAccounts?u.getAccounts():null); if(accs&&accs[0]) put('bitcoin',accs[0]); } }catch(e){}
+    }
+    if(!out.has('tron')){
+      try{ const t=(window.verum&&window.verum.tron)||((window.tronLink&&window.tronLink.tronWeb)||window.tronWeb);
+        const addr=t&&((t.address&&(t.address.base58||t.address))||(t.defaultAddress&&t.defaultAddress.base58)); if(typeof addr==='string') put('tron',addr); }catch(e){}
+    }
+    return [...out.entries()].map(([network,address])=>({network,address}));
   }
   function pfRow(left,right,indent){
     const pad=indent?'padding-left:14px':'';
@@ -1564,14 +1585,17 @@ img,svg,canvas,video{max-width:100%}
           }
           throw ex;
         }
-        // Multichain: captura os endereços das demais redes que a Verum expõe.
-        const addresses=await collectVerumAddresses();
+        // Multichain: captura os endereços das demais redes (getAddresses + providers por família).
+        const addresses=await collectVerumAddresses(w.address);
         // Define a rede primária do slot conforme a escolha do dropdown.
         let network='solana', address=w.address;
         if(chosen!=='multichain'){
           const found=addresses.find(a=>a.network===chosen);
           if(found){ network=chosen; address=found.address; }
-          else { toast('A Verum ainda não expôs endereço em '+chosen+'; conectando como Solana/multichain.','info'); }
+          // Rede escolhida SEM endereço → ERRO claro (nunca conectar silenciosamente como Solana).
+          else throw new Error('A Verum Wallet não expôs endereço em '+chosen+' nesta aba. Desbloqueie/atualize a extensão e tente de novo — ou conecte como Multichain.');
+        } else if(addresses.length<2){
+          toast('A carteira só expôs '+addresses.length+' rede(s) — os saldos das demais não vão aparecer. Atualize a Verum Wallet.','info');
         }
         await pmApi('/v1/portal/wallet/connect',{method:'POST',body:{address,network,addresses}});
         setTopWallet(address); // cabeçalho reflete a carteira recém-conectada na hora
