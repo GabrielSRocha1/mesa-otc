@@ -1413,7 +1413,12 @@ img,svg,canvas,video{max-width:100%}
   async function connectWallet(network){
     const w=window;
     if(network==='ethereum'){ const p=await findVerumEthProvider(); if(!p){ const temVerum=typeof w.verum!=='undefined'; throw walletErr(temVerum?'A Verum Wallet está ativa, mas o provider EVM não foi injetado nesta aba. Recarregue a extensão (pasta extension-dist) em chrome://extensions e dê Ctrl+Shift+R aqui.':'Verum Wallet não detectada nesta aba. Instale/desbloqueie a extensão (extension-dist) e recarregue a página.','NO_WALLET'); } const accs=await p.request({method:'eth_requestAccounts'}); const address=accs&&accs[0]; if(!address) throw walletErr('Nenhuma conta EVM retornada.','NO_WALLET'); return {address,network}; }
-    if(network==='solana'){ const p=solProvider(); __dbg('solProvider → '+(p?(p===w.verum?'window.verum':p===w.solana?'window.solana':'outro'):'null')); if(!p) throw walletErr('Verum Wallet não encontrada. Instale/desbloqueie a extensão.','NO_WALLET'); __dbg('chamando p.connect()…'); const r=await p.connect(); __dbg('p.connect() resolveu'); const address=(r&&r.publicKey?r.publicKey:p.publicKey).toString(); __dbg('endereço='+address); return {address,network}; }
+    if(network==='solana'){ const p=solProvider(); __dbg('solProvider → '+(p?(p===w.verum?'window.verum':p===w.solana?'window.solana':'outro'):'null')); if(!p) throw walletErr('Verum Wallet não encontrada. Instale/desbloqueie a extensão.','NO_WALLET'); __dbg('chamando p.connect()…'); const r=await p.connect(); __dbg('p.connect() resolveu');
+      // Caminho A do protocolo: o CONNECT_RESPONSE pode embutir a lista multichain — guardamos
+      // para o collectVerumAddresses (o relay separado do getAddresses nem sempre responde).
+      w.__verumConnectAddresses=(r&&Array.isArray(r.addresses)&&r.addresses.length)?r.addresses:null;
+      __dbg('addresses no connect: '+(w.__verumConnectAddresses?w.__verumConnectAddresses.length:'0'));
+      const address=(r&&r.publicKey?r.publicKey:p.publicKey).toString(); __dbg('endereço='+address); return {address,network}; }
     throw walletErr('Rede não suportada para conexão direta.','NO_WALLET');
   }
   // ── Portfólio multichain (18 redes) — leitura NO BACKEND da OTC ──────────
@@ -1435,6 +1440,8 @@ img,svg,canvas,video{max-width:100%}
     const out=new Map(); // network → address (primeira fonte vence)
     const put=(network,address)=>{ if(network&&address&&!out.has(network)) out.set(String(network),String(address)); };
     if(solAddress) put('solana',solAddress);
+    // Fonte 0: a lista que a carteira EMBUTIU na resposta do connect (Caminho A) — mais confiável.
+    try{ (window.__verumConnectAddresses||[]).forEach(a=>a&&put(a.network,a.address)); }catch(e){}
     try{
       const p=window.verum;
       if(p&&typeof p.getAddresses==='function'){

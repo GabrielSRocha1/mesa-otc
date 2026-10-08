@@ -163,6 +163,8 @@ h1{font-size:22px;margin-bottom:8px}
     if(network==='solana'){
       const p=solProvider(); if(!p) throw walletErr('Carteira Verum Wallet não encontrada','NO_WALLET');
       const r=await p.connect();
+      // Caminho A: a resposta do connect pode EMBUTIR a lista multichain — guardamos p/ o collect.
+      window.__verumConnectAddresses=(r&&Array.isArray(r.addresses)&&r.addresses.length)?r.addresses:null;
       const pk=(r&&r.publicKey)?r.publicKey:p.publicKey;
       if(!pk) throw walletErr('Não foi possível ler o endereço da carteira Solana','NO_WALLET');
       return {address:pk.toString(),network};
@@ -178,43 +180,32 @@ h1{font-size:22px;margin-bottom:8px}
     throw walletErr('Rede não suportada','NO_WALLET');
   }
 
-  // Saldo via RPC público a partir do endereço conectado (não passa pela extensão).
-  const BAL_RPC={ solana:'https://api.mainnet-beta.solana.com', ethereum:'https://ethereum-rpc.publicnode.com' };
+  // Saldo via BACKEND (/v1/chains/balances): respeita os CHAIN_ENDPOINT_* do servidor —
+  // em testes, lê testnet/devnet; em produção, mainnet. Nada de RPC mainnet fixo no browser.
   async function walletBalance(address,network){
     try{
-      if(network==='solana'){
-        const r=await fetch(BAL_RPC.solana,{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({jsonrpc:'2.0',id:1,method:'getBalance',params:[address]})});
-        const j=await r.json(); const lamports=j&&j.result&&typeof j.result.value==='number'?j.result.value:null;
-        if(lamports==null) return null; return (lamports/1e9).toLocaleString('pt-BR',{maximumFractionDigits:4})+' SOL';
-      }
-      if(network==='ethereum'){
-        const r=await fetch(BAL_RPC.ethereum,{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({jsonrpc:'2.0',id:1,method:'eth_getBalance',params:[address,'latest']})});
-        const j=await r.json(); if(!j||!j.result) return null; const eth=Number(BigInt(j.result))/1e18;
-        return eth.toLocaleString('pt-BR',{maximumFractionDigits:5})+' ETH';
-      }
-      if(network==='bitcoin'){
-        const r=await fetch('https://blockstream.info/api/address/'+encodeURIComponent(address));
-        if(!r.ok) return null; const j=await r.json(); const cs=j.chain_stats||{}; const sats=(cs.funded_txo_sum||0)-(cs.spent_txo_sum||0);
-        return (sats/1e8).toLocaleString('pt-BR',{maximumFractionDigits:8})+' BTC';
-      }
-    }catch(e){}
-    return null;
+      const res=await api('/v1/chains/balances',{method:'POST',body:{addresses:[{network,address}]}});
+      const it=res&&res.items&&res.items[0];
+      if(!it||!it.ok||it.amount==null) return null;
+      return Number(it.amount).toLocaleString('pt-BR',{maximumFractionDigits:6})+' '+(it.symbol||'');
+    }catch(e){ return null; }
   }
 
-  // Endereços multichain que a Verum expõe (getAddresses) — para a OTC ler
-  // saldo em todas as redes suportadas pela carteira.
+  // Endereços multichain da Verum — fonte 0: a lista EMBUTIDA na resposta do connect (Caminho A,
+  // mais confiável); fonte 1: getAddresses() com timeout (o relay separado nem sempre responde).
   async function collectVerumAddresses(){
+    const out=new Map();
+    const put=a=>{ if(a&&a.network&&a.address&&!out.has(String(a.network))) out.set(String(a.network),String(a.address)); };
+    try{ (window.__verumConnectAddresses||[]).forEach(put); }catch(e){}
     try{
       const p=window.verum;
       if(p&&typeof p.getAddresses==='function'){
-        // getAddresses pode NÃO resolver (extensão sem relay p/ VERUM_ADDRESSES_REQUEST).
-        // Corremos contra um timeout p/ NUNCA travar a conexão após assinar.
-        const to=new Promise(res=>setTimeout(()=>res(null),2500));
+        const to=new Promise(res=>setTimeout(()=>res(null),4000));
         const r=await Promise.race([Promise.resolve(p.getAddresses()).catch(()=>null),to]);
-        if(r&&Array.isArray(r.addresses)) return r.addresses.filter(a=>a&&a.network&&a.address).map(a=>({network:String(a.network),address:String(a.address)}));
+        if(r&&Array.isArray(r.addresses)) r.addresses.forEach(put);
       }
     }catch(e){}
-    return [];
+    return [...out.entries()].map(([network,address])=>({network,address}));
   }
   function fmtAmt(n){ if(n==null) return '—'; const abs=Math.abs(n); const d=abs>=1?4:abs>=0.0001?6:8; return Number(n).toLocaleString('pt-BR',{maximumFractionDigits:d}); }
   function fmtUsd(n){ if(n==null) return ''; return '$'+Number(n).toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2}); }
