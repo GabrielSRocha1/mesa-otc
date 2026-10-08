@@ -120,7 +120,8 @@ h1{font-size:22px;margin-bottom:8px}
   // navegador dApp da Verum já carregando o PRÓPRIO link do convite (token preservado no
   // caminho/query) — lá dentro window.verum existe e a conexão/assinatura funciona.
   const IS_MOBILE=/android|iphone|ipad|ipod|mobile/i.test(navigator.userAgent||'');
-  function hasInjectedWallet(){ const w=window; return !!(w.verum||w.solana||w.ethereum); }
+  // ESTRITO à Verum: outras carteiras injetadas (Solflare/MetaMask) não contam — sem a Verum, dapp-browser.
+  function hasInjectedWallet(){ const w=window; return !!(w.verum||(w.solana&&w.solana.isVerum)||(w.ethereum&&(w.ethereum.isVerum||(Array.isArray(w.ethereum.providers)&&w.ethereum.providers.some(p=>p&&p.isVerum))))); }
   const VERUM_DAPP_BROWSER='https://www.verumcrypto.com/dapp-browser';
   function openInVerumBrowser(){
     const url=VERUM_DAPP_BROWSER+'?url='+encodeURIComponent(location.origin+location.pathname+location.search)+'&name='+encodeURIComponent('VERUM OTC');
@@ -134,9 +135,9 @@ h1{font-size:22px;margin-bottom:8px}
   // Provedor Solana — Verum Wallet (preferencial), depois Solflare.
   function solProvider(){
     const w=window;
+    // SOMENTE a Verum — nunca Solflare/outras (a mesa aceita só conexões Verum Wallet).
     if(w.verum) return w.verum;
-    if(w.solflare && (w.solflare.isSolflare || typeof w.solflare.connect==='function')) return w.solflare;
-    if(w.solana && (w.solana.isVerum || w.solana.isSolflare)) return w.solana;
+    if(w.solana && w.solana.isVerum) return w.solana;
     return null;
   }
   // Provider EVM da Verum via EIP-6963 (rdns com.verumcrypto.wallet). Sem isto, a
