@@ -144,7 +144,9 @@ export class MesaService {
 
   /* ---------- convites por cadeira ---------- */
 
-  async createChairInvite(portalToken: string | undefined, mesaId: string, chairId: string): Promise<{ inviteId: string; code: string; link: string; message: string; expiresAt: number; role: MesaChairRole }> {
+  /** `baseUrl` opcional: a rota passa o host REAL da requisição (deploy/local) — o default de
+   *  configuração vira só fallback, nunca mais um link para domínio morto. */
+  async createChairInvite(portalToken: string | undefined, mesaId: string, chairId: string, baseUrl?: string): Promise<{ inviteId: string; code: string; link: string; message: string; expiresAt: number; role: MesaChairRole }> {
     const pm = this.d.portal.requirePayMaster(portalToken);
     const mesa = this.mesaOf(pm.id, mesaId);
     this.assertMesaOpen(mesa);
@@ -161,7 +163,7 @@ export class MesaService {
     const row: MesaInviteRow = { inviteId, mesaId, chairId, codeHash: codeHashOf(inviteId, code), codePrefix: normalizeCode(code).slice(0, 4), status: 'PENDING', usedByAddress: null, usedByName: null, usedAt: null, createdAt: t, expiresAt };
     await this.d.store.insertMesaInvite(row);
     void this.audit('mesa.convite.gerado', pm.id, { mesaId, chairId, inviteId, role: chair.role });
-    const link = `${this.d.baseUrl}/otc/convite/${encodeURIComponent(inviteId)}?c=${encodeURIComponent(code)}`;
+    const link = `${baseUrl ?? this.d.baseUrl}/otc/convite/${encodeURIComponent(inviteId)}?c=${encodeURIComponent(code)}`;
     return { inviteId, code, link, message: this.inviteMessage(mesa, chair, code, link, expiresAt), expiresAt, role: chair.role };
   }
 

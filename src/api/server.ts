@@ -635,7 +635,11 @@ export async function buildApi(deps: ApiDeps): Promise<FastifyInstance> {
   });
   app.post('/v1/portal/mesas/:mesaId/chairs/:chairId/invite', async (req, reply) => {
     const { mesaId, chairId } = req.params as { mesaId: string; chairId: string };
-    const inv = await deps.mesa.createChairInvite(portalToken(req), mesaId, chairId);
+    // Link do convite com o host REAL desta requisição (deploy Vercel, domínio próprio ou local)
+    // — o APP_DOMAIN configurado é só fallback (o default apontava para domínio inexistente).
+    const proto = String(req.headers['x-forwarded-proto'] ?? req.protocol ?? 'https').split(',')[0];
+    const baseUrl = req.headers.host ? `${proto}://${req.headers.host}` : undefined;
+    const inv = await deps.mesa.createChairInvite(portalToken(req), mesaId, chairId, baseUrl);
     void reply.code(201); return inv;
   });
   app.post('/v1/portal/mesas/:mesaId/invites/:inviteId/revoke', async (req) => {

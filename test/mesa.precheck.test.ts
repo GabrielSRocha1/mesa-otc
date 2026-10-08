@@ -40,6 +40,13 @@ describe('balancePreCheck — rota e gate de assinatura', () => {
     expect(body.canCancel).toBe(true);
     expect(body.ok).toBe(false); // cadeiras ainda sem carteira → motivos nominais
     expect(body.failures.join(' | ')).toContain('carteira ainda não conectada');
+
+    // Link do convite usa o HOST da requisição (deploy/local) — nunca o domínio fixo da config.
+    const mesa = app.mesa.mesaById(mesaId)!;
+    const buyerChair = mesa.chairs.find(c => c.role === 'BUYER')!;
+    const inv = await app.api.inject({ method: 'POST', url: `/v1/portal/mesas/${mesaId}/chairs/${buyerChair.chairId}/invite`, headers: { ...pmHeaders(token), host: 'meu-deploy.vercel.app', 'x-forwarded-proto': 'https' }, payload: {} });
+    expect(inv.statusCode, inv.body).toBe(201);
+    expect(inv.json<{ link: string }>().link.startsWith('https://meu-deploy.vercel.app/otc/convite/')).toBe(true);
     await app.close();
   }, 60_000);
 
