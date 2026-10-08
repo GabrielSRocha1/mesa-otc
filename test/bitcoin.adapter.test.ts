@@ -8,7 +8,7 @@ import { bytesToHex, hexToBytes } from '@noble/hashes/utils.js';
 import { secp256k1 } from '@noble/curves/secp256k1.js';
 import { bech32 } from '@scure/base';
 import {
-  BitcoinChainAdapter, htlcWitnessScript, p2wshAddress, p2wpkhAddress, outputScriptOf,
+  BitcoinChainAdapter, htlcWitnessScript, p2wshAddress, p2wpkhAddress, outputScriptOf, toNetworkHrp,
   buildHtlcSpend, bip143Sighash, preimageFromWitness, scriptNum, varint, type BitcoinSettings, type HtlcUtxo,
 } from '../src/adapters/bitcoin.js';
 import type { Deal } from '../src/domain/types.js';
@@ -44,6 +44,15 @@ describe('script HTLC + endereço P2WSH', () => {
     expect(dec.words[0]).toBe(0);
     expect(bytesToHex(Uint8Array.from(bech32.fromWords(dec.words.slice(1))))).toBe(bytesToHex(sha256(s)));
   });
+  it('toNetworkHrp re-encoda bc1↔tb1 preservando o programa (mesma chave) e ignora o resto', () => {
+    const main = p2wpkhAddress(claimPub, 'mainnet');
+    const test = p2wpkhAddress(claimPub, 'testnet');
+    expect(toNetworkHrp(main, 'testnet')).toBe(test); // carteira expõe bc1…, testnet gasta no tb1… equivalente
+    expect(toNetworkHrp(test, 'mainnet')).toBe(main);
+    expect(toNetworkHrp(test, 'testnet')).toBe(test); // já no HRP certo → intacto
+    expect(toNetworkHrp('0xDEAD', 'testnet')).toBe('0xDEAD'); // não-bech32 → intacto
+  });
+
   it('outputScriptOf aceita bech32 v0 da própria rede e rejeita rede errada/lixo', () => {
     const w = p2wpkhAddress(claimPub, 'regtest');
     expect(bytesToHex(outputScriptOf(w, 'regtest')).startsWith('0014')).toBe(true);

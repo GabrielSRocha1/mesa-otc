@@ -26,7 +26,7 @@ import { sha256 } from '@noble/hashes/sha2.js';
 import { ripemd160 } from '@noble/hashes/legacy.js';
 import { bytesToHex, hexToBytes, concatBytes } from '@noble/hashes/utils.js';
 import { secp256k1 } from '@noble/curves/secp256k1.js';
-import { bech32 } from '@scure/base';
+import { bech32, bech32m } from '@scure/base';
 import bs58 from 'bs58';
 import { DomainError } from '../domain/errors.js';
 import type { CanonicalAsset, ChainRef, Deal, Leg, Participant, Terms } from '../domain/types.js';
@@ -80,6 +80,21 @@ export function htlcWitnessScript(htlcHashHex: string, claimPub: Uint8Array, ref
     Uint8Array.of(OP.ELSE), pushData(scriptNum(csvBlocks)), Uint8Array.of(OP.CSV, OP.DROP), pushData(refundPub), Uint8Array.of(OP.CHECKSIG),
     Uint8Array.of(OP.ENDIF),
   );
+}
+
+/**
+ * Re-encoda um endereço bech32/bech32m para o HRP da rede alvo (MESMO programa/chave): carteiras
+ * multichain (Verum) expõem o formato MAINNET (bc1…) e, em testnet, o mesmo dono recebe/gasta no
+ * tb1… equivalente. Endereços não-bech32 (ou já no HRP certo) passam intactos.
+ */
+export function toNetworkHrp(address: string, net: BitcoinNet): string {
+  const want = HRP[net];
+  const m = /^(bc|tb|bcrt)1/.exec(address.toLowerCase());
+  if (!m || m[1] === want) return address;
+  for (const codec of [bech32, bech32m]) {
+    try { const d = codec.decode(address.toLowerCase() as `${string}1${string}`, 120); return codec.encode(want, d.words, 120); } catch { /* tenta o próximo codec */ }
+  }
+  return address;
 }
 
 export function p2wshAddress(witnessScript: Uint8Array, net: BitcoinNet): string {
@@ -244,7 +259,7 @@ export class BitcoinChainAdapter implements SettlementAdapter {
   capabilities(): AdapterCapabilities { return { escrowNN: false, htlc: true, verifiableSigSchemes: [], finalityConfirmations: this.cfg.confirmations, nativeCode: 'BTC' }; }
   /** Não há escrow global — o "cofre" visível é o endereço operacional do keeper (cada deal tem seu P2WSH). */
   escrowAddress(): string { return p2wpkhAddress(this.claimPub, this.cfg.network); }
-  validateAddress(address: string): boolean { try { outputScriptOf(address, this.cfg.network); return true; } catch { return false; } }
+  validateAddress(address: string): boolean { try { outputScriptOf(toNetworkHrp(address, this.cfg.network), this.cfg.network); return true; } catch { return false; } }
 
   async verifyAsset(asset: CanonicalAsset): Promise<AssetVerification> {
     const checkedAt = this.now(); const reasons: string[] = [];
@@ -256,7 +271,7 @@ export class BitcoinChainAdapter implements SettlementAdapter {
 
   async getBalance(address: string, asset: CanonicalAsset): Promise<bigint> {
     if (asset.contractOrMint !== null) return 0n;
-    return this.esplora.addressSats(address);
+    return this.esplora.addressSats(toNetworkHrp(address, this.cfg.network));
   }
 
   async estimateCostUsd(op: 'deposit' | 'register' | 'settle' | 'refund'): Promise<string> {
@@ -296,8 +311,9 @@ export class BitcoinChainAdapter implements SettlementAdapter {
   /** Endereço BTC de payout do papel: participante na rede bitcoin OU resolvedor multichain (Verum Wallet). */
   private async payoutOf(dealId: string, e: HtlcEssentials, role: Leg['from']): Promise<string> {
     const p = e.participants.find(x => x.role === role && x.network === 'bitcoin');
-    const addr = p?.address ?? (await this.deps?.btcAddressOf?.(dealId, role)) ?? null;
-    if (!addr) throw new DomainError('SETTLEMENT_NOT_ALLOWED', `payout BTC impossível: o papel ${role} não tem endereço Bitcoin na deal nem na carteira multichain`);
+    const raw = p?.address ?? (await this.deps?.btcAddressOf?.(dealId, role)) ?? null;
+    if (!raw) throw new DomainError('SETTLEMENT_NOT_ALLOWED', `payout BTC impossível: o papel ${role} não tem endereço Bitcoin na deal nem na carteira multichain`);
+    const addr = toNetworkHrp(raw, this.cfg.network); // carteira pode expor o formato mainnet (bc1…)
     outputScriptOf(addr, this.cfg.network); // valida já aqui com motivo nominal
     return addr;
   }

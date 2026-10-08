@@ -74,7 +74,12 @@ async function readSolana(c: ChainDef, address: string): Promise<NativeBalance |
 }
 
 async function readBitcoin(c: ChainDef, address: string): Promise<NativeBalance | null> {
-  const j = await fetchJson(`${c.endpoint}/address/${encodeURIComponent(address)}`);
+  // Endpoint de testnet exige tb1…; carteiras multichain expõem o formato MAINNET (bc1…) da
+  // MESMA chave — re-encoda o HRP conforme a rede do endpoint (senão o Esplora responde
+  // "Address on invalid network" e o saldo aparece como indisponível).
+  const { toNetworkHrp } = await import('../adapters/bitcoin.js');
+  const net = /testnet|signet/i.test(c.endpoint) ? 'testnet' as const : /regtest|localhost|127\.0\.0\.1/i.test(c.endpoint) ? 'regtest' as const : 'mainnet' as const;
+  const j = await fetchJson(`${c.endpoint}/address/${encodeURIComponent(toNetworkHrp(address, net))}`);
   if (j?.__notFound) return pack(0n, c);
   const cs = j?.chain_stats;
   if (!cs) return null;
