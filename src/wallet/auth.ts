@@ -16,7 +16,7 @@ export interface Session {
   /** Sessão de PARTICIPANTE de mesa (v3): emitida após convite válido + challenge assinado. */
   mesa?: { mesaId: string; chairId: string; role: 'SELLER' | 'BUYER' | 'PAYMASTER_1' | 'PAYMASTER_2'; firstName: string };
 }
-export interface Challenge { message: string; nonce: string; expiresAt: number }
+export interface Challenge { message: string; nonce: string; expiresAt: number; issuedAtIso: string; expiresAtIso: string }
 
 const b64u = (s: string | Buffer): string => Buffer.from(s).toString('base64url');
 const fromB64u = (s: string): string => Buffer.from(s, 'base64url').toString('utf8');
@@ -29,20 +29,25 @@ export class WalletAuth {
   async challenge(network: Network, address: string): Promise<Challenge> {
     const a = this.adapters.get(network); if (!a) throw new DomainError('ADAPTER_UNAVAILABLE', `Rede ${network} não suportada`);
     if (!a.validateAddress(address)) throw new DomainError('WALLET_INVALID', 'Endereço inválido para a rede');
-    const nonce = randomToken(); const expiresAt = this.now() + this.cfg.challengeTtlMs;
-    await this.store.insertNonce({ value: nonce, kind: 'challenge', dealId: null, revision: null, role: null, subject: `${network}:${address.toLowerCase()}`, issuedAt: this.now(), expiresAt, consumedAt: null });
-    const message = [`${this.cfg.appDomain} quer que você entre com sua carteira ${network}.`, '', `Endereço: ${address}`, `Domínio: VerumOTC/1/${this.cfg.env}`, `Nonce: ${nonce}`, `Emitido em: ${new Date(this.now()).toISOString()}`, `Expira em: ${new Date(expiresAt).toISOString()}`, '', 'Assinar esta mensagem não movimenta fundos e não concede permissões.'].join('\n');
-    return { message, nonce, expiresAt };
+    // Um ÚNICO instante para nonce+mensagem: três now() separados divergiam por ms em produção e
+    // o verify reprovava carimbos de clientes CORRETOS (local nunca pegava — relógio fixo nos testes).
+    const nonce = randomToken(); const t = this.now(); const expiresAt = t + this.cfg.challengeTtlMs;
+    await this.store.insertNonce({ value: nonce, kind: 'challenge', dealId: null, revision: null, role: null, subject: `${network}:${address.toLowerCase()}`, issuedAt: t, expiresAt, consumedAt: null });
+    const issuedAtIso = new Date(t).toISOString(); const expiresAtIso = new Date(expiresAt).toISOString();
+    const message = [`${this.cfg.appDomain} quer que você entre com sua carteira ${network}.`, '', `Endereço: ${address}`, `Domínio: VerumOTC/1/${this.cfg.env}`, `Nonce: ${nonce}`, `Emitido em: ${issuedAtIso}`, `Expira em: ${expiresAtIso}`, '', 'Assinar esta mensagem não movimenta fundos e não concede permissões.'].join('\n');
+    // Carimbos EXPLÍCITOS na resposta: clientes não precisam (nem devem) extrair da mensagem por regex.
+    return { message, nonce, expiresAt, issuedAtIso, expiresAtIso };
   }
 
-  /** Reconstrói a mensagem a partir do nonce persistido — o cliente não escolhe o que assina. */
-  async verify(network: Network, address: string, nonce: string, signature: string, issuedAtIso: string, expiresAtIso: string): Promise<{ token: string; session: Session }> {
+  /** Reconstrói a mensagem EXCLUSIVAMENTE do nonce persistido — o cliente não escolhe o que assina
+   *  e nem precisa devolver carimbos (campos aceitos só por compatibilidade e ignorados). */
+  async verify(network: Network, address: string, nonce: string, signature: string, _issuedAtIso?: string, _expiresAtIso?: string): Promise<{ token: string; session: Session }> {
     const n = await this.store.getNonce(nonce);
     if (!n || n.kind !== 'challenge') throw new DomainError('NONCE_INVALID', 'desafio desconhecido');
     if (n.subject !== `${network}:${address.toLowerCase()}`) throw new DomainError('NONCE_INVALID', 'desafio emitido para outra carteira');
     if (n.consumedAt !== null) throw new DomainError('NONCE_INVALID', 'desafio já utilizado');
     if (this.now() >= n.expiresAt) throw new DomainError('SIGNATURE_EXPIRED', 'desafio expirado');
-    if (new Date(issuedAtIso).getTime() !== n.issuedAt || new Date(expiresAtIso).getTime() !== n.expiresAt) throw new DomainError('SIGNATURE_INVALID', 'carimbos do desafio não conferem');
+    const issuedAtIso = new Date(n.issuedAt).toISOString(); const expiresAtIso = new Date(n.expiresAt).toISOString();
     const message = [`${this.cfg.appDomain} quer que você entre com sua carteira ${network}.`, '', `Endereço: ${address}`, `Domínio: VerumOTC/1/${this.cfg.env}`, `Nonce: ${nonce}`, `Emitido em: ${issuedAtIso}`, `Expira em: ${expiresAtIso}`, '', 'Assinar esta mensagem não movimenta fundos e não concede permissões.'].join('\n');
     let ok: boolean;
     if (network === 'ethereum') { try { ok = await verifyMessage({ address: address as `0x${string}`, message, signature: signature as `0x${string}` }); } catch { ok = false; } }
