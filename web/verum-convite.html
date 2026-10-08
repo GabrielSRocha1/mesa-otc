@@ -255,7 +255,8 @@ h1{font-size:22px;margin-bottom:8px}
     // a PROVA de posse usa a rede de auth suportada (Verum = Solana por baixo).
     const net=authNetFor(invite.network);
     // Celular sem carteira injetada → abre este convite dentro do navegador da Verum Wallet.
-    if(IS_MOBILE && !hasInjectedWallet()){ toast('Abrindo no navegador da Verum Wallet…'); openInVerumBrowser(); return; }
+    // Sem wallet injetada (desktop OU mobile) → abre o convite DENTRO do navegador da Verum.
+    if(!hasInjectedWallet()){ toast('Abrindo dentro da Verum Wallet…'); openInVerumBrowser(); return; }
     try{
       busy(true,'Conectando carteira…');
       const w=await connectWallet(net);
@@ -347,7 +348,7 @@ h1{font-size:22px;margin-bottom:8px}
     const name=($('#v3Name')&&$('#v3Name').value.trim())||'';
     if(name.length<2||name.length>30){ toast('Informe seu primeiro nome (2 a 30 caracteres)','err'); return; }
     // Celular sem provider injetado → abre ESTE convite dentro do navegador da Verum (síncrono no clique).
-    if(!verumProvider()){ if(IS_MOBILE){ toast('Abrindo na Verum Wallet…'); openInVerumBrowser(); return; } v3Blocked(); return; }
+    if(!verumProvider()){ toast('Abrindo na Verum Wallet…'); openInVerumBrowser(); return; }
     try{
       v3Busy(true,'Conectando Verum Wallet…');
       const prov=verumProvider();

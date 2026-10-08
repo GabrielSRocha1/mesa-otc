@@ -1349,12 +1349,7 @@ img,svg,canvas,video{max-width:100%}
   // Verum Wallet) — sem link, sem endereço fake. EVM habilita assinatura EIP-712.
   const CONNECT_NETS=['ethereum','solana'];
   // Destino quando NÃO há carteira injetada (extensão): abre a carteira web da
-  // Verum já na tela "Carteiras" (/wallet). Se o usuário tiver sessão ativa
-  // nesse domínio, cai logado; senão o app manda pro login e volta pra cá.
-  // A OTC NÃO cria a sessão da carteira (origem diferente) — só direciona.
-  // Troque o domínio se o app web estiver noutro subdomínio (app./swap.).
-  const VERUM_WALLET_URL='https://www.verumcrypto.com/wallet';
-  // ── Mobile sem extensão: abrir ESTA dApp dentro do navegador da Verum Wallet ──
+  // ── Sem extensão (desktop OU mobile): abrir ESTA dApp dentro do navegador da Verum Wallet ──
   // No celular (sem extensão/ window.verum) abrimos o NAVEGADOR dApp da Verum já carregando o
   // próprio OTC — o site roda DENTRO da Verum (onde window.verum existe) e a conexão acontece lá,
   // igual ao Verum Vesting. Rota HTTPS do PWA da Verum: /dapp-browser?url=<enc do OTC>.
@@ -1552,9 +1547,10 @@ img,svg,canvas,video{max-width:100%}
       const role=b.dataset.revoke; try{ await pmApi('/v1/portal/mesa/invites/revoke',{method:'POST',body:{role}}); toast('Convite revogado','info'); await refreshMesa(); }catch(ex){ toast(ex.message,'err'); }
     }));
     $$('#mesaSlots [data-connect]').forEach(b=>b.addEventListener('click',async()=>{
-      // Mobile sem carteira injetada → abre no navegador da Verum. SÍNCRONO no clique (não pode
-      // ocorrer após await, senão o navegador bloqueia a navegação para o esquema do app).
-      if(IS_MOBILE && !hasInjectedWallet()){ toast('Abrindo no navegador da Verum Wallet…','info'); openInVerumBrowser(); return; }
+      // SEM carteira injetada (desktop OU mobile) → abre ESTA dApp dentro do navegador da Verum
+      // (iframe com window.verum) — é lá que a conexão acontece. SÍNCRONO no clique (não pode
+      // ocorrer após await, senão o navegador bloqueia a navegação).
+      if(!hasInjectedWallet()){ toast('Abrindo o OTC dentro da Verum Wallet…','info'); openInVerumBrowser(); return; }
       // Uma conexão por vez: sem isto, o polling de 4s re-renderiza o botão no
       // meio do fluxo e um segundo clique dispara um pedido concorrente à
       // extensão — a Verum Wallet reabre o popup e fica presa na tela de início.
@@ -1572,15 +1568,10 @@ img,svg,canvas,video{max-width:100%}
         try{ w=await connectWallet('solana'); }
         catch(ex){
           if(ex.code==='NO_WALLET'){
-            if(IS_MOBILE){
-              // Celular sem extensão → abre a dApp dentro do navegador da Verum Wallet.
-              toast('Abrindo no navegador da Verum Wallet…','info');
-              openInVerumBrowser();
-              return;
-            }
-            // Desktop sem carteira injetada → leva o usuário à Verum Wallet (web).
-            window.open(VERUM_WALLET_URL,'_blank','noopener');
-            toast('Abrindo a Verum Wallet… conecte sua carteira por lá.','info');
+            // Qualquer plataforma sem provider → abre ESTA dApp DENTRO do navegador da Verum
+            // (iframe com window.verum), onde a conexão é possível — nada de aba avulsa.
+            toast('Abrindo o OTC dentro da Verum Wallet…','info');
+            openInVerumBrowser();
             return;
           }
           throw ex;
