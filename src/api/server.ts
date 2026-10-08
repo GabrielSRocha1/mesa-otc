@@ -128,7 +128,7 @@ export async function buildApi(deps: ApiDeps): Promise<FastifyInstance> {
   /* ---------- auth ---------- */
   app.get('/v1/auth/challenge', async req => { const q = parse(z.object({ network: NetworkZ, address: z.string().min(20).max(120) }), req.query); return deps.auth.challenge(q.network, q.address); });
   // issuedAt/expiresAt OPCIONAIS (compat): o verify reconstrói a mensagem do nonce persistido.
-  app.post('/v1/auth/verify', async req => { const b = parse(z.object({ network: NetworkZ, address: z.string(), nonce: z.string(), signature: z.string().min(20), issuedAt: z.string().optional(), expiresAt: z.string().optional() }), req.body); const r = await deps.auth.verify(b.network, b.address, b.nonce, b.signature, b.issuedAt, b.expiresAt); await deps.audit.append({ actorType: 'user', actorId: r.session.sub, category: 'auth.login', dealId: null, payload: { network: b.network } }); return r; });
+  app.post('/v1/auth/verify', async req => { const b = parse(z.object({ network: NetworkZ, address: z.string(), nonce: z.string(), signature: z.string().min(20), issuedAt: z.union([z.string(), z.number()]).optional(), expiresAt: z.union([z.string(), z.number()]).optional() }), req.body); const r = await deps.auth.verify(b.network, b.address, b.nonce, b.signature, b.issuedAt, b.expiresAt); await deps.audit.append({ actorType: 'user', actorId: r.session.sub, category: 'auth.login', dealId: null, payload: { network: b.network } }); return r; });
   app.get('/v1/me', async req => requireSession(req));
 
   /* ---------- Identidade mínima (§2) — ancorada na carteira (sessão do WalletAuth) ---------- */
