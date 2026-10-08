@@ -15,7 +15,10 @@ export function tronWallet(): Wallet { const k = testSigning.tron(); return { ne
 
 export async function makeApp(over: AppOverrides & { env?: Record<string, string> } = {}): Promise<{ app: App; clock: Clock }> {
   const clock = new Clock(); const { env, ...rest } = over;
-  const config = loadConfig({ OTC_ENV: 'dev', DATABASE_MODE: 'memory', SESSION_SECRET: 'x'.repeat(48), ...(env ?? {}) });
+  // PORTAL_DATA_FILE ISOLADO por app de teste: o default (./.data/portal.json) é o arquivo do
+  // DEV SERVER — os testes sobrescreviam o portal real, apagando contas/carteiras conectadas.
+  const portalFile = `${process.env.TEMP ?? process.env.TMPDIR ?? '.'}/verum-test-portal-${Date.now()}-${Math.floor(Math.random() * 1e9)}.json`;
+  const config = loadConfig({ OTC_ENV: 'dev', DATABASE_MODE: 'memory', SESSION_SECRET: 'x'.repeat(48), PORTAL_DATA_FILE: portalFile, ...(env ?? {}) });
   const app = await createApp(config, { now: clock.now, ...rest }); return { app, clock };
 }
 export const ASSETS = {
