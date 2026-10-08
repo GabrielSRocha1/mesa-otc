@@ -197,6 +197,8 @@ h1{font-size:22px;margin-bottom:8px}
     const out=new Map();
     const put=a=>{ if(!a) return; const n=String(a.network||'').trim(), ad=String(a.address||'').trim(); if(n.length>=2&&ad.length>=8&&ad.length<=120&&!out.has(n)) out.set(n,ad); };
     try{ (window.__verumConnectAddresses||[]).forEach(put); }catch(e){}
+    // Connect já entregou a lista multichain → NÃO dispara getAddresses (evita segundo popup da wallet).
+    if(out.size>=2) return [...out.entries()].map(([network,address])=>({network,address}));
     try{
       const p=window.verum;
       if(p&&typeof p.getAddresses==='function'){

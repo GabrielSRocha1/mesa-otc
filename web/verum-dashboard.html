@@ -1436,12 +1436,15 @@ img,svg,canvas,video{max-width:100%}
   // para todas as redes EVM), Bitcoin (unisat-style) e Tron — para a rede escolhida NUNCA
   // degradar silenciosamente para Solana.
   const EVM_NETS=['ethereum','bsc','polygon','arbitrum','base','optimism','avalanche','cronos'];
-  async function collectVerumAddresses(solAddress){
+  async function collectVerumAddresses(solAddress,needNet){
     const out=new Map(); // network → address (primeira fonte vence)
     const put=(network,address)=>{ const n=String(network||'').trim(), a=String(address||'').trim(); if(n.length>=2&&a.length>=8&&a.length<=120&&!out.has(n)) out.set(n,a); };
     if(solAddress) put('solana',solAddress);
     // Fonte 0: a lista que a carteira EMBUTIU na resposta do connect (Caminho A) — mais confiável.
     try{ (window.__verumConnectAddresses||[]).forEach(a=>a&&put(a.network,a.address)); }catch(e){}
+    // Connect já trouxe multichain (e a rede pedida, se houver) → ZERO prompts adicionais na wallet.
+    const satisfied=()=>out.size>=2&&(!needNet||out.has(needNet));
+    if(satisfied()) return [...out.entries()].map(([network,address])=>({network,address}));
     try{
       const p=window.verum;
       if(p&&typeof p.getAddresses==='function'){
@@ -1454,11 +1457,13 @@ img,svg,canvas,video{max-width:100%}
         }
       }
     }catch(e){}
-    // Fallback por família — só para o que o getAddresses não trouxe.
-    if(!EVM_NETS.some(n=>out.has(n))){
+    if(satisfied()) return [...out.entries()].map(([network,address])=>({network,address}));
+    // Fallbacks por família ABREM POPUP na wallet — só disparam quando a rede ESCOLHIDA está
+    // faltando (nunca em multichain, que se contenta com o que o connect/getAddresses trouxe).
+    if(needNet&&EVM_NETS.includes(needNet)&&!out.has(needNet)){
       try{ const p=await findVerumEthProvider(); if(p){ const accs=await p.request({method:'eth_requestAccounts'}); if(accs&&accs[0]) EVM_NETS.forEach(n=>put(n,accs[0])); } }catch(e){}
     }
-    if(!out.has('bitcoin')){
+    if(needNet==='bitcoin'&&!out.has('bitcoin')){
       try{ const u=window.unisat||(window.verum&&window.verum.bitcoin)||null;
         if(u){ const accs=await (u.requestAccounts?u.requestAccounts():u.getAccounts?u.getAccounts():null); if(accs&&accs[0]) put('bitcoin',accs[0]); } }catch(e){}
     }
@@ -1587,7 +1592,7 @@ img,svg,canvas,video{max-width:100%}
           throw ex;
         }
         // Multichain: captura os endereços das demais redes (getAddresses + providers por família).
-        const addresses=await collectVerumAddresses(w.address);
+        const addresses=await collectVerumAddresses(w.address, chosen!=='multichain'?chosen:undefined);
         // Define a rede primária do slot conforme a escolha do dropdown.
         let network='solana', address=w.address;
         if(chosen!=='multichain'){
