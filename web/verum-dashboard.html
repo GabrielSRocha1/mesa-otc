@@ -722,11 +722,12 @@ img,svg,canvas,video{max-width:100%}
         <input id="search" placeholder="Buscar operação, ativo, hash…">
       </div>
       <div class="top-sp"></div>
-      <div class="wallet" data-toast="Carteira 0x8F2A…3e7C conectada · saldo sincronizado">
+      <!-- Chip do cabeçalho: SEMPRE a carteira REAL conectada pelo Pay Master (nunca um endereço fixo). -->
+      <div class="wallet" data-toast="Nenhuma carteira conectada — conecte a Verum Wallet na aba Mesa">
         <div class="lk"><svg viewBox="0 0 24 24"><rect x="5" y="11" width="14" height="9" rx="2"/><path d="M8 11V8a4 4 0 018 0v3"/></svg></div>
         <div>
-          <div class="wt" id="topWalletRole">Carteira Conectada</div>
-          <div class="wa" id="topWallet">0x8F2A…3e7C</div>
+          <div class="wt" id="topWalletRole">Pay Master 1</div>
+          <div class="wa" id="topWallet">não conectada</div>
         </div>
         <svg class="cv" viewBox="0 0 24 24"><path d="M6 9l6 6 6-6"/></svg>
       </div>
@@ -1257,14 +1258,18 @@ img,svg,canvas,video{max-width:100%}
     const pm1Part=document.querySelectorAll('.part')[2];
     if(pm1Part){ pm1Part.querySelector('.pr').textContent=org||(pm.name||'').split(' ')[0]; }
     $('#topWalletRole').textContent='Pay Master 1'+(org?' · '+org:'');
+    setTopWallet(st.wallet?st.wallet.address:null);
     if(st.wallet){
-      const short=shortAddr(st.wallet.address);
-      $('#topWallet').textContent=short;
-      $('.wallet').dataset.toast='Pay Master 1 · '+short+' conectada';
       const a=$('#pm1Addr');
-      if(a){ a.dataset.copy=st.wallet.address; a.childNodes[0].nodeValue=short+' '; }
+      if(a){ a.dataset.copy=st.wallet.address; a.childNodes[0].nodeValue=shortAddr(st.wallet.address)+' '; }
     }
     toast('Mesa vinculada ao Pay Master 1'+(st.code&&st.code.ttlMs>0?' · '+st.code.code:''),'ok');
+  }
+  /** Chip do cabeçalho = carteira REAL do Pay Master (null → estado "não conectada", nunca um endereço fixo). */
+  function setTopWallet(addr){
+    const chip=document.querySelector('.wallet'); const el=$('#topWallet'); if(!chip||!el) return;
+    if(addr){ const s=shortAddr(addr); el.textContent=s; el.title=addr; chip.dataset.toast='Pay Master 1 · '+s+' conectada'; }
+    else { el.textContent='não conectada'; el.title=''; chip.dataset.toast='Nenhuma carteira conectada — conecte a Verum Wallet na aba Mesa'; }
   }
 
   /* ---------- Mesa: convites das 3 carteiras + polling em tempo real ---------- */
@@ -1569,6 +1574,7 @@ img,svg,canvas,video{max-width:100%}
           else { toast('A Verum ainda não expôs endereço em '+chosen+'; conectando como Solana/multichain.','info'); }
         }
         await pmApi('/v1/portal/wallet/connect',{method:'POST',body:{address,network,addresses}});
+        setTopWallet(address); // cabeçalho reflete a carteira recém-conectada na hora
         toast('Verum Wallet conectada'+(addresses.length>1?' · multichain ('+addresses.length+' redes)':' ('+network+')'),'ok');
       }catch(ex){ toast(ex.message||'Falha ao conectar carteira','err'); }
       finally{ mesaConnecting=false; b.disabled=false; b.innerHTML=prev; await refreshMesa(); }
@@ -1596,7 +1602,7 @@ img,svg,canvas,video{max-width:100%}
     $('#dcConfirm').addEventListener('click',async()=>{
       const btn=$('#dcConfirm'); btn.disabled=true; btn.textContent='Desconectando…';
       try{
-        if(role==='PAYMASTER_1'){ await pmApi('/v1/portal/wallet/disconnect',{method:'POST',body:{}}); }
+        if(role==='PAYMASTER_1'){ await pmApi('/v1/portal/wallet/disconnect',{method:'POST',body:{}}); setTopWallet(null); }
         else{ await pmApi('/v1/portal/mesa/invites/revoke',{method:'POST',body:{role}}); }
         closeModal(); toast('Carteira desconectada permanentemente','info'); await refreshMesa();
       }catch(ex){ closeModal(); toast(ex.message||'Falha ao desconectar','err'); }
