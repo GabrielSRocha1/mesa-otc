@@ -42,8 +42,8 @@ export type MesaRole = 'SELLER' | 'BUYER' | 'PAYMASTER_2';
 /** Convite por papel: link portador que permite ao dono conectar a própria carteira sem login do PM. */
 export interface MesaInvite { token: string; payMasterId: string; role: MesaRole; network: string; label?: string; status: 'pending' | 'confirmed'; wallet: WalletLink | null; createdAt: number; expiresAt: number }
 
-export interface PortalData { seq: number; payMasters: Record<string, PayMaster>; sessions: Record<string, PortalSession>; codes: Record<string, MesaCode>; invites: Record<string, MesaInvite>; mesas: Record<string, MesaRecord> }
-export function emptyPortalData(): PortalData { return { seq: 0, payMasters: {}, sessions: {}, codes: {}, invites: {}, mesas: {} }; }
+export interface PortalData { seq: number; /** Versão monotônica do documento (concorrência serverless): cada write() incrementa; o save no Postgres só aplica se rev for mais novo que o do banco — evita que uma instância com memória velha sobrescreva escritas de outra. */ rev?: number; payMasters: Record<string, PayMaster>; sessions: Record<string, PortalSession>; codes: Record<string, MesaCode>; invites: Record<string, MesaInvite>; mesas: Record<string, MesaRecord> }
+export function emptyPortalData(): PortalData { return { seq: 0, rev: 0, payMasters: {}, sessions: {}, codes: {}, invites: {}, mesas: {} }; }
 
 /**
  * Backend de persistência do portal. `file` (dev, síncrono) ou `postgres` (Supabase). No serverless
@@ -90,7 +90,9 @@ export class PortalService {
   async hydrate(): Promise<void> {
     if (!this.persistence) return;
     const d = await this.persistence.hydrate();
-    if (d) this.data = { seq: d.seq ?? 0, payMasters: d.payMasters ?? {}, sessions: d.sessions ?? {}, codes: d.codes ?? {}, invites: d.invites ?? {}, mesas: d.mesas ?? {} };
+    // Só adota o documento do banco se NÃO for mais velho que a memória — um SELECT que resolve
+    // tarde (concorrência na mesma instância) não pode desfazer uma mutação local recém-gravada.
+    if (d && (d.rev ?? 0) >= (this.data.rev ?? 0)) this.data = { seq: d.seq ?? 0, rev: d.rev ?? 0, payMasters: d.payMasters ?? {}, sessions: d.sessions ?? {}, codes: d.codes ?? {}, invites: d.invites ?? {}, mesas: d.mesas ?? {} };
   }
   /** Aguarda a última escrita pendente ser persistida (usado após mutações no serverless). */
   async flush(): Promise<void> { if (this.persistence) await this.persistence.flush(); }
@@ -106,12 +108,13 @@ export class PortalService {
     try {
       if (file && existsSync(file)) {
         const raw = JSON.parse(readFileSync(file, 'utf8')) as Partial<PortalData>;
-        return { seq: raw.seq ?? 0, payMasters: raw.payMasters ?? {}, sessions: raw.sessions ?? {}, codes: raw.codes ?? {}, invites: raw.invites ?? {}, mesas: raw.mesas ?? {} };
+        return { seq: raw.seq ?? 0, rev: raw.rev ?? 0, payMasters: raw.payMasters ?? {}, sessions: raw.sessions ?? {}, codes: raw.codes ?? {}, invites: raw.invites ?? {}, mesas: raw.mesas ?? {} };
       }
     } catch { /* arquivo corrompido/ausente → começa vazio */ }
     return emptyPortalData();
   }
   private write(): void {
+    this.data.rev = (this.data.rev ?? 0) + 1;
     if (this.persistence) { this.persistence.save(this.data); return; }
     const file = this.opts.file; if (!file) return;
     const dir = path.dirname(file);

@@ -37,12 +37,15 @@ export class PostgresPortalPersistence implements PortalPersistence {
   }
 
   save(data: PortalData): void {
-    // Upsert do documento inteiro. Fire-and-forget rastreado por `pending` (aguardado em flush()).
+    // Upsert do documento inteiro, GUARDADO POR VERSÃO: só aplica se o `rev` em memória for mais
+    // novo que o do banco — uma instância com snapshot velho não sobrescreve escritas de outra
+    // (era a causa da "carteira conectada" sumir no multi-instância da Vercel).
     const doc = JSON.stringify(data);
     const at = this.now();
+    const rev = data.rev ?? 0;
     this.pending = this.sql
-      .query('INSERT INTO portal_state (id, doc, updated_at) VALUES ($1, $2::jsonb, $3) ON CONFLICT (id) DO UPDATE SET doc = $2::jsonb, updated_at = $3', [ID, doc, at])
-      .then(() => { this.lastSaveError = null; })
+      .query<{ id: string }>("INSERT INTO portal_state (id, doc, updated_at) VALUES ($1, $2::jsonb, $3) ON CONFLICT (id) DO UPDATE SET doc = $2::jsonb, updated_at = $3 WHERE COALESCE((portal_state.doc->>'rev')::bigint, 0) < $4 RETURNING id", [ID, doc, at, rev])
+      .then(r => { this.lastSaveError = null; if (!r.rows.length) logger.warn({ rev }, 'portal save ignorado — banco tem versão mais nova'); })
       .catch(e => { this.lastSaveError = (e as Error).message; logger.error({ err: (e as Error).message }, 'portal save falhou'); });
   }
 
