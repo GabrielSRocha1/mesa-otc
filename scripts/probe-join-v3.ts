@@ -43,6 +43,9 @@ const ch = await api(`/v1/mesa-invites/${inv.inviteId}/challenge`, { method: 'PO
 const signature = bs58.encode(nacl.sign.detached(new TextEncoder().encode(ch.message), kp.secretKey));
 const join = await api(`/v1/mesa-invites/${inv.inviteId}/join`, { method: 'POST', body: { code: inv.code, firstName: 'ProbeV3', network: 'solana', address, nonce: ch.nonce, signature, addresses } });
 log(`JOIN V3 (assinado) OK ✓ mesaId=${join.mesaId} role=${join.role}`);
+// DESTINO do redirect: a visão do participante (somente leitura) carrega com o token do join?
+const pview = await api(`/v1/mesas/${join.mesaId}`, { token: join.token }) as { viewer?: { role?: string }; config?: unknown; chairs?: unknown[]; invites?: unknown; label?: unknown };
+log(`VISÃO DO PARTICIPANTE OK ✓ viewer.role=${pview.viewer?.role} · vê config(somente leitura)=${pview.config != null} · cadeiras=${(pview.chairs || []).length} · expõe convites/rótulos internos=${pview.invites !== undefined || pview.label !== undefined ? 'SIM (erro!)' : 'não (correto)'}`);
 
 // addresses:null tolerado (serialização defensiva do cliente).
 const inv2 = await api(`/v1/portal/mesas/${mesa.mesaId}/chairs/${mesa.chairs.find((c: { role: string }) => c.role === 'BUYER').chairId}/invite`, { method: 'POST', token: tok, body: {} });

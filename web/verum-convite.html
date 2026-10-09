@@ -477,8 +477,12 @@ h1{font-size:22px;margin-bottom:8px}
       v3Busy(true,'Confirmando posse…');
       const addresses=(await collectVerumAddresses()).slice(0,30);
       const join=await api('/v1/mesa-invites/'+encodeURIComponent(V3.inviteId)+'/join',{method:'POST',body:{code,firstName:name,network:'solana',address,nonce:ch.nonce,signature,addresses}});
-      renderState('ok','Você entrou na mesa!','Conexão autorizada como '+esc(v3Info.roleLabel)+'. Redirecionando para a mesa…');
-      setTimeout(()=>{ window.location.href='/mesa?mesa='+encodeURIComponent(join.mesaId)+'#pt='+encodeURIComponent(join.token); },900);
+      // Redireciona DIRETO para a operação (visão do participante, somente leitura). Guarda o token
+      // também em sessionStorage p/ a mesa recuperá-lo mesmo se o fragmento #pt se perder.
+      const dest='/mesa?mesa='+encodeURIComponent(join.mesaId)+'#pt='+encodeURIComponent(join.token);
+      try{ sessionStorage.setItem('verum_mesa_pt_'+join.mesaId, join.token); }catch(e){}
+      renderState('ok','Conectado! Abrindo a operação…','');
+      window.location.replace(dest);
     }catch(ex){
       v3Busy(false);
       // Erro de formato de assinatura: mostra o detalhe COMPLETO + botão copiar (toast trunca e o
