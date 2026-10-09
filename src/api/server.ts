@@ -456,6 +456,12 @@ export async function buildApi(deps: ApiDeps): Promise<FastifyInstance> {
     const dealNow = await deps.deals.get(created.id);
     const evmMeta = dealNow?.onChain?.ethereum?.meta as Record<string, unknown> | undefined;
     const registerTx = evmMeta?.registerPending && typeof evmMeta.registerTx === 'string' ? JSON.parse(evmMeta.registerTx) as Record<string, unknown> : null;
+    // O cofre P2WSH é DETERMINÍSTICO (meta do registro BTC) — não depende do fund, que no fluxo
+    // ordenado responde "leg de contrato primeiro" sem o endereço.
+    if (!htlcFunding) {
+      const btcMeta = dealNow?.onChain?.bitcoin?.meta as Record<string, unknown> | undefined;
+      if (typeof btcMeta?.htlcAddress === 'string') htlcFunding = { address: btcMeta.htlcAddress, requiredSat: String(mesa.config!.amountInBase) };
+    }
     return { ...await mesaDealView(dealNow), htlcFunding, registerTx };
   };
 

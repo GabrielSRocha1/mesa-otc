@@ -96,14 +96,14 @@ await api(`/v1/portal/mesas/${mesa.mesaId}/config`, { method: 'PATCH', token: to
 const pre = await api(`/v1/portal/mesas/${mesa.mesaId}/precheck`, { token: tok }) as { ok: boolean; failures: string[] };
 log(`precheck: ok=${pre.ok}${pre.failures.length ? ' · ' + pre.failures.join(' | ') : ''}`);
 log('APPROVE — cria a deal HTLC real (createTradeV2 na Sepolia, ~60-120s)…');
-const ap = await api(`/v1/portal/mesas/${mesa.mesaId}/approve`, { method: 'POST', token: tok, body: {} }) as { approved: boolean; registerTx?: { to: `0x${string}`; data: `0x${string}` } | null; deal: { id: string; state: string; htlcFunding?: { address: string; requiredSat: string } } };
+const ap = await api(`/v1/portal/mesas/${mesa.mesaId}/approve`, { method: 'POST', token: tok, body: {} }) as { approved: boolean; deal: { id: string; state: string; htlcFunding?: { address: string; requiredSat: string } | null; registerTx?: { to: `0x${string}`; data: `0x${string}` } | null } };
 log(`APPROVED ✓ deal=${ap.deal.id} estado=${ap.deal.state}`);
 log(`COFRE HTLC devolvido ao admin: ${ap.deal.htlcFunding ? ap.deal.htlcFunding.address + ' (' + ap.deal.htlcFunding.requiredSat + ' sats)' : '(não veio — ver resposta)'}`);
-if (ap.registerTx?.to) {
+if (ap.deal.registerTx?.to) {
   // Carteira real: o PM1 envia o createTradeV2 — aqui o probe faz o papel da Verum Wallet.
   log('registerTx recebido — PM1 enviando createTradeV2 na Sepolia…');
   const pm1W = createWalletClient({ transport: http(evmCfg.rpcUrl), account: pm1Evm });
-  const h = await pm1W.sendTransaction({ to: ap.registerTx.to, data: ap.registerTx.data, chain: null });
+  const h = await pm1W.sendTransaction({ to: ap.deal.registerTx.to, data: ap.deal.registerTx.data, chain: null });
   const rc = await pub.waitForTransactionReceipt({ hash: h });
   if (rc.status !== 'success') throw new Error(`createTradeV2 revertida: ${h}`);
   log(`createTradeV2 confirmada ✓ tx=${h}`);
