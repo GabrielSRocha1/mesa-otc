@@ -95,6 +95,12 @@ export class PortalService {
   /** Aguarda a última escrita pendente ser persistida (usado após mutações no serverless). */
   async flush(): Promise<void> { if (this.persistence) await this.persistence.flush(); }
 
+  /** Diagnóstico da persistência (roundtrip + resumo do que está NO BANCO). null sem backend async. */
+  async persistenceHealth(): Promise<Record<string, unknown> | null> {
+    const p = this.persistence as (PortalPersistence & { health?: () => Promise<Record<string, unknown>> }) | undefined;
+    return p?.health ? p.health() : null;
+  }
+
   private read(): PortalData {
     const file = this.opts.file;
     try {

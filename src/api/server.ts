@@ -123,6 +123,9 @@ export async function buildApi(deps: ApiDeps): Promise<FastifyInstance> {
 
   /* ---------- saúde e métricas ---------- */
   app.get('/health', async () => ({ ok: true, env: deps.env, time: Date.now() }));
+  // Diagnóstico da persistência do portal: roundtrip de escrita + resumo do singleton NO BANCO.
+  // Não expõe dados sensíveis (só contagens e mensagens de erro de infraestrutura).
+  app.get('/health/portal', async () => ({ persistence: (await deps.portal.persistenceHealth()) ?? 'memória/arquivo (sem backend async)' }));
   app.get('/metrics', async (_req, reply) => { void reply.header('content-type', metricsRegistry.contentType); return metricsRegistry.metrics(); });
 
   /* ---------- auth ---------- */
