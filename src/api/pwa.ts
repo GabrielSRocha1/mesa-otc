@@ -49,7 +49,7 @@ export const MANIFEST_JSON = JSON.stringify({
 
 /** Service worker — shell estático + offline; jamais cacheia API/HTML autenticado. */
 export const SW_JS = `/* VERUM OTC service worker */
-const CACHE = 'verum-otc-shell-v2'; // v2: fixes de 206/undefined no fetch handler — força atualização do SW nos clientes
+const CACHE = 'verum-otc-shell-v3'; // v3: auto-update (updateViaCache none + reload no controllerchange) — evita página presa em versão antiga no dapp-browser
 const SHELL = ['/offline.html', '/icons/verum.svg', '/manifest.webmanifest'];
 self.addEventListener('install', e => { e.waitUntil(caches.open(CACHE).then(c => c.addAll(SHELL)).then(() => self.skipWaiting())); });
 self.addEventListener('activate', e => { e.waitUntil(caches.keys().then(ks => Promise.all(ks.filter(k => k !== CACHE).map(k => caches.delete(k)))).then(() => self.clients.claim())); });
@@ -101,8 +101,11 @@ const PWA_HEAD_TAGS = [
   '<link rel="apple-touch-icon" href="/icons/verum.svg">',
 ].join('');
 
-/** Registro do service worker (inline; permitido pelo CSP script-src 'unsafe-inline'). */
-const PWA_SW_REG = `<script>if('serviceWorker'in navigator){window.addEventListener('load',function(){navigator.serviceWorker.register('/sw.js').catch(function(){});});}</script>`;
+/** Registro do service worker (inline; permitido pelo CSP script-src 'unsafe-inline').
+ *  AUTO-UPDATE: `updateViaCache:'none'` (busca sw.js sempre fresco) + `reg.update()` no load +
+ *  reload ÚNICO quando um SW novo assume o controle — assim um deploy novo não fica preso atrás de
+ *  um HTML velho no webview do dapp-browser. Não recarrega na primeira instalação (sem controller). */
+const PWA_SW_REG = `<script>if('serviceWorker'in navigator){(function(){var had=!!navigator.serviceWorker.controller,ref=false;navigator.serviceWorker.addEventListener('controllerchange',function(){if(ref||!had)return;ref=true;location.reload();});window.addEventListener('load',function(){navigator.serviceWorker.register('/sw.js',{updateViaCache:'none'}).then(function(r){try{r.update();}catch(e){}}).catch(function(){});});})();}</script>`;
 
 /** Injeta manifest/ícones no <head> e o registro do SW antes de </body>. */
 export function injectPwa(html: string): string {
