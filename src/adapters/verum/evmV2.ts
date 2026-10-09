@@ -246,12 +246,22 @@ export class VerumEvmV2Adapter implements SettlementAdapter, ParticipantStepProv
         atts.push(await signWalletAttestationEvm(this.cfg.attestorKey, this.cfg.chainId, this.escrowV2, p.wallet, Number(terms.expiresAt) + 3600));
       }
       const attTuples = atts.map(a => ({ validUntil: BigInt(a.validUntil), signature: a.signature as Hex }));
-      // Criador: PM1 quando presente; bilateral → vendedor.
+      // Criador: PM1 quando presente; bilateral → vendedor. O contrato exige msg.sender = criador.
       const pm1 = terms.participants.find(p => p.role === OnchainRole.PAYMASTER_01);
-      const creator = this.devAccount((pm1 ?? terms.participants[0] as { wallet: Hex }).wallet);
-      await this.ensureGas(creator.address);
-      const tx = await this.write('createTradeV2', [terms, attTuples], creator);
-      const meta = { tradeId, termsHash, onChainCreatedAt: Number(terms.createdAt), onChainExpiresAt: Number(terms.expiresAt), buyerLegIndex: map.buyerLegIndex, sellerLegIndex: map.sellerLegIndex ?? -1 } as VerumMeta;
+      const creatorAddr = (pm1 ?? terms.participants[0] as { wallet: Hex }).wallet;
+      const creatorAcc = this.keyring?.accountByAddress(creatorAddr) ?? null;
+      const baseMeta = { tradeId, termsHash, onChainCreatedAt: Number(terms.createdAt), onChainExpiresAt: Number(terms.expiresAt), buyerLegIndex: map.buyerLegIndex, sellerLegIndex: map.sellerLegIndex ?? -1 };
+      if (!creatorAcc) {
+        // CARTEIRA REAL: sem chave no backend — o registro vira um txRequest que a carteira do
+        // criador (PM1) envia. tradeId/termsHash são determinísticos, então o restante do fluxo
+        // (steps, settle) encontra a trade assim que o createTradeV2 confirmar on-chain.
+        const data = encodeFunctionData({ abi: ESCROW_V2_ABI, functionName: 'createTradeV2', args: [terms, attTuples] });
+        const meta = { ...baseMeta, registerPending: 1, registerFrom: creatorAddr, registerTx: JSON.stringify({ to: this.escrowV2, data, value: '0', chainId: this.cfg.chainId, from: creatorAddr }) } as VerumMeta;
+        return { ...this.ref(`pending:createTradeV2:${tradeId}`), meta };
+      }
+      await this.ensureGas(creatorAcc.address);
+      const tx = await this.write('createTradeV2', [terms, attTuples], creatorAcc);
+      const meta = baseMeta as VerumMeta;
       return { ...this.ref(tx), meta };
     } catch (e) { this.fail('register', e); }
   }
@@ -375,6 +385,13 @@ export class VerumEvmV2Adapter implements SettlementAdapter, ParticipantStepProv
     const onRole = ROLE_TO_ONCHAIN[role];
     const t = await this.rawTrade(b.meta.tradeId);
     const state = Number(t.state) as StateV2;
+    if (state === StateV2.NONE && b.meta.registerPending) {
+      // Trade ainda não registrada on-chain: o criador (PM1) envia o createTradeV2 pela carteira;
+      // os demais aguardam. O tradeId é determinístico — ao confirmar, os steps seguem normais.
+      const isCreator = String(b.meta.registerFrom ?? '').toLowerCase() === signer.toLowerCase();
+      if (isCreator) return { kind: 'txRequest', action: 'createTradeV2', txRequest: JSON.parse(String(b.meta.registerTx)) as Record<string, unknown>, tradeId: b.meta.tradeId };
+      return { kind: 'waitRegister', tradeId: b.meta.tradeId, registerFrom: b.meta.registerFrom ?? null };
+    }
     if (state !== StateV2.SIGNING || CANON.indexOf(onRole) < Number(t.nextIdx)) return { kind: 'done', tradeId: b.meta.tradeId, state };
     const now = await this.chainNow();
     const deadline = Math.min(now + 300, Number(t.expiresAt));

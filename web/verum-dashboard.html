@@ -2580,8 +2580,18 @@ img,svg,canvas,video{max-width:100%}
     m3ShowMotivos(null);
     const btn=$('#m3dApprove'); btn.disabled=true; btn.textContent='Validando saldos e aprovando…';
     try{
-      await pmApi('/v1/portal/mesas/'+m3Sel+'/approve',{method:'POST',body:{}});
-      toast('Operação aprovada — termos congelados','ok'); m3BalAt=0; m3Refresh();
+      const ap=await pmApi('/v1/portal/mesas/'+m3Sel+'/approve',{method:'POST',body:{}});
+      toast('Operação aprovada — termos congelados','ok');
+      if(ap&&ap.registerTx&&ap.registerTx.to){
+        // Carteira real: o registro on-chain (createTradeV2) sai da carteira do PM1.
+        btn.textContent='Registrando a operação on-chain (assine na carteira)…';
+        const p=await findVerumEthProvider(); if(!p) throw new Error('Operação aprovada, mas o provider EVM da Verum Wallet não está nesta aba para registrar on-chain.');
+        const accs=await p.request({method:'eth_requestAccounts'}); const from=accs&&accs[0];
+        const h=await p.request({method:'eth_sendTransaction',params:[{from,to:ap.registerTx.to,data:ap.registerTx.data}]});
+        await evmWaitReceipt(p,h);
+        toast('Operação registrada on-chain ✓','ok');
+      }
+      m3BalAt=0; m3Refresh();
     }catch(e){
       const det=(e&&e.details&&e.details.motivos)||null;
       if(det) m3ShowMotivos(det); else toast(e.message||'Falha na aprovação','err');

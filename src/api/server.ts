@@ -451,7 +451,12 @@ export async function buildApi(deps: ApiDeps): Promise<FastifyInstance> {
       else logger.warn({ dealId: created.id, err: err.message }, 'funding do vendedor pendente');
     }
     await deps.audit.append({ actorType: 'user', actorId: mesa.payMasterId, category: 'portal.mesa.deal.created', dealId: created.id, payload: { mode: 'htlc-btc', vault: htlcFunding?.address ?? null } });
-    return { ...await mesaDealView(await deps.deals.get(created.id)), htlcFunding };
+    // Carteira real: o registro on-chain (createTradeV2) é enviado pela carteira do PM1 — o
+    // txRequest vem no meta do adapter e vai na resposta para o dashboard disparar a assinatura.
+    const dealNow = await deps.deals.get(created.id);
+    const evmMeta = dealNow?.onChain?.ethereum?.meta as Record<string, unknown> | undefined;
+    const registerTx = evmMeta?.registerPending && typeof evmMeta.registerTx === 'string' ? JSON.parse(evmMeta.registerTx) as Record<string, unknown> : null;
+    return { ...await mesaDealView(dealNow), htlcFunding, registerTx };
   };
 
   app.post('/v1/portal/mesa/deal', async (req, reply) => {
