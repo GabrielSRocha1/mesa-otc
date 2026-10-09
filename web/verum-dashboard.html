@@ -2658,7 +2658,7 @@ img,svg,canvas,video{max-width:100%}
   /* ================= MODO PARTICIPANTE (mesa v3) ================= */
   const P_MESA=(new URLSearchParams(location.search)).get('mesa')||'';
   let P_TOK='';
-  (function(){ try{ const m=/[#&]pt=([^&]+)/.exec(location.hash); if(m){ P_TOK=decodeURIComponent(m[1]); try{ sessionStorage.setItem('verum_mesa_pt_'+P_MESA,P_TOK); }catch(e){} history.replaceState(null,'',location.pathname+location.search); } if(!P_TOK&&P_MESA){ try{ P_TOK=sessionStorage.getItem('verum_mesa_pt_'+P_MESA)||''; }catch(e){} } }catch(e){} })();
+  (function(){ try{ const m=/[#&]pt=([^&]+)/.exec(location.hash); if(m){ P_TOK=decodeURIComponent(m[1]); try{ sessionStorage.setItem('verum_mesa_pt_'+P_MESA,P_TOK); localStorage.setItem('verum_mesa_pt_'+P_MESA,P_TOK); }catch(e){} history.replaceState(null,'',location.pathname+location.search); } if(!P_TOK&&P_MESA){ try{ P_TOK=sessionStorage.getItem('verum_mesa_pt_'+P_MESA)||localStorage.getItem('verum_mesa_pt_'+P_MESA)||''; }catch(e){} } }catch(e){} })();
   const P_ON=!!(P_MESA&&P_TOK);
   async function pApi(path,opts){
     opts=opts||{}; const headers={'accept':'application/json','authorization':'Bearer '+P_TOK};
@@ -2720,11 +2720,12 @@ img,svg,canvas,video{max-width:100%}
     else tt.style.display='none';
   }
   async function pRefresh(){
+    if(pReentering) return;
     try{
       pDto=await pApi('/v1/mesas/'+encodeURIComponent(P_MESA));
       if(Date.now()-pBalAt>15000){ pBalAt=Date.now(); pApi('/v1/mesas/'+encodeURIComponent(P_MESA)+'/precheck').then(b=>{ pBal=b; pRender(); }).catch(()=>{}); }
       pRender(); pTick();
-    }catch(e){ if(e.status===401||e.status===403){ $('#pMeCard').innerHTML='<p style="color:#fecaca">Sessão expirada. Abra o link do convite novamente.</p>'; } }
+    }catch(e){ if(e.status===401||e.status===403){ try{ sessionStorage.removeItem('verum_mesa_pt_'+P_MESA); localStorage.removeItem('verum_mesa_pt_'+P_MESA); }catch(x){} P_TOK=''; pReentry('Sessão expirada — reconecte para continuar vendo a operação.'); } }
   }
   function pReview(){
     const m=pDto, me=m.viewer||{}, d=m.deal; if(!d) return;
@@ -2786,17 +2787,62 @@ img,svg,canvas,video{max-width:100%}
       closeModal(); toast('Assinatura registrada ✓','ok'); pRefresh();
     }catch(e){ toast(e.message||'Falha ao assinar','err'); if(btn){ btn.disabled=false; btn.textContent='Assinar e continuar'; } }
   }
+  let pReentering=false, pStarted=false;
+  function pStart(){ if(pStarted) return; pStarted=true; const sb=$('#pSignBtn'); if(sb) sb.addEventListener('click',pReview); pRefresh(); setInterval(pRefresh,5000); setInterval(pTick,1000); }
   function pInit(){
     document.getElementById('pMode').style.display='';
     document.body.style.overflow='auto';
-    $('#pSignBtn').addEventListener('click',pReview);
-    pRefresh(); setInterval(pRefresh,5000); setInterval(pTick,1000);
+    pStart();
+  }
+  /** REENTRADA (somente leitura): a carteira JÁ vinculada reconecta e assina p/ obter um token novo
+   *  — sem novo convite. Chamada quando o link da mesa abre sem sessão, ou quando o token expira. */
+  function pReentry(err){
+    pReentering=true;
+    document.getElementById('pMode').style.display='';
+    document.body.style.overflow='auto';
+    $('#pMeCard').innerHTML=''
+      +'<div style="text-align:center;padding:10px 0">'
+      +'<div style="font-family:var(--f-head);font-weight:700;font-size:17px;margin-bottom:6px">Entrar na operação</div>'
+      +'<div style="font-size:13px;color:var(--ink-3);margin-bottom:16px">Reconecte a Verum Wallet para ver esta operação (somente leitura). Você assina apenas para provar que é a mesma carteira — não movimenta nada.</div>'
+      +(err?'<div style="color:#fecaca;font-size:12.5px;margin-bottom:12px">'+esc(err)+'</div>':'')
+      +'<button class="btn btn-primary" id="pReBtn" style="max-width:320px;margin:0 auto">Entrar com a Verum Wallet</button>'
+      +'</div>';
+    // esconde as outras seções do participante até reentrar
+    ['pChairs','pSummary','pSigns'].forEach(id=>{ const el=$('#'+id); if(el){ const c=el.closest('.card'); if(c) c.style.display='none'; } });
+    const btn=$('#pReBtn');
+    btn.addEventListener('click',async()=>{
+      btn.disabled=true; btn.textContent='Conectando…';
+      try{
+        const prov=solProvider(); if(!prov) throw new Error('Verum Wallet não detectada nesta aba.');
+        const r=await prov.connect(); const pk=(r&&r.publicKey)?r.publicKey:prov.publicKey;
+        const address=(pk&&pk.toBase58)?pk.toBase58():(pk?String(pk):'');
+        if(!address||address.indexOf('[object')>=0) throw new Error('Não foi possível ler o endereço da carteira.');
+        btn.textContent='Gerando autorização…';
+        const chR=await fetch(API+'/v1/mesas/'+encodeURIComponent(P_MESA)+'/reenter/challenge',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({network:'solana',address})});
+        const ch=await chR.json(); if(!chR.ok) throw new Error(ch.message||'Esta carteira não pertence a esta mesa.');
+        btn.textContent='Deslize para assinar…';
+        const signature=await solSignMessage(prov,ch.message);
+        btn.textContent='Entrando…';
+        const reR=await fetch(API+'/v1/mesas/'+encodeURIComponent(P_MESA)+'/reenter',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({network:'solana',address,nonce:ch.nonce,signature})});
+        const re=await reR.json(); if(!reR.ok) throw new Error(re.message||'Falha ao reentrar.');
+        P_TOK=re.token;
+        try{ sessionStorage.setItem('verum_mesa_pt_'+P_MESA,P_TOK); localStorage.setItem('verum_mesa_pt_'+P_MESA,P_TOK); }catch(e){}
+        // restaura as seções e abre a operação
+        ['pChairs','pSummary','pSigns'].forEach(id=>{ const el=$('#'+id); if(el){ const c=el.closest('.card'); if(c) c.style.display=''; } });
+        pReentering=false; pStart(); pRefresh();
+      }catch(ex){ btn.disabled=false; btn.textContent='Entrar com a Verum Wallet'; pReentry(ex.message||'Falha na reentrada.'); }
+    });
   }
 
   /* ---------- init ---------- */
   if(P_ON){
     // Participante: tela própria somente leitura — nada do portal é carregado.
     pInit();
+    return;
+  }
+  if(P_MESA){
+    // Link da mesa SEM sessão de participante → reentrada por reconexão da Verum Wallet (leitura).
+    pReentry();
     return;
   }
   opInit();

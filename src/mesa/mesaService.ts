@@ -357,6 +357,53 @@ export class MesaService {
     return { token: this.d.auth.sign(session), mesaId: mesa.mesaId, chairId: chair.chairId, role: chair.role };
   }
 
+  /** Encontra a cadeira cuja carteira (primária OU qualquer endereço multichain) bate com `address`. */
+  private chairByWallet(mesa: MesaRecord, address: string): MesaChair | undefined {
+    const addr = address.trim().toLowerCase();
+    return mesa.chairs.find(c => c.wallet && [c.wallet.address, ...(c.wallet.addresses ?? []).map(a => a.address)].map(a => a.toLowerCase()).includes(addr));
+  }
+
+  /**
+   * REENTRADA (somente leitura) de uma carteira JÁ vinculada a uma cadeira — sem novo convite.
+   * O dono reconecta a Verum Wallet e assina um desafio provando posse da MESMA carteira; recebe um
+   * token de participante novo. Não altera nada da mesa (o token de participante não muta config).
+   */
+  async reenterChallenge(mesaId: string, input: { network: AuthNetwork; address: string }): Promise<{ message: string; nonce: string; expiresAt: number }> {
+    const mesa = this.mesaById(mesaId);
+    if (!mesa) throw new DomainError('INVALID_INPUT', 'Mesa não encontrada.');
+    const chair = this.chairByWallet(mesa, input.address);
+    if (!chair) throw new DomainError('FORBIDDEN', 'Esta carteira não está conectada a nenhuma cadeira desta mesa.');
+    const t = this.now();
+    const nonce = randomBytes(16).toString('hex');
+    const expiresAt = t + CHALLENGE_TTL_MS;
+    await this.d.store.insertNonce({ value: nonce, kind: 'challenge', dealId: null, revision: null, role: chair.role, subject: JSON.stringify({ k: 'mesa-reenter', mesaId, chairId: chair.chairId, network: input.network, address: input.address.trim() }), issuedAt: t, expiresAt, consumedAt: null });
+    void this.audit('mesa.reentrada.desafio', 'public', { mesaId, chairId: chair.chairId, network: input.network, address: input.address.trim() });
+    return { message: this.challengeMessage(mesa, chair, chair.firstName ?? 'participante', input.address.trim(), input.network, nonce, expiresAt), nonce, expiresAt };
+  }
+
+  async reenterMesa(mesaId: string, input: { network: AuthNetwork; address: string; nonce: string; signature: string }): Promise<{ token: string; mesaId: string; chairId: string; role: MesaChairRole }> {
+    const mesa = this.mesaById(mesaId);
+    if (!mesa) throw new DomainError('INVALID_INPUT', 'Mesa não encontrada.');
+    const t = this.now();
+    const n = await this.d.store.getNonce(input.nonce);
+    if (!n || n.kind !== 'challenge' || !n.subject) throw new DomainError('NONCE_INVALID', 'Desafio desconhecido. Recomece a conexão.');
+    let sub: { k: string; mesaId: string; chairId: string; network: AuthNetwork; address: string };
+    try { sub = JSON.parse(n.subject) as typeof sub; } catch { throw new DomainError('NONCE_INVALID', 'Desafio inválido.'); }
+    if (sub.k !== 'mesa-reenter' || sub.mesaId !== mesaId) throw new DomainError('NONCE_INVALID', 'Desafio emitido para outra mesa.');
+    if (sub.network !== input.network || sub.address.toLowerCase() !== input.address.trim().toLowerCase()) throw new DomainError('NONCE_INVALID', 'Desafio emitido para outra carteira.');
+    if (n.consumedAt !== null) throw new DomainError('NONCE_INVALID', 'Desafio já utilizado.');
+    if (t >= n.expiresAt) throw new DomainError('SIGNATURE_EXPIRED', 'Desafio expirado. Recomece a conexão.');
+    const chair = mesa.chairs.find(c => c.chairId === sub.chairId);
+    if (!chair || !chair.wallet || !this.chairByWallet(mesa, sub.address) || this.chairByWallet(mesa, sub.address)!.chairId !== chair.chairId) throw new DomainError('FORBIDDEN', 'Carteira não pertence a esta cadeira.');
+    const message = this.challengeMessage(mesa, chair, chair.firstName ?? 'participante', sub.address, sub.network, n.value, n.expiresAt);
+    const ok = await Promise.resolve(this.verifyBy(sub.network, message, input.signature, sub.address));
+    if (!ok) { void this.audit('mesa.reentrada.rejeitada', 'public', { mesaId, chairId: chair.chairId, reason: 'assinatura_invalida' }); throw new DomainError('SIGNATURE_INVALID', 'Assinatura do desafio inválida para a carteira informada.'); }
+    if (!(await this.d.store.consumeNonce(n.value, t))) throw new DomainError('NONCE_INVALID', 'Desafio já utilizado.');
+    void this.audit('mesa.reentrada.ok', 'public', { mesaId, chairId: chair.chairId, role: chair.role, network: sub.network, address: sub.address });
+    const session: Session = { sub: `mesa:${mesa.mesaId}:${chair.chairId}`, network: sub.network as Network, chainId: '', address: sub.address, keyScheme: NETWORK_KEY_SCHEME[sub.network as Network], role: 'participant', iat: t, exp: t + 24 * 3600_000, mesa: { mesaId: mesa.mesaId, chairId: chair.chairId, role: chair.role, firstName: chair.firstName ?? '' } };
+    return { token: this.d.auth.sign(session), mesaId: mesa.mesaId, chairId: chair.chairId, role: chair.role };
+  }
+
   /* ---------- configuração e aprovação (admin-only) ---------- */
 
   updateConfig(portalToken: string | undefined, mesaId: string, patch: Partial<MesaOperationConfig>): MesaOperationConfig {

@@ -480,7 +480,10 @@ h1{font-size:22px;margin-bottom:8px}
       // Redireciona DIRETO para a operação (visão do participante, somente leitura). Guarda o token
       // também em sessionStorage p/ a mesa recuperá-lo mesmo se o fragmento #pt se perder.
       const dest='/mesa?mesa='+encodeURIComponent(join.mesaId)+'#pt='+encodeURIComponent(join.token);
+      // Guarda o token em session E localStorage: a reentrada "lembra no aparelho" (localStorage
+      // sobrevive a fechar o app); o fragmento #pt pode ser descartado pelo dapp-browser.
       try{ sessionStorage.setItem('verum_mesa_pt_'+join.mesaId, join.token); }catch(e){}
+      try{ localStorage.setItem('verum_mesa_pt_'+join.mesaId, join.token); }catch(e){}
       renderState('ok','Conectado! Abrindo a operação…','');
       window.location.replace(dest);
     }catch(ex){

@@ -835,6 +835,20 @@ export async function buildApi(deps: ApiDeps): Promise<FastifyInstance> {
     const r = await deps.mesa.joinMesa(inviteId, { ...b, network: b.network as AuthNetwork });
     void reply.code(201); return r;
   });
+  // REENTRADA (somente leitura) de uma carteira já vinculada — sem novo convite. Prova de posse
+  // por assinatura; devolve um token de participante novo (o antigo expira em 24h).
+  app.post('/v1/mesas/:mesaId/reenter/challenge', async (req, reply) => {
+    const { mesaId } = req.params as { mesaId: string };
+    const b = parse(z.object({ network: AuthNetZ, address: z.string().min(8).max(120) }), req.body);
+    const r = await deps.mesa.reenterChallenge(mesaId, { ...b, network: b.network as AuthNetwork });
+    void reply.code(201); return r;
+  });
+  app.post('/v1/mesas/:mesaId/reenter', async (req, reply) => {
+    const { mesaId } = req.params as { mesaId: string };
+    const b = parse(z.object({ network: AuthNetZ, address: z.string().min(8).max(120), nonce: z.string().min(8).max(80), signature: z.string().min(20).max(400) }), req.body);
+    const r = await deps.mesa.reenterMesa(mesaId, { ...b, network: b.network as AuthNetwork });
+    void reply.code(201); return r;
+  });
   // Conexão SEM assinatura de mensagem (a posse é provada pela conexão da Verum Wallet, como o
   // admin) — o signMessage do provider nativo da Verum não entrega a assinatura no dapp-browser.
   app.post('/v1/mesa-invites/:inviteId/connect', async (req, reply) => {

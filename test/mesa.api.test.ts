@@ -256,6 +256,31 @@ describe('validação diagnosticável do convite', () => {
     await app.close();
   });
 
+  it('reentrada: carteira já vinculada reconecta+assina e recebe token novo; carteira estranha → 403', async () => {
+    const app = await makeApp().then(r => r.app);
+    const pm = await registerPm(app, uniqueEmail('pm-re'));
+    const mesa = await createMesa(app, pm);
+    const seller = mesa.chairs.find(c => c.role === 'SELLER')!;
+    const w = solWallet();
+    await inviteAndJoin(app, pm, mesa.mesaId, seller.chairId, 'Vend', w);
+    // Reentrada da MESMA carteira: challenge → assina → reenter → token de participante.
+    const rc = await app.api.inject({ method: 'POST', url: `/v1/mesas/${mesa.mesaId}/reenter/challenge`, payload: { network: 'solana', address: w.address } });
+    expect(rc.statusCode, rc.body).toBe(201);
+    const { message, nonce } = rc.json<{ message: string; nonce: string }>();
+    const re = await app.api.inject({ method: 'POST', url: `/v1/mesas/${mesa.mesaId}/reenter`, payload: { network: 'solana', address: w.address, nonce, signature: await w.signMessage(message) } });
+    expect(re.statusCode, re.body).toBe(201);
+    const { token, role } = re.json<{ token: string; role: string }>();
+    expect(role).toBe('SELLER');
+    // O token novo abre a visão do participante (somente leitura).
+    const view = await app.api.inject({ method: 'GET', url: `/v1/mesas/${mesa.mesaId}`, headers: { authorization: `Bearer ${token}` } });
+    expect(view.statusCode).toBe(200);
+    expect(view.json<{ viewer?: { role?: string } }>().viewer?.role).toBe('SELLER');
+    // Carteira estranha (não vinculada) → 403 já no challenge.
+    const bad = await app.api.inject({ method: 'POST', url: `/v1/mesas/${mesa.mesaId}/reenter/challenge`, payload: { network: 'solana', address: solWallet().address } });
+    expect(bad.statusCode).toBe(403);
+    await app.close();
+  });
+
   it('connect (sem assinatura): vincula a cadeira pela conexão da Verum e emite token; convite vira USED', async () => {
     const { app } = await makeApp();
     const pm = await registerPm(app, uniqueEmail('pm-conn'));
