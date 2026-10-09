@@ -49,7 +49,7 @@ export const MANIFEST_JSON = JSON.stringify({
 
 /** Service worker — shell estático + offline; jamais cacheia API/HTML autenticado. */
 export const SW_JS = `/* VERUM OTC service worker */
-const CACHE = 'verum-otc-shell-v3'; // v3: auto-update (updateViaCache none + reload no controllerchange) — evita página presa em versão antiga no dapp-browser
+const CACHE = 'verum-otc-shell-v4'; // v4: força troca de SW (versão antiga presa servindo convite velho no dapp-browser)
 const SHELL = ['/offline.html', '/icons/verum.svg', '/manifest.webmanifest'];
 self.addEventListener('install', e => { e.waitUntil(caches.open(CACHE).then(c => c.addAll(SHELL)).then(() => self.skipWaiting())); });
 self.addEventListener('activate', e => { e.waitUntil(caches.keys().then(ks => Promise.all(ks.filter(k => k !== CACHE).map(k => caches.delete(k)))).then(() => self.clients.claim())); });
