@@ -150,22 +150,39 @@ h1{font-size:22px;margin-bottom:8px}
     }
     return null;
   }
-  /** Assinatura Solana (ed25519, 64 bytes) → bs58, aceitando TODAS as formas que a Verum Wallet
-   *  pode devolver através do postMessage do iframe: bytes em qualquer formato, string bs58,
-   *  string base64 ou hex, e o envelope {signature:...} aninhado. */
-  function normalizeSolSig(raw){
-    let v=raw&&raw.signature!==undefined?raw.signature:raw;
-    if(v&&typeof v==='object'&&v.signature!==undefined) v=v.signature; // 2º nível de aninhamento
+  // Tenta extrair 64 bytes de UM valor (sem recursão): bytes diretos, ou string bs58/base64/hex.
+  function sig64From(v){
     const direct=anyBytes(v);
-    if(direct&&direct.length===64) return bs58encode(direct);
+    if(direct&&direct.length===64) return direct;
     if(typeof v==='string'){
       const s=v.trim();
-      const b58=bs58decode(s); if(b58&&b58.length===64) return s;              // já é bs58
-      try{ const b=Uint8Array.from(atob(s),c=>c.charCodeAt(0)); if(b.length===64) return bs58encode(b); }catch(e){} // base64
-      if(/^(0x)?[0-9a-fA-F]{128}$/.test(s)){ const h=s.replace(/^0x/,''); const b=new Uint8Array(64); for(let i=0;i<64;i++) b[i]=parseInt(h.slice(i*2,i*2+2),16); return bs58encode(b); } // hex
+      const b58=bs58decode(s); if(b58&&b58.length===64) return b58;             // bs58
+      try{ const b=Uint8Array.from(atob(s),c=>c.charCodeAt(0)); if(b.length===64) return b; }catch(e){} // base64
+      if(/^(0x)?[0-9a-fA-F]{128}$/.test(s)){ const h=s.replace(/^0x/,''); const b=new Uint8Array(64); for(let i=0;i<64;i++) b[i]=parseInt(h.slice(i*2,i*2+2),16); return b; } // hex
     }
-    const desc=v===null?'null':typeof v==='object'?('objeto {'+Object.keys(v||{}).slice(0,4).join(',')+'}'):typeof v+' de tamanho '+String(v&&v.length);
-    throw walletErr('A Verum Wallet devolveu a assinatura num formato não reconhecido ('+desc+'). Atualize a wallet e tente de novo.','BAD_SIG_SHAPE');
+    return null;
+  }
+  // Descrição PROFUNDA da estrutura (p/ diagnóstico quando nada casar).
+  function shapeOf(v,d){ d=d||0; if(v==null) return String(v); if(v instanceof Uint8Array) return 'bytes('+v.length+')'; if(Array.isArray(v)) return 'array('+v.length+')'; if(typeof v==='string') return 'string('+v.length+')'; if(typeof v==='object'){ if(d>2) return 'objeto'; return '{'+Object.keys(v).slice(0,6).map(k=>k+':'+shapeOf(v[k],d+1)).join(',')+'}'; } return typeof v; }
+  /** Assinatura Solana (ed25519, 64 bytes) → bs58. Busca RECURSIVA pelos 64 bytes em qualquer
+   *  forma/profundidade que a Verum Wallet possa devolver via postMessage: bytes crus, objeto
+   *  indexado, string bs58/base64/hex, e QUALQUER aninhamento ({signature:{...}}, {sig:...}, etc.). */
+  function normalizeSolSig(raw){
+    var seen=[];
+    function walk(v,depth){
+      if(v==null||depth>5) return null;
+      var hit=sig64From(v); if(hit) return hit;
+      if(typeof v==='object'&&seen.indexOf(v)<0){
+        seen.push(v);
+        // chaves prováveis primeiro, depois todas (ignora índices numéricos — já cobertos por anyBytes)
+        var keys=['signature','sig','data','bytes','value','result'].concat(Object.keys(v).filter(function(k){return !/^\d+$/.test(k)}));
+        for(var i=0;i<keys.length;i++){ if(v[keys[i]]!==undefined){ var r=walk(v[keys[i]],depth+1); if(r) return r; } }
+      }
+      return null;
+    }
+    var bytes=walk(raw,0);
+    if(bytes) return bs58encode(bytes);
+    throw walletErr('A Verum Wallet devolveu a assinatura num formato não reconhecido ('+shapeOf(raw,0)+'). Atualize a wallet e tente de novo.','BAD_SIG_SHAPE');
   }
   /** Endereço Solana da wallet → string base58 (nunca "[object Object]"). */
   function normalizeSolAddress(pk){

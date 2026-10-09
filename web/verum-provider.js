@@ -136,24 +136,32 @@
     for (var j = 0; j < s.length && s[j] === '1'; j++) out.unshift(0);
     return new Uint8Array(out);
   }
-  /** Assinatura ed25519 (64 bytes) vinda da wallet em QUALQUER forma → Uint8Array(64).
-   *  Aceita: Uint8Array/Array/objeto-bytes ({0:..} ou {data:[...]}), string base64, string bs58. */
-  function normalizeSigBytes(v) {
-    if (v instanceof Uint8Array) return v;
-    if (Array.isArray(v)) return new Uint8Array(v);
-    if (v && typeof v === 'object') {
-      if (Array.isArray(v.data)) return new Uint8Array(v.data);
-      var ks = Object.keys(v).filter(function (k) { return /^\d+$/.test(k); });
-      if (ks.length > 8) return new Uint8Array(ks.sort(function (a, b) { return a - b; }).map(function (k) { return v[k]; }));
-    }
+  function sig64One(v) {
+    if (v instanceof Uint8Array) return v.length === 64 ? v : null;
+    if (Array.isArray(v) && v.every(function (x) { return typeof x === 'number'; })) { var a = new Uint8Array(v); return a.length === 64 ? a : null; }
+    if (v && typeof v === 'object' && Array.isArray(v.data)) { var dd = new Uint8Array(v.data); return dd.length === 64 ? dd : null; }
+    if (v && typeof v === 'object') { var ks = Object.keys(v).filter(function (k) { return /^\d+$/.test(k); }); if (ks.length > 8) { var arr = new Uint8Array(ks.sort(function (a, b) { return a - b; }).map(function (k) { return v[k]; })); return arr.length === 64 ? arr : null; } }
     if (typeof v === 'string') {
-      var b64 = decodeBase64(v);
-      if (b64 instanceof Uint8Array && b64.length === 64) return b64;
-      var b58 = b58decode(v);
-      if (b58 && b58.length === 64) return b58;
-      if (b64 instanceof Uint8Array) return b64; // melhor esforço (mantém comportamento antigo)
+      var b64 = decodeBase64(v); if (b64 instanceof Uint8Array && b64.length === 64) return b64;
+      var b58 = b58decode(v); if (b58 && b58.length === 64) return b58;
     }
-    return v; // forma desconhecida: o dApp normaliza/erra com mensagem clara
+    return null;
+  }
+  /** Assinatura ed25519 (64 bytes) vinda da wallet em QUALQUER forma/aninhamento → Uint8Array(64).
+   *  Busca recursiva: bytes crus, objeto indexado, {data:[...]}, string base64/bs58, {signature:{...}}. */
+  function normalizeSigBytes(v) {
+    var seen = [];
+    function walk(x, depth) {
+      if (x == null || depth > 5) return null;
+      var hit = sig64One(x); if (hit) return hit;
+      if (typeof x === 'object' && seen.indexOf(x) < 0) {
+        seen.push(x);
+        var keys = ['signature', 'sig', 'data', 'bytes', 'value', 'result'].concat(Object.keys(x).filter(function (k) { return !/^\d+$/.test(k); }));
+        for (var i = 0; i < keys.length; i++) { if (x[keys[i]] !== undefined) { var r = walk(x[keys[i]], depth + 1); if (r) return r; } }
+      }
+      return null;
+    }
+    return walk(v, 0) || v; // forma desconhecida: o dApp normaliza/erra com mensagem clara
   }
   function decodeBase64(str) {
     try {
