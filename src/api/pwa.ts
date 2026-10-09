@@ -49,7 +49,7 @@ export const MANIFEST_JSON = JSON.stringify({
 
 /** Service worker — shell estático + offline; jamais cacheia API/HTML autenticado. */
 export const SW_JS = `/* VERUM OTC service worker */
-const CACHE = 'verum-otc-shell-v1';
+const CACHE = 'verum-otc-shell-v2'; // v2: fixes de 206/undefined no fetch handler — força atualização do SW nos clientes
 const SHELL = ['/offline.html', '/icons/verum.svg', '/manifest.webmanifest'];
 self.addEventListener('install', e => { e.waitUntil(caches.open(CACHE).then(c => c.addAll(SHELL)).then(() => self.skipWaiting())); });
 self.addEventListener('activate', e => { e.waitUntil(caches.keys().then(ks => Promise.all(ks.filter(k => k !== CACHE).map(k => caches.delete(k)))).then(() => self.clients.claim())); });
@@ -61,12 +61,18 @@ self.addEventListener('fetch', e => {
   // NUNCA cacheia API/métricas/dados sensíveis nem requisições autenticadas.
   if (url.pathname.startsWith('/v1/') || url.pathname.startsWith('/ops/') || url.pathname === '/metrics' || req.headers.has('authorization')) return;
   if (req.mode === 'navigate') {                       // HTML autenticado: network-first, sem cachear.
-    e.respondWith(fetch(req).catch(() => caches.match('/offline.html')));
+    // NUNCA resolver com undefined (o browser converte em network-error e DERRUBA a página):
+    // sem rede e sem offline.html no cache, devolve 503 explícito.
+    e.respondWith(fetch(req).catch(async () => (await caches.match('/offline.html')) || new Response('Sem conexao. Tente novamente.', { status: 503, headers: { 'content-type': 'text/plain; charset=utf-8' } })));
     return;
   }
-  // Assets estáticos same-origin: stale-while-revalidate.
+  // Assets estáticos same-origin: stale-while-revalidate. Cache.put exige 200 COMPLETO —
+  // res.ok inclui 206 (resposta parcial de range request) e lançava TypeError no put.
   e.respondWith(caches.match(req).then(cached => {
-    const net = fetch(req).then(res => { if (res && res.ok) { const clone = res.clone(); caches.open(CACHE).then(c => c.put(req, clone)); } return res; }).catch(() => cached);
+    const net = fetch(req).then(res => {
+      if (res && res.status === 200 && res.type === 'basic') { const clone = res.clone(); caches.open(CACHE).then(c => c.put(req, clone)).catch(() => {}); }
+      return res;
+    }).catch(() => cached || new Response('', { status: 504 }));
     return cached || net;
   }));
 });
