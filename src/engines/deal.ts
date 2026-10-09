@@ -43,7 +43,7 @@ export const CreateDealInput = z.object({
 });
 export type CreateDealInputT = z.infer<typeof CreateDealInput>;
 
-export interface DealEngineConfig { env: Environment; platformFeeBps: number; paymasterShareBps: number; treasury: string; networkCostUsd: (n: Network) => Promise<string>; execMarginMs: number; defaultExpiresSec: number }
+export interface DealEngineConfig { env: Environment; platformFeeBps: number; paymasterShareBps: number; treasury: string; networkCostUsd: (n: Network) => Promise<string>; execMarginMs: number; defaultExpiresSec: number; /** Preimage HTLC fixa (hex 32B) — só para o runner de swap RESUMÍVEL em testnet: permite recriar a deal com o MESMO htlcHash de um lock já confirmado. Em produção NUNCA é setada (preimage é aleatória por deal). */ htlcPreimageHex?: string }
 export interface DealEngineDeps { store: Store; registry: AssetRegistry; adapters: AdapterRegistry; price: PriceEngine; liquidity: LiquidityEngine; router: RouterEngine; signature: SignatureEngine; risk: RiskEngine; audit: AuditLog; config: DealEngineConfig; now?: () => number }
 
 export interface DealEventMsg { type: string; dealId: string; state: DealState; at: number; payload: Record<string, unknown> }
@@ -163,7 +163,9 @@ export class DealEngine {
         { index: 0, asset: dr.assetIn, amountBase: dr.amountInBase, from: 'SELLER', to: 'BUYER', escrowChain: dr.assetIn.network, escrowContract: escrowFor(dr.assetIn.network).escrowContract, mode: escrowFor(dr.assetIn.network).mode },
         { index: 1, asset: dr.assetOut, amountBase: econ.amountOutBase, from: 'BUYER', to: 'SELLER', escrowChain: dr.assetOut.network, escrowContract: escrowFor(dr.assetOut.network).escrowContract, mode: escrowFor(dr.assetOut.network).mode }
       ];
-      const htlc = route.kind === 'HTLC' ? { preimage: randomHex(32) } : null; // segredo gerado para o Vendedor (leg BTC); exposto só a ele via API
+      // segredo gerado para o Vendedor (leg BTC); exposto só a ele via API. Override fixo APENAS no
+      // runner de swap resumível (htlcPreimageHex) — reconstrói o mesmo cofre de um lock confirmado.
+      const htlc = route.kind === 'HTLC' ? { preimage: this.d.config.htlcPreimageHex && /^[0-9a-f]{64}$/i.test(this.d.config.htlcPreimageHex) ? this.d.config.htlcPreimageHex.toLowerCase() : randomHex(32) } : null;
       const terms: Terms = { schemaVersion: 1, environment: this.d.config.env, dealId: deal.id, revision: deal.revision, createdAt: deal.createdAt, expiresAt: deal.expiresAt, participants: dr.participants, requiredSignatures: deal.requiredSignatures, legs, pricing: econ.pricing, route: { routeId: route.routeId, kind: route.kind, legs: route.legs, ...(htlc ? { htlcHash: htlcHashOf(htlc.preimage) } : {}) }, dealNonce: randomHex(16) };
       deal.terms = terms; deal.hash = computeDealHash(terms); (deal as Deal & { htlcPreimage?: string }).htlcPreimage = htlc?.preimage;
       await this.transition(deal, 'LIQUIDITY_VERIFIED', actor, { dealHash: deal.hash.dealHash, routeId: route.routeId, priceSnapshotId: snapshot.id, liquidity: { depthUsd: liq.depthUsd, slippageBps: liq.slippageBps } });
