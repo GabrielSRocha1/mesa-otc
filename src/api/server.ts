@@ -24,7 +24,7 @@ import type { RoomService, RoomActor } from '../rooms/service.js';
 import { WsClientMessage, INVITABLE_ROLES } from '../rooms/types.js';
 import { type ProposalService, ProposalChangeZ } from '../proposals/service.js';
 import { identityOpenApi } from './identityOpenapi.js';
-import { MANIFEST_JSON, SW_JS, ICON_SVG, ICON_MASKABLE_SVG, OFFLINE_HTML, injectPwa } from './pwa.js';
+import { MANIFEST_JSON, SW_JS, ICON_SVG, ICON_MASKABLE_SVG, OFFLINE_HTML, injectPwa, injectPwaNoSW } from './pwa.js';
 import type { Store } from '../db/repository.js';
 import { AuditLog } from '../audit/audit.js';
 import { hasParticipantSteps, type AdapterRegistry } from '../adapters/types.js';
@@ -894,10 +894,15 @@ export async function buildApi(deps: ApiDeps): Promise<FastifyInstance> {
   // As páginas recebem as tags PWA (manifest/ícones), o registro do SW e o provider da Verum
   // (window.verum p/ quando o OTC roda DENTRO do navegador dApp da Verum — via iframe/postMessage).
   const dirOf = (p: string): string => p.replace(/[\\/][^\\/]*$/, '');
-  const prepHtml = (path: string): string => injectPwa(readFileSync(path, 'utf8').replace('<meta name="verum-otc-api" content="">', `<meta name="verum-otc-api" content="/">`)).replace('</head>', '<script src="/verum-provider.js"></script></head>');
+  const withApiMeta = (path: string): string => readFileSync(path, 'utf8').replace('<meta name="verum-otc-api" content="">', `<meta name="verum-otc-api" content="/">`);
+  const withProvider = (html: string): string => html.replace('</head>', '<script src="/verum-provider.js"></script></head>');
+  const prepHtml = (path: string): string => withProvider(injectPwa(withApiMeta(path)));
+  // Convite: SEM service worker (injectPwaNoSW desregistra SW antigo + limpa caches) — um SW preso
+  // estava servindo o HTML velho do convite no dapp-browser da Verum.
+  const prepHtmlNoSW = (path: string): string => withProvider(injectPwaNoSW(withApiMeta(path)));
   if (deps.mesaHtmlPath) { const mesa = prepHtml(deps.mesaHtmlPath); for (const p of ['/mesa', '/operacao', '/operacoes', '/abrir-mesa']) app.get(p, async (_req, reply) => sendHtml(reply, mesa)); }
   if (deps.portalHtmlPath) { const portalHtml = prepHtml(deps.portalHtmlPath); for (const p of ['/portal', '/cadastro', '/login']) app.get(p, async (_req, reply) => sendHtml(reply, portalHtml)); }
-  if (deps.conviteHtmlPath) { const convite = prepHtml(deps.conviteHtmlPath); for (const p of ['/convite', '/convite/:token', '/invite', '/invite/:token', '/otc/convite/:token']) app.get(p, async (_req, reply) => sendHtml(reply, convite)); }
+  if (deps.conviteHtmlPath) { const convite = prepHtmlNoSW(deps.conviteHtmlPath); for (const p of ['/convite', '/convite/:token', '/invite', '/invite/:token', '/otc/convite/:token']) app.get(p, async (_req, reply) => sendHtml(reply, convite)); }
   // Provider da Verum (window.verum) — só ativa quando embutido no iframe do navegador dApp da Verum.
   // Same-origin (CSP script-src 'self'). Lido do mesmo diretório dos HTML.
   const webDir = deps.mesaHtmlPath ? dirOf(deps.mesaHtmlPath) : deps.portalHtmlPath ? dirOf(deps.portalHtmlPath) : deps.conviteHtmlPath ? dirOf(deps.conviteHtmlPath) : null;

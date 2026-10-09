@@ -113,3 +113,15 @@ export function injectPwa(html: string): string {
   out = out.includes('</body>') ? out.replace('</body>', PWA_SW_REG + '</body>') : out + PWA_SW_REG;
   return out;
 }
+
+/** AUTO-LIMPEZA de service worker: NÃO registra SW e DESREGISTRA qualquer SW + apaga todos os
+ *  caches. Roda o quanto antes (no <head>) para que um SW antigo preso (que servia HTML velho no
+ *  dapp-browser) seja removido assim que esta página carregar uma única vez. */
+const PWA_SW_PURGE = `<script>(function(){try{if('serviceWorker'in navigator){navigator.serviceWorker.getRegistrations().then(function(rs){rs.forEach(function(r){try{r.unregister();}catch(e){}});}).catch(function(){});}if(window.caches&&caches.keys){caches.keys().then(function(ks){ks.forEach(function(k){try{caches.delete(k);}catch(e){}});}).catch(function(){});}}catch(e){}})();</script>`;
+
+/** Variante para o CONVITE: injeta manifest/ícones mas, em vez de registrar o SW, faz a
+ *  auto-limpeza (desregistra SW antigo + limpa caches). O convite não precisa de PWA/offline. */
+export function injectPwaNoSW(html: string): string {
+  let out = html.includes('</head>') ? html.replace('</head>', PWA_HEAD_TAGS + PWA_SW_PURGE + '</head>') : PWA_SW_PURGE + PWA_HEAD_TAGS + html;
+  return out;
+}
