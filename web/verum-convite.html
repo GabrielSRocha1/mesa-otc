@@ -214,13 +214,16 @@ h1{font-size:22px;margin-bottom:8px}
         var d=e&&e.data; if(!d) return;
         if(d.__verum_channel==='cs->page'&&d.msg) d=d.msg;          // modo extensão: desembrulha
         if(typeof d!=='object') return;
-        var t=String(d.type||d.method||''); if(t) typesSeen[t]=1;
-        if(/reject|denied|cancel/i.test(t)){ return; }               // rejeição → deixa dar timeout/erro
-        if(t&&!/sign|msg|message|signature/i.test(t)) return;        // ignora connect/balance/etc.
-        var sig=extractSolSig(d); if(sig) resolve(sig);
+        var t=String(d.type||d.method||'msg');
+        if(/reject|denied|cancel/i.test(t)){ typesSeen[t]='(rejeitada)'; return; } // rejeição → timeout/erro
+        if(!/sign|msg|message|signature/i.test(t)) return;          // ignora connect/balance/etc.
+        var sig=extractSolSig(d);
+        if(sig){ resolve(sig); return; }
+        typesSeen[t]=shapeOf(d,0);                                   // resposta sem 64 bytes → guarda a ESTRUTURA p/ diagnóstico
       }
       window.addEventListener('message',onMsg);
-      cleanup=function(){ window.removeEventListener('message',onMsg); }; // (bug antigo: referenciava bridge antes de existir → erro imediato)
+      document.addEventListener('message',onMsg);                   // alguns webviews despacham em document
+      cleanup=function(){ window.removeEventListener('message',onMsg); document.removeEventListener('message',onMsg); };
     });
     // Dispara o prompt da carteira (o retorno dele é aproveitado SE vier com assinatura).
     var direct=(async function(){ try{ var r=await prov.signMessage(bytes); if(r!=null){ var s=extractSolSig(r); if(s) return s; attempts.push('retorno direto: '+shapeOf(r,0)); } else attempts.push('retorno direto: vazio'); }catch(e){ attempts.push('retorno direto: '+(e&&e.message||e)); } return new Promise(function(){}); })();
@@ -231,8 +234,8 @@ h1{font-size:22px;margin-bottom:8px}
       return sig;
     }catch(e){
       cleanup();
-      var seen=Object.keys(typesSeen);
-      throw walletErr('A Verum Wallet não devolveu a assinatura. '+attempts.join(' ‖ ')+(seen.length?(' · mensagens recebidas: '+seen.join(', ')):' · nenhuma mensagem da carteira capturada'),'BAD_SIG_SHAPE');
+      var seen=Object.keys(typesSeen).map(function(k){ return k+'='+typesSeen[k]; });
+      throw walletErr('A Verum Wallet não devolveu a assinatura. '+attempts.join(' ‖ ')+(seen.length?(' · mensagens da carteira: '+seen.join(' ; ')):' · nenhuma mensagem da carteira capturada'),'BAD_SIG_SHAPE');
     }
   }
   /** Endereço Solana da wallet → string base58 (nunca "[object Object]"). */
@@ -461,12 +464,16 @@ h1{font-size:22px;margin-bottom:8px}
       const pk=(r&&r.publicKey)?r.publicKey:prov.publicKey;
       if(!pk) throw new Error('Não foi possível ler o endereço da Verum Wallet');
       const address=normalizeSolAddress(pk);
+      v3Busy(true,'Gerando autorização…');
+      const ch=await api('/v1/mesa-invites/'+encodeURIComponent(V3.inviteId)+'/challenge',{method:'POST',body:{code,firstName:name,network:'solana',address}});
+      // O usuário DESLIZA para assinar na Verum Wallet — é a prova de posse. A assinatura é
+      // capturada do canal cru da carteira (signSolana), pois o provider nativo não a entrega no
+      // retorno da Promise. slice(0,30): o backend rejeita a lista inteira acima de 50 itens.
+      v3Busy(true,'Deslize para assinar na Verum Wallet…');
+      const signature=await signSolana(prov,ch.message,address);
       v3Busy(true,'Confirmando posse…');
-      // A posse é provada pela CONEXÃO da Verum Wallet (ela só devolve o endereço real do usuário),
-      // como o admin conecta — sem assinatura de mensagem (o signMessage do provider nativo não a
-      // entrega no dapp-browser). slice(0,30): o backend rejeita a lista inteira acima de 50 itens.
       const addresses=(await collectVerumAddresses()).slice(0,30);
-      const join=await api('/v1/mesa-invites/'+encodeURIComponent(V3.inviteId)+'/connect',{method:'POST',body:{code,firstName:name,network:'solana',address,addresses}});
+      const join=await api('/v1/mesa-invites/'+encodeURIComponent(V3.inviteId)+'/join',{method:'POST',body:{code,firstName:name,network:'solana',address,nonce:ch.nonce,signature,addresses}});
       renderState('ok','Você entrou na mesa!','Conexão autorizada como '+esc(v3Info.roleLabel)+'. Redirecionando para a mesa…');
       setTimeout(()=>{ window.location.href='/mesa?mesa='+encodeURIComponent(join.mesaId)+'#pt='+encodeURIComponent(join.token); },900);
     }catch(ex){

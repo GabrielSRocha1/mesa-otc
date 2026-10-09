@@ -38,14 +38,18 @@ const addresses = [
   { network: 'bitcoin', address: 'tb1q' + 'x'.repeat(38) },
   { network: 'ethereum', address: '0x' + 'a'.repeat(40) },
 ];
-// Caminho REAL da Verum Wallet no dapp-browser: /connect (prova = conexão, SEM assinatura).
-const join = await api(`/v1/mesa-invites/${inv.inviteId}/connect`, { method: 'POST', body: { code: inv.code, firstName: 'ProbeV3', network: 'solana', address, addresses } });
-log(`CONNECT V3 OK ✓ mesaId=${join.mesaId} role=${join.role} (token de participante emitido)`);
+// Caminho REAL: challenge → assina (ed25519/bs58, como a Verum) → /join com a assinatura.
+const ch = await api(`/v1/mesa-invites/${inv.inviteId}/challenge`, { method: 'POST', body: { code: inv.code, firstName: 'ProbeV3', network: 'solana', address } });
+const signature = bs58.encode(nacl.sign.detached(new TextEncoder().encode(ch.message), kp.secretKey));
+const join = await api(`/v1/mesa-invites/${inv.inviteId}/join`, { method: 'POST', body: { code: inv.code, firstName: 'ProbeV3', network: 'solana', address, nonce: ch.nonce, signature, addresses } });
+log(`JOIN V3 (assinado) OK ✓ mesaId=${join.mesaId} role=${join.role}`);
 
-// Variantes que a tolerância do backend deve aceitar sem derrubar a requisição:
+// addresses:null tolerado (serialização defensiva do cliente).
 const inv2 = await api(`/v1/portal/mesas/${mesa.mesaId}/chairs/${mesa.chairs.find((c: { role: string }) => c.role === 'BUYER').chairId}/invite`, { method: 'POST', token: tok, body: {} });
 const kp2 = nacl.sign.keyPair();
 const addr2 = bs58.encode(kp2.publicKey);
-const join2 = await api(`/v1/mesa-invites/${inv2.inviteId}/connect`, { method: 'POST', body: { code: inv2.code, firstName: 'ProbeVb', network: 'solana', address: addr2, addresses: null } });
-log(`CONNECT com addresses:null aceito ✓ (${join2.role})`);
-console.log('\nRESULTADO: caminho V3 do convite (conexão Verum, sem assinatura) verde no servidor.');
+const ch2 = await api(`/v1/mesa-invites/${inv2.inviteId}/challenge`, { method: 'POST', body: { code: inv2.code, firstName: 'ProbeVb', network: 'solana', address: addr2 } });
+const sig2 = bs58.encode(nacl.sign.detached(new TextEncoder().encode(ch2.message), kp2.secretKey));
+const join2 = await api(`/v1/mesa-invites/${inv2.inviteId}/join`, { method: 'POST', body: { code: inv2.code, firstName: 'ProbeVb', network: 'solana', address: addr2, nonce: ch2.nonce, signature: sig2, addresses: null } });
+log(`JOIN com addresses:null aceito ✓ (${join2.role})`);
+console.log('\nRESULTADO: caminho V3 do convite (assinatura solana/bs58) verde no servidor.');
