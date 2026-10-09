@@ -201,32 +201,39 @@ h1{font-size:22px;margin-bottom:8px}
   // Promise com timeout — sem isto, uma convenção que a wallet nativa nunca resolve travava a
   // página "carregando infinitamente".
   function withTimeout(p, ms, label){ return Promise.race([ Promise.resolve(p), new Promise(function(_,rej){ setTimeout(function(){ rej(new Error((label||'')+' sem resposta em '+Math.round(ms/1000)+'s')); }, ms); }) ]); }
-  /** Assina `message` (string) na Verum Wallet. Tenta a convenção PADRÃO (uma assinatura) e, só se
-   *  ela não render 64 bytes, a Wallet-Standard — cada uma com TIMEOUT (nunca trava). No máximo dois
-   *  pedidos de assinatura. Devolve bs58; se nada vier, lança com o dump de cada retorno. */
+  /** Assina `message` na Verum Wallet. O provider NATIVO perde a assinatura ao resolver a Promise
+   *  (devolve {signature:undefined}); então, em paralelo, ESCUTAMOS o postMessage CRU da carteira
+   *  (a resposta chega como evento 'message' na janela) e extraímos os 64 bytes de onde estiverem —
+   *  contornando o parsing quebrado do provider. Vence quem primeiro render 64 bytes. Timeout + dump. */
   async function signSolana(prov, message, address){
     var bytes=new TextEncoder().encode(message);
-    var attempts=[];
-    async function attempt(label, fn, ms){
-      var res;
-      try{ res=await withTimeout(fn(), ms, label); }
-      catch(e){ attempts.push(label+': '+(e&&e.message||e)); return null; }
-      if(res===undefined||res===null){ attempts.push(label+': vazio'); return null; }
-      var sig=extractSolSig(res);
-      if(sig) return sig;
-      attempts.push(label+': '+shapeOf(res,0));
-      return null;
+    var attempts=[]; var typesSeen={};
+    // Captura da resposta BRUTA da carteira (bypass do provider nativo).
+    var bridge=new Promise(function(resolve,reject){
+      function onMsg(e){
+        var d=e&&e.data; if(!d) return;
+        if(d.__verum_channel==='cs->page'&&d.msg) d=d.msg;          // modo extensão: desembrulha
+        if(typeof d!=='object') return;
+        var t=String(d.type||d.method||''); if(t) typesSeen[t]=1;
+        if(/reject|denied|cancel/i.test(t)){ return; }               // rejeição → deixa dar timeout/erro
+        if(t&&!/sign|msg|message|signature/i.test(t)) return;        // ignora connect/balance/etc.
+        var sig=extractSolSig(d); if(sig) resolve(sig);
+      }
+      window.addEventListener('message',onMsg);
+      bridge._cleanup=function(){ window.removeEventListener('message',onMsg); };
+    });
+    // Dispara o prompt da carteira (o retorno dele é aproveitado SE vier com assinatura).
+    var direct=(async function(){ try{ var r=await prov.signMessage(bytes); if(r!=null){ var s=extractSolSig(r); if(s) return s; attempts.push('retorno direto: '+shapeOf(r,0)); } else attempts.push('retorno direto: vazio'); }catch(e){ attempts.push('retorno direto: '+(e&&e.message||e)); } return new Promise(function(){}); })();
+    var timeout=new Promise(function(_,rej){ setTimeout(function(){ rej(walletErr('x','T')); },120000); });
+    try{
+      var sig=await Promise.race([bridge,direct,timeout]);
+      bridge._cleanup&&bridge._cleanup();
+      return sig;
+    }catch(e){
+      bridge._cleanup&&bridge._cleanup();
+      var seen=Object.keys(typesSeen);
+      throw walletErr('A Verum Wallet não devolveu a assinatura. '+attempts.join(' ‖ ')+(seen.length?(' · mensagens recebidas: '+seen.join(', ')):' · nenhuma mensagem da carteira capturada'),'BAD_SIG_SHAPE');
     }
-    // 1) Phantom padrão SEM 2º argumento (o 'utf8' confundia o provider nativo e voltava vazio).
-    var s=await attempt('signMessage(bytes)', function(){ return prov.signMessage(bytes); }, 120000);
-    if(s) return s;
-    // 2) Wallet-Standard (feature solana:signMessage), se exposta — devolve [{signature,...}].
-    var f=prov.features&&prov.features['solana:signMessage'];
-    if(f&&typeof f.signMessage==='function'){
-      s=await attempt('wallet-standard', function(){ var acc=(prov.accounts&&prov.accounts[0])||{address:address,publicKey:address}; return f.signMessage({account:acc,message:bytes}); }, 120000);
-      if(s) return s;
-    }
-    throw walletErr('A Verum Wallet não devolveu a assinatura. Tentativas → '+attempts.join(' ‖ '),'BAD_SIG_SHAPE');
   }
   /** Endereço Solana da wallet → string base58 (nunca "[object Object]"). */
   function normalizeSolAddress(pk){
