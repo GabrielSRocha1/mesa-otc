@@ -963,6 +963,7 @@ img,svg,canvas,video{max-width:100%}
           <span class="mono" id="m3dOpCode" style="font-size:13px;color:var(--blue)" title="Código único da operação"></span>
           <span class="badge wait" id="m3dTtl" title="Tempo restante da mesa">—</span>
           <span class="badge wait" id="m3dTurn" style="display:none" title="Tempo para assinaturas">—</span>
+          <button class="btn" id="m3dOpLink" style="height:32px;font-size:12px;padding:0 12px" title="Link somente-leitura da operação — envie aos participantes para acompanharem/reentrarem"><svg viewBox="0 0 24 24" style="width:14px;height:14px;stroke:currentColor;fill:none;stroke-width:2"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V5a2 2 0 012-2h8"/></svg>Copiar link da operação</button>
           <div class="fh" id="m3dPlan" style="flex-basis:100%;color:var(--blue)"></div>
         </div>
         <div class="op-parts" id="m3dChairs"></div>
@@ -2492,6 +2493,10 @@ img,svg,canvas,video{max-width:100%}
       }).join('');
       chairs.querySelectorAll('[data-m3-inv]').forEach(b=>b.addEventListener('click',()=>m3Invite(b.dataset.m3Inv)));
       chairs.querySelectorAll('[data-m3-rvk]').forEach(b=>b.addEventListener('click',async()=>{ if(!confirm('Revogar a conexão desta cadeira? O participante precisará de um novo convite.')) return; try{ await pmApi('/v1/portal/mesas/'+m3Sel+'/chairs/'+b.dataset.m3Rvk+'/revoke',{method:'POST',body:{}}); m3Refresh(); }catch(e){ toast(e.message,'err'); } }));
+      // Link de ACOMPANHAMENTO (somente leitura) da operação — o admin envia aos participantes
+      // para voltarem à operação quando quiserem (sessão lembrada ou reconexão da carteira).
+      const opLink=location.origin+'/mesa?mesa='+encodeURIComponent(m3Sel);
+      const opBtn=$('#m3dOpLink'); if(opBtn){ opBtn.onclick=()=>{ clip(opLink); toast('Link da operação copiado — envie aos participantes','ok'); }; }
       $('#m3dOpCode').textContent=m.operationCode?('Operação '+m.operationCode):'';
       $('#m3dPlan').textContent=m.settlement?('Liquidação: '+m.settlement.summary):'';
       // Config em valores humanos: converte unidades base/bps usando os decimais das cadeiras.
