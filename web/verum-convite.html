@@ -102,7 +102,12 @@ h1{font-size:22px;margin-bottom:8px}
     if(opts.token) headers['authorization']='Bearer '+opts.token;
     const res=await fetch(API+path,{method:opts.method||'GET',headers,body:opts.body!==undefined?JSON.stringify(opts.body):undefined});
     let data=null; try{ data=await res.json(); }catch(e){}
-    if(!res.ok){ const m=(data&&(data.message||data.error))||('Erro '+res.status); const e=new Error(m); e.status=res.status; throw e; }
+    if(!res.ok){
+      let m=(data&&(data.message||data.error))||('Erro '+res.status);
+      // Validação zod devolve details.issues — nomeia os campos no toast (diagnóstico de 1 rodada).
+      try{ const iss=data&&data.details&&data.details.issues; if(Array.isArray(iss)&&iss.length){ m+=' ['+iss.slice(0,3).map(i=>((i.path||[]).join('.')||'corpo')+': '+(i.message||i.code)).join(' · ')+']'; } }catch(e2){}
+      const e=new Error(m); e.status=res.status; e.details=data&&data.details; throw e;
+    }
     return data;
   }
 
@@ -131,6 +136,44 @@ h1{font-size:22px;margin-bottom:8px}
   /* ---------- carteira injetada (EVM / Phantom / Unisat) ---------- */
   const B58='123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz';
   function bs58encode(bytes){ const b=bytes instanceof Uint8Array?bytes:new Uint8Array(bytes); let n=0n; for(const x of b) n=n*256n+BigInt(x); let out=''; while(n>0n){ out=B58[Number(n%58n)]+out; n/=58n; } for(const x of b){ if(x!==0) break; out='1'+out; } return out; }
+  function bs58decode(s){ let n=0n; for(const c of s){ const i=B58.indexOf(c); if(i<0) return null; n=n*58n+BigInt(i); } const out=[]; while(n>0n){ out.unshift(Number(n%256n)); n/=256n; } for(const c of s){ if(c!=='1') break; out.unshift(0); } return new Uint8Array(out); }
+  // Bytes de QUALQUER forma que uma wallet/postMessage possa devolver: Uint8Array, ArrayBuffer,
+  // Array, objeto indexado {0:..,1:..}, {type:'Buffer',data:[...]} ou {data:[...]}.
+  function anyBytes(v){
+    if(v instanceof Uint8Array) return v;
+    if(v instanceof ArrayBuffer) return new Uint8Array(v);
+    if(Array.isArray(v)&&v.every(x=>typeof x==='number')) return new Uint8Array(v);
+    if(v&&typeof v==='object'){
+      if(Array.isArray(v.data)) return anyBytes(v.data);
+      const ks=Object.keys(v).filter(k=>/^\d+$/.test(k));
+      if(ks.length>8){ const arr=ks.sort((a,b)=>a-b).map(k=>v[k]); if(arr.every(x=>typeof x==='number')) return new Uint8Array(arr); }
+    }
+    return null;
+  }
+  /** Assinatura Solana (ed25519, 64 bytes) → bs58, aceitando TODAS as formas que a Verum Wallet
+   *  pode devolver através do postMessage do iframe: bytes em qualquer formato, string bs58,
+   *  string base64 ou hex, e o envelope {signature:...} aninhado. */
+  function normalizeSolSig(raw){
+    let v=raw&&raw.signature!==undefined?raw.signature:raw;
+    if(v&&typeof v==='object'&&v.signature!==undefined) v=v.signature; // 2º nível de aninhamento
+    const direct=anyBytes(v);
+    if(direct&&direct.length===64) return bs58encode(direct);
+    if(typeof v==='string'){
+      const s=v.trim();
+      const b58=bs58decode(s); if(b58&&b58.length===64) return s;              // já é bs58
+      try{ const b=Uint8Array.from(atob(s),c=>c.charCodeAt(0)); if(b.length===64) return bs58encode(b); }catch(e){} // base64
+      if(/^(0x)?[0-9a-fA-F]{128}$/.test(s)){ const h=s.replace(/^0x/,''); const b=new Uint8Array(64); for(let i=0;i<64;i++) b[i]=parseInt(h.slice(i*2,i*2+2),16); return bs58encode(b); } // hex
+    }
+    const desc=v===null?'null':typeof v==='object'?('objeto {'+Object.keys(v||{}).slice(0,4).join(',')+'}'):typeof v+' de tamanho '+String(v&&v.length);
+    throw walletErr('A Verum Wallet devolveu a assinatura num formato não reconhecido ('+desc+'). Atualize a wallet e tente de novo.','BAD_SIG_SHAPE');
+  }
+  /** Endereço Solana da wallet → string base58 (nunca "[object Object]"). */
+  function normalizeSolAddress(pk){
+    if(typeof pk==='string'&&pk.length>=32) return pk;
+    const cand=(pk&&typeof pk.toBase58==='function'&&pk.toBase58())||(pk&&typeof pk.publicKey==='string'&&pk.publicKey)||(pk!=null&&String(pk));
+    if(typeof cand==='string'&&cand.length>=32&&cand.indexOf('[object')<0) return cand;
+    throw walletErr('A Verum Wallet não devolveu um endereço válido. Reconecte a carteira e tente de novo.','BAD_PK_SHAPE');
+  }
   const walletErr = (msg,code) => { const e=new Error(msg); e.code=code; return e; };
   // Provedor Solana — Verum Wallet (preferencial), depois Solflare.
   function solProvider(){
@@ -175,7 +218,7 @@ h1{font-size:22px;margin-bottom:8px}
   async function signMessage(network,address,message){
     const w=window;
     if(network==='ethereum'){ const p=ethProvider||w.ethereum; if(!p) throw walletErr('Verum Wallet (EVM) não encontrada','NO_WALLET'); return p.request({method:'personal_sign',params:[message,address]}); }
-    if(network==='solana'){ const p=solProvider(); if(!p) throw walletErr('Carteira Verum Wallet não encontrada','NO_WALLET'); const r=await p.signMessage(new TextEncoder().encode(message),'utf8'); const sig=(r&&r.signature)?r.signature:r; return typeof sig==='string'?sig:bs58encode(sig); }
+    if(network==='solana'){ const p=solProvider(); if(!p) throw walletErr('Carteira Verum Wallet não encontrada','NO_WALLET'); const r=await p.signMessage(new TextEncoder().encode(message),'utf8'); return normalizeSolSig(r); }
     if(network==='bitcoin') return w.unisat.signMessage(message,'ecdsa');
     throw walletErr('Rede não suportada','NO_WALLET');
   }
@@ -349,16 +392,16 @@ h1{font-size:22px;margin-bottom:8px}
       const r=await prov.connect();
       const pk=(r&&r.publicKey)?r.publicKey:prov.publicKey;
       if(!pk) throw new Error('Não foi possível ler o endereço da Verum Wallet');
-      const address=pk.toString();
+      const address=normalizeSolAddress(pk);
       v3Busy(true,'Gerando autorização…');
       const ch=await api('/v1/mesa-invites/'+encodeURIComponent(V3.inviteId)+'/challenge',{method:'POST',body:{code,firstName:name,network:'solana',address}});
       // O texto do desafio é exibido INTEGRALMENTE pela própria Verum Wallet ao pedir a assinatura.
       v3Busy(true,'Assine na Verum Wallet…');
       const sigRaw=await prov.signMessage(new TextEncoder().encode(ch.message),'utf8');
-      const sig=(sigRaw&&sigRaw.signature)?sigRaw.signature:sigRaw;
-      const signature=typeof sig==='string'?sig:bs58encode(sig);
+      const signature=normalizeSolSig(sigRaw);
       v3Busy(true,'Confirmando posse…');
-      const addresses=await collectVerumAddresses();
+      // slice(0,30): o backend rejeita a requisição INTEIRA acima de 50 itens — e a lista vem da wallet.
+      const addresses=(await collectVerumAddresses()).slice(0,30);
       const join=await api('/v1/mesa-invites/'+encodeURIComponent(V3.inviteId)+'/join',{method:'POST',body:{code,firstName:name,network:'solana',address,nonce:ch.nonce,signature,addresses}});
       renderState('ok','Você entrou na mesa!','Conexão autorizada como '+esc(v3Info.roleLabel)+'. Redirecionando para a mesa…');
       setTimeout(()=>{ window.location.href='/mesa?mesa='+encodeURIComponent(join.mesaId)+'#pt='+encodeURIComponent(join.token); },900);

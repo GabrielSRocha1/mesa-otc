@@ -78,10 +78,12 @@
       // Transformações de resultado baseadas no tipo de request
       var finalResult = result;
       
-      // Se for assinatura de mensagem simples — retorna { signature, publicKey } (padrão Phantom)
-      if (cb.type === 'signMsg' && result && typeof result.signature === 'string') {
+      // Se for assinatura de mensagem simples — retorna { signature, publicKey } (padrão Phantom).
+      // A wallet pode mandar a assinatura como base64, bs58, array ou objeto-bytes (serialização
+      // do postMessage): normaliza SEMPRE para Uint8Array(64) — o dApp não deve adivinhar.
+      if (cb.type === 'signMsg' && result && result.signature !== undefined) {
         finalResult = {
-          signature: decodeBase64(result.signature),
+          signature: normalizeSigBytes(result.signature),
           publicKey: result.publicKey || (window.verum.publicKey ? window.verum.publicKey.toString() : ''),
         };
       }
@@ -125,6 +127,34 @@
   }
 
   /** Helper para converter Base64 em Uint8Array compatível com Solanachain standard */
+  var B58_ALPHA = '123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz';
+  function b58decode(s) {
+    var n = 0n;
+    for (var i = 0; i < s.length; i++) { var x = B58_ALPHA.indexOf(s[i]); if (x < 0) return null; n = n * 58n + BigInt(x); }
+    var out = [];
+    while (n > 0n) { out.unshift(Number(n % 256n)); n /= 256n; }
+    for (var j = 0; j < s.length && s[j] === '1'; j++) out.unshift(0);
+    return new Uint8Array(out);
+  }
+  /** Assinatura ed25519 (64 bytes) vinda da wallet em QUALQUER forma → Uint8Array(64).
+   *  Aceita: Uint8Array/Array/objeto-bytes ({0:..} ou {data:[...]}), string base64, string bs58. */
+  function normalizeSigBytes(v) {
+    if (v instanceof Uint8Array) return v;
+    if (Array.isArray(v)) return new Uint8Array(v);
+    if (v && typeof v === 'object') {
+      if (Array.isArray(v.data)) return new Uint8Array(v.data);
+      var ks = Object.keys(v).filter(function (k) { return /^\d+$/.test(k); });
+      if (ks.length > 8) return new Uint8Array(ks.sort(function (a, b) { return a - b; }).map(function (k) { return v[k]; }));
+    }
+    if (typeof v === 'string') {
+      var b64 = decodeBase64(v);
+      if (b64 instanceof Uint8Array && b64.length === 64) return b64;
+      var b58 = b58decode(v);
+      if (b58 && b58.length === 64) return b58;
+      if (b64 instanceof Uint8Array) return b64; // melhor esforço (mantém comportamento antigo)
+    }
+    return v; // forma desconhecida: o dApp normaliza/erra com mensagem clara
+  }
   function decodeBase64(str) {
     try {
       var bin = atob(str);

@@ -234,3 +234,25 @@ describe('API mesa v3 — fluxo completo', () => {
     await app.close();
   }, 120_000);
 });
+
+describe('validação diagnosticável do convite', () => {
+  it('join com assinatura vazia → 400 nomeando o campo; addresses:null é tolerado', async () => {
+    const { app } = await makeApp();
+    const pm = await registerPm(app, uniqueEmail('pm-diag'));
+    const mesa = await createMesa(app, pm);
+    const seller = mesa.chairs.find(c => c.role === 'SELLER')!;
+    const inv = await app.api.inject({ method: 'POST', url: `/v1/portal/mesas/${mesa.mesaId}/chairs/${seller.chairId}/invite`, headers: pmHeaders(pm) });
+    const { inviteId, code } = inv.json<{ inviteId: string; code: string }>();
+    const w = solWallet();
+    const ch = await app.api.inject({ method: 'POST', url: `/v1/mesa-invites/${encodeURIComponent(inviteId)}/challenge`, payload: { code, firstName: 'Diag', network: 'solana', address: w.address } });
+    const { message, nonce } = ch.json<{ message: string; nonce: string }>();
+    // Assinatura vazia (o que a wallet quebrada produzia): a mensagem NOMEIA o campo.
+    const bad = await app.api.inject({ method: 'POST', url: `/v1/mesa-invites/${encodeURIComponent(inviteId)}/join`, payload: { code, firstName: 'Diag', network: 'solana', address: w.address, nonce, signature: '' } });
+    expect(bad.statusCode).toBe(400);
+    expect(bad.json<{ message: string }>().message).toMatch(/signature/);
+    // addresses: null não derruba a requisição (serialização defensiva do cliente).
+    const ok = await app.api.inject({ method: 'POST', url: `/v1/mesa-invites/${encodeURIComponent(inviteId)}/join`, payload: { code, firstName: 'Diag', network: 'solana', address: w.address, nonce, signature: await w.signMessage(message), addresses: null } });
+    expect(ok.statusCode, ok.body).toBe(201);
+    await app.close();
+  });
+});

@@ -60,7 +60,7 @@ const NetworkZ = z.enum(['bitcoin', 'ethereum', 'solana', 'zcash', 'tron']); con
 // entradas malformadas vindas da wallet (endereço curto/vazio, rede estranha) são DESCARTADAS em
 // vez de derrubar a requisição inteira com "Entrada inválida" — o dado é público/informativo;
 // a prova de posse continua sendo o challenge assinado.
-const WalletAddressesZ = z.array(z.unknown()).max(50).optional().transform(list =>
+const WalletAddressesZ = z.array(z.unknown()).max(50).nullish().transform(list =>
   !list ? undefined : list.flatMap(a => {
     const o = a as { network?: unknown; address?: unknown } | null;
     const network = typeof o?.network === 'string' ? o.network.trim() : '';
@@ -119,7 +119,16 @@ export async function buildApi(deps: ApiDeps): Promise<FastifyInstance> {
     if (prev) { if (prev.requestHash !== reqHash) throw new DomainError('VERSION_CONFLICT', 'Idempotency-Key reutilizada com corpo diferente'); void reply.header('Idempotent-Replayed', 'true'); return prev.response as T; }
     const res = await fn(); await deps.store.putIdempotent(key, actor, reqHash, res, Date.now()); return res;
   };
-  const parse = <T>(schema: z.ZodType<T>, v: unknown): T => { const r = schema.safeParse(v); if (!r.success) throw new DomainError('INVALID_INPUT', 'Entrada inválida', { issues: r.error.issues }); return r.data; };
+  // Nomeia os campos reprovados na mensagem — "Entrada inválida" seco não é diagnosticável
+  // pelo usuário (ex.: assinatura da wallet chegando vazia aparecia sem pista nenhuma).
+  const parse = <T>(schema: z.ZodType<T>, v: unknown): T => {
+    const r = schema.safeParse(v);
+    if (!r.success) {
+      const fields = r.error.issues.slice(0, 3).map(i => `${i.path.join('.') || 'corpo'}: ${i.message}`).join(' · ');
+      throw new DomainError('INVALID_INPUT', `Entrada inválida (${fields})`, { issues: r.error.issues });
+    }
+    return r.data;
+  };
 
   /* ---------- saúde e métricas ---------- */
   app.get('/health', async () => ({ ok: true, env: deps.env, time: Date.now(), adapters: deps.adapters?.all().map(a => `${a.chain.network}:${a.chain.chainId}`) ?? [] }));
@@ -804,15 +813,25 @@ export async function buildApi(deps: ApiDeps): Promise<FastifyInstance> {
     const q = parse(z.object({ c: z.string().max(20).optional() }), req.query ?? {});
     return deps.mesa.resolveInvite(inviteId, q.c);
   });
+  // Validação com LOG (warn): os campos reprovados aparecem no runtime log — era impossível
+  // diagnosticar o "Entrada inválida" do convite sem acesso ao f12 do usuário.
+  const parseInvite = <T>(route: string, schema: z.ZodType<T>, v: unknown): T => {
+    try { return parse(schema, v); }
+    catch (e) {
+      const issues = (e as DomainError).details?.issues as { path?: (string | number)[]; code?: string; message?: string }[] | undefined;
+      logger.warn({ route, issues: issues?.map(i => ({ path: (i.path ?? []).join('.'), code: i.code, message: i.message })) }, 'convite: entrada inválida');
+      throw e;
+    }
+  };
   app.post('/v1/mesa-invites/:inviteId/challenge', async (req, reply) => {
     const { inviteId } = req.params as { inviteId: string };
-    const b = parse(z.object({ code: z.string().min(4).max(20), firstName: z.string().min(1).max(60), network: AuthNetZ, address: z.string().min(8).max(120) }), req.body);
+    const b = parseInvite('mesa-invites/challenge', z.object({ code: z.string().min(4).max(20), firstName: z.string().min(1).max(60), network: AuthNetZ, address: z.string().min(8).max(120) }), req.body);
     const r = await deps.mesa.joinChallenge(inviteId, { ...b, network: b.network as AuthNetwork });
     void reply.code(201); return r;
   });
   app.post('/v1/mesa-invites/:inviteId/join', async (req, reply) => {
     const { inviteId } = req.params as { inviteId: string };
-    const b = parse(z.object({ code: z.string().min(4).max(20), firstName: z.string().min(1).max(60), network: AuthNetZ, address: z.string().min(8).max(120), nonce: z.string().min(8).max(80), signature: z.string().min(20).max(400), addresses: WalletAddressesZ }), req.body);
+    const b = parseInvite('mesa-invites/join', z.object({ code: z.string().min(4).max(20), firstName: z.string().min(1).max(60), network: AuthNetZ, address: z.string().min(8).max(120), nonce: z.string().min(8).max(80), signature: z.string().min(20).max(400), addresses: WalletAddressesZ }), req.body);
     const r = await deps.mesa.joinMesa(inviteId, { ...b, network: b.network as AuthNetwork });
     void reply.code(201); return r;
   });
