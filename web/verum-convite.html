@@ -198,28 +198,35 @@ h1{font-size:22px;margin-bottom:8px}
     if(sig) return sig;
     throw walletErr('A assinatura não veio no formato esperado. Estrutura recebida: '+shapeOf(raw,0),'BAD_SIG_SHAPE');
   }
-  /** Assina `message` (string) na Verum Wallet tentando TODAS as convenções conhecidas de
-   *  signMessage (Phantom, Wallet-Standard, request RPC) — o provider nativo varia. Devolve a
-   *  assinatura em bs58; se nenhuma convenção produzir 64 bytes, lança com o dump de cada retorno. */
+  // Promise com timeout — sem isto, uma convenção que a wallet nativa nunca resolve travava a
+  // página "carregando infinitamente".
+  function withTimeout(p, ms, label){ return Promise.race([ Promise.resolve(p), new Promise(function(_,rej){ setTimeout(function(){ rej(new Error((label||'')+' sem resposta em '+Math.round(ms/1000)+'s')); }, ms); }) ]); }
+  /** Assina `message` (string) na Verum Wallet. Tenta a convenção PADRÃO (uma assinatura) e, só se
+   *  ela não render 64 bytes, a Wallet-Standard — cada uma com TIMEOUT (nunca trava). No máximo dois
+   *  pedidos de assinatura. Devolve bs58; se nada vier, lança com o dump de cada retorno. */
   async function signSolana(prov, message, address){
     var bytes=new TextEncoder().encode(message);
     var attempts=[];
-    var tryFns=[
-      function(){ return prov.signMessage(bytes,'utf8'); },
-      function(){ return prov.signMessage(bytes); },
-      function(){ return prov.signMessage({message:bytes}); },
-      function(){ return prov.request&&prov.request({method:'signMessage',params:{message:bs58encode(bytes)}}); },
-      function(){ return prov.request&&prov.request({method:'signMessage',params:{message:message}}); },
-      function(){ var f=prov.features&&prov.features['solana:signMessage']; var acc=prov.accounts&&prov.accounts[0]; return f&&f.signMessage({account:acc,message:bytes}); },
-    ];
-    for(var i=0;i<tryFns.length;i++){
-      var res; try{ res=await tryFns[i](); }catch(e){ attempts.push('#'+(i+1)+' exceção: '+(e&&e.message||e)); continue; }
-      if(res===undefined||res===null){ attempts.push('#'+(i+1)+' vazio'); continue; }
+    async function attempt(label, fn, ms){
+      var res;
+      try{ res=await withTimeout(fn(), ms, label); }
+      catch(e){ attempts.push(label+': '+(e&&e.message||e)); return null; }
+      if(res===undefined||res===null){ attempts.push(label+': vazio'); return null; }
       var sig=extractSolSig(res);
       if(sig) return sig;
-      attempts.push('#'+(i+1)+' '+shapeOf(res,0));
+      attempts.push(label+': '+shapeOf(res,0));
+      return null;
     }
-    throw walletErr('A Verum Wallet não devolveu a assinatura em nenhum formato reconhecido. Detalhes: '+attempts.join(' | '),'BAD_SIG_SHAPE');
+    // 1) Phantom padrão SEM 2º argumento (o 'utf8' confundia o provider nativo e voltava vazio).
+    var s=await attempt('signMessage(bytes)', function(){ return prov.signMessage(bytes); }, 120000);
+    if(s) return s;
+    // 2) Wallet-Standard (feature solana:signMessage), se exposta — devolve [{signature,...}].
+    var f=prov.features&&prov.features['solana:signMessage'];
+    if(f&&typeof f.signMessage==='function'){
+      s=await attempt('wallet-standard', function(){ var acc=(prov.accounts&&prov.accounts[0])||{address:address,publicKey:address}; return f.signMessage({account:acc,message:bytes}); }, 120000);
+      if(s) return s;
+    }
+    throw walletErr('A Verum Wallet não devolveu a assinatura. Tentativas → '+attempts.join(' ‖ '),'BAD_SIG_SHAPE');
   }
   /** Endereço Solana da wallet → string base58 (nunca "[object Object]"). */
   function normalizeSolAddress(pk){
