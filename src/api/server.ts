@@ -122,7 +122,7 @@ export async function buildApi(deps: ApiDeps): Promise<FastifyInstance> {
   const parse = <T>(schema: z.ZodType<T>, v: unknown): T => { const r = schema.safeParse(v); if (!r.success) throw new DomainError('INVALID_INPUT', 'Entrada inválida', { issues: r.error.issues }); return r.data; };
 
   /* ---------- saúde e métricas ---------- */
-  app.get('/health', async () => ({ ok: true, env: deps.env, time: Date.now() }));
+  app.get('/health', async () => ({ ok: true, env: deps.env, time: Date.now(), adapters: deps.adapters?.all().map(a => `${a.chain.network}:${a.chain.chainId}`) ?? [] }));
   // Diagnóstico da persistência do portal: roundtrip de escrita + resumo do singleton NO BANCO.
   // Não expõe dados sensíveis (só contagens e mensagens de erro de infraestrutura).
   app.get('/health/portal', async () => ({ persistence: (await deps.portal.persistenceHealth()) ?? 'memória/arquivo (sem backend async)' }));
