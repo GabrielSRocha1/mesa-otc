@@ -207,7 +207,7 @@ h1{font-size:22px;margin-bottom:8px}
    *  contornando o parsing quebrado do provider. Vence quem primeiro render 64 bytes. Timeout + dump. */
   async function signSolana(prov, message, address){
     var bytes=new TextEncoder().encode(message);
-    var attempts=[]; var typesSeen={};
+    var attempts=[]; var typesSeen={}; var cleanup=function(){};
     // Captura da resposta BRUTA da carteira (bypass do provider nativo).
     var bridge=new Promise(function(resolve,reject){
       function onMsg(e){
@@ -220,17 +220,17 @@ h1{font-size:22px;margin-bottom:8px}
         var sig=extractSolSig(d); if(sig) resolve(sig);
       }
       window.addEventListener('message',onMsg);
-      bridge._cleanup=function(){ window.removeEventListener('message',onMsg); };
+      cleanup=function(){ window.removeEventListener('message',onMsg); }; // (bug antigo: referenciava bridge antes de existir → erro imediato)
     });
     // Dispara o prompt da carteira (o retorno dele é aproveitado SE vier com assinatura).
     var direct=(async function(){ try{ var r=await prov.signMessage(bytes); if(r!=null){ var s=extractSolSig(r); if(s) return s; attempts.push('retorno direto: '+shapeOf(r,0)); } else attempts.push('retorno direto: vazio'); }catch(e){ attempts.push('retorno direto: '+(e&&e.message||e)); } return new Promise(function(){}); })();
     var timeout=new Promise(function(_,rej){ setTimeout(function(){ rej(walletErr('x','T')); },120000); });
     try{
       var sig=await Promise.race([bridge,direct,timeout]);
-      bridge._cleanup&&bridge._cleanup();
+      cleanup();
       return sig;
     }catch(e){
-      bridge._cleanup&&bridge._cleanup();
+      cleanup();
       var seen=Object.keys(typesSeen);
       throw walletErr('A Verum Wallet não devolveu a assinatura. '+attempts.join(' ‖ ')+(seen.length?(' · mensagens recebidas: '+seen.join(', ')):' · nenhuma mensagem da carteira capturada'),'BAD_SIG_SHAPE');
     }
