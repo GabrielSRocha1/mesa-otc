@@ -322,6 +322,41 @@ export class MesaService {
     return { token: this.d.auth.sign(session), mesaId: mesa.mesaId, chairId: chair.chairId, role: chair.role };
   }
 
+  /**
+   * Conexão da cadeira SEM assinatura de mensagem — a posse é provada pela CONEXÃO da Verum Wallet
+   * (a carteira só devolve o endereço real do usuário), exatamente como o Pay Master 1/admin conecta
+   * em /v1/portal/wallet/connect. Usado porque o signMessage do provider nativo da Verum não entrega
+   * a assinatura no dapp-browser. Controle de acesso = o código secreto do convite. Consumo atômico.
+   */
+  async connectMesa(inviteId: string, input: { code: string; firstName: string; network: AuthNetwork; address: string; addresses?: WalletAddress[] }): Promise<{ token: string; mesaId: string; chairId: string; role: MesaChairRole }> {
+    const { invite, mesa, chair } = await this.inviteOrThrow(inviteId);
+    this.assertMesaOpen(mesa);
+    if (invite.status !== 'PENDING' || invite.expiresAt <= this.now()) throw new DomainError('INVALID_INPUT', invite.status === 'USED' ? 'Este convite já foi utilizado.' : 'Convite inválido ou expirado.');
+    if (!hashesEqual(codeHashOf(inviteId, input.code), invite.codeHash)) throw new DomainError('FORBIDDEN', 'Código do convite incorreto.');
+    const firstName = input.firstName.trim();
+    if (!FIRST_NAME_RE.test(firstName)) throw new DomainError('INVALID_INPUT', 'Informe seu primeiro nome (2 a 30 caracteres).');
+    const address = input.address.trim();
+    if (address.length < 8 || address.length > 120) throw new DomainError('INVALID_INPUT', 'Endereço de carteira inválido.');
+    const t = this.now();
+    this.assertAddressFree(mesa, chair.chairId, address);
+    // CONSUMO ATÔMICO do convite — exatamente uma conexão vence (reparo idempotente p/ a mesma wallet).
+    const consumed = await this.d.store.consumeMesaInvite(inviteId, { address, name: firstName }, t);
+    if (!consumed) {
+      const cur = await this.d.store.getMesaInvite(inviteId);
+      if (!(cur && cur.status === 'USED' && cur.usedByAddress?.toLowerCase() === address.toLowerCase())) {
+        throw new DomainError('VERSION_CONFLICT', 'Este convite já foi utilizado por outra wallet.');
+      }
+    }
+    chair.wallet = this.d.portal.walletLink(address, input.network, input.addresses);
+    chair.firstName = firstName;
+    chair.connectedAt = t;
+    this.d.portal.persistMesas();
+    void this.audit('mesa.wallet.conectada', 'public', { mesaId: mesa.mesaId, chairId: chair.chairId, role: chair.role, network: input.network, address, proof: 'connect' });
+    void this.audit('mesa.convite.consumido', 'public', { mesaId: mesa.mesaId, chairId: chair.chairId, inviteId });
+    const session: Session = { sub: `mesa:${mesa.mesaId}:${chair.chairId}`, network: input.network as Network, chainId: '', address, keyScheme: NETWORK_KEY_SCHEME[input.network as Network], role: 'participant', iat: t, exp: t + 24 * 3600_000, mesa: { mesaId: mesa.mesaId, chairId: chair.chairId, role: chair.role, firstName } };
+    return { token: this.d.auth.sign(session), mesaId: mesa.mesaId, chairId: chair.chairId, role: chair.role };
+  }
+
   /* ---------- configuração e aprovação (admin-only) ---------- */
 
   updateConfig(portalToken: string | undefined, mesaId: string, patch: Partial<MesaOperationConfig>): MesaOperationConfig {

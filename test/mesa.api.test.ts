@@ -255,4 +255,27 @@ describe('validação diagnosticável do convite', () => {
     expect(ok.statusCode, ok.body).toBe(201);
     await app.close();
   });
+
+  it('connect (sem assinatura): vincula a cadeira pela conexão da Verum e emite token; convite vira USED', async () => {
+    const { app } = await makeApp();
+    const pm = await registerPm(app, uniqueEmail('pm-conn'));
+    const mesa = await createMesa(app, pm);
+    const seller = mesa.chairs.find(c => c.role === 'SELLER')!;
+    const inv = await app.api.inject({ method: 'POST', url: `/v1/portal/mesas/${mesa.mesaId}/chairs/${seller.chairId}/invite`, headers: pmHeaders(pm) });
+    const { inviteId, code } = inv.json<{ inviteId: string; code: string }>();
+    const w = solWallet();
+    // Caminho da Verum Wallet: conecta SEM assinar (prova = conexão), com endereços multichain.
+    const r = await app.api.inject({ method: 'POST', url: `/v1/mesa-invites/${encodeURIComponent(inviteId)}/connect`, payload: { code, firstName: 'Vend', network: 'solana', address: w.address, addresses: [{ network: 'solana', address: w.address }, { network: 'bitcoin', address: 'tb1qexemploexemploexemploexemploexemplo00' }] } });
+    expect(r.statusCode, r.body).toBe(201);
+    expect(r.json<{ token: string; role: string }>().role).toBe('SELLER');
+    // Convite consumido: segunda conexão é rejeitada.
+    const again = await app.api.inject({ method: 'POST', url: `/v1/mesa-invites/${encodeURIComponent(inviteId)}/connect`, payload: { code, firstName: 'Outro', network: 'solana', address: solWallet().address } });
+    expect(again.statusCode).toBeGreaterThanOrEqual(400);
+    // Código errado é rejeitado.
+    const inv2 = await app.api.inject({ method: 'POST', url: `/v1/portal/mesas/${mesa.mesaId}/chairs/${mesa.chairs.find(c => c.role === 'BUYER')!.chairId}/invite`, headers: pmHeaders(pm) });
+    const inviteId2 = inv2.json<{ inviteId: string }>().inviteId;
+    const wrong = await app.api.inject({ method: 'POST', url: `/v1/mesa-invites/${encodeURIComponent(inviteId2)}/connect`, payload: { code: 'XXXX-YYYY', firstName: 'Comp', network: 'solana', address: solWallet().address } });
+    expect(wrong.statusCode).toBe(403);
+    await app.close();
+  });
 });

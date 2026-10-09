@@ -835,6 +835,14 @@ export async function buildApi(deps: ApiDeps): Promise<FastifyInstance> {
     const r = await deps.mesa.joinMesa(inviteId, { ...b, network: b.network as AuthNetwork });
     void reply.code(201); return r;
   });
+  // Conexão SEM assinatura de mensagem (a posse é provada pela conexão da Verum Wallet, como o
+  // admin) — o signMessage do provider nativo da Verum não entrega a assinatura no dapp-browser.
+  app.post('/v1/mesa-invites/:inviteId/connect', async (req, reply) => {
+    const { inviteId } = req.params as { inviteId: string };
+    const b = parseInvite('mesa-invites/connect', z.object({ code: z.string().min(4).max(20), firstName: z.string().min(1).max(60), network: AuthNetZ, address: z.string().min(8).max(120), addresses: WalletAddressesZ }), req.body);
+    const r = await deps.mesa.connectMesa(inviteId, { ...b, network: b.network as AuthNetwork });
+    void reply.code(201); return r;
+  });
 
   // --- mesa (admin OU participante; DTO recortado por papel NO BACKEND) ---
   app.get('/v1/mesas/:mesaId', async req => {

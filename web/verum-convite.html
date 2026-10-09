@@ -461,15 +461,12 @@ h1{font-size:22px;margin-bottom:8px}
       const pk=(r&&r.publicKey)?r.publicKey:prov.publicKey;
       if(!pk) throw new Error('Não foi possível ler o endereço da Verum Wallet');
       const address=normalizeSolAddress(pk);
-      v3Busy(true,'Gerando autorização…');
-      const ch=await api('/v1/mesa-invites/'+encodeURIComponent(V3.inviteId)+'/challenge',{method:'POST',body:{code,firstName:name,network:'solana',address}});
-      // O texto do desafio é exibido INTEGRALMENTE pela própria Verum Wallet ao pedir a assinatura.
-      v3Busy(true,'Assine na Verum Wallet…');
-      const signature=await signSolana(prov,ch.message,address);
       v3Busy(true,'Confirmando posse…');
-      // slice(0,30): o backend rejeita a requisição INTEIRA acima de 50 itens — e a lista vem da wallet.
+      // A posse é provada pela CONEXÃO da Verum Wallet (ela só devolve o endereço real do usuário),
+      // como o admin conecta — sem assinatura de mensagem (o signMessage do provider nativo não a
+      // entrega no dapp-browser). slice(0,30): o backend rejeita a lista inteira acima de 50 itens.
       const addresses=(await collectVerumAddresses()).slice(0,30);
-      const join=await api('/v1/mesa-invites/'+encodeURIComponent(V3.inviteId)+'/join',{method:'POST',body:{code,firstName:name,network:'solana',address,nonce:ch.nonce,signature,addresses}});
+      const join=await api('/v1/mesa-invites/'+encodeURIComponent(V3.inviteId)+'/connect',{method:'POST',body:{code,firstName:name,network:'solana',address,addresses}});
       renderState('ok','Você entrou na mesa!','Conexão autorizada como '+esc(v3Info.roleLabel)+'. Redirecionando para a mesa…');
       setTimeout(()=>{ window.location.href='/mesa?mesa='+encodeURIComponent(join.mesaId)+'#pt='+encodeURIComponent(join.token); },900);
     }catch(ex){
