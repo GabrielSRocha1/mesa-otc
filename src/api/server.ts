@@ -435,6 +435,9 @@ export async function buildApi(deps: ApiDeps): Promise<FastifyInstance> {
       ],
     };
     const created = await deps.deals.create(input, sellerBtc as string);
+    // Linka a deal à mesa ANTES do open: o registro on-chain (dentro do open) resolve o endereço
+    // EVM do vendedor-BTC pela carteira multichain da cadeira — a busca é por mesa.dealId(s).
+    onCreated(created.id);
     for (const p of input.participants) if (p.role !== 'SELLER') await deps.deals.connectWallet(created.id, p.role as Role, p.address as string, p.address as string);
     await deps.deals.open(created.id, sellerBtc as string); // registra: createTradeV2 (EVM) + derivação do cofre (BTC)
     // Funding: comprador (approve ERC-20 — melhor esforço: carteira real completa via /onchain-tx);
@@ -447,7 +450,6 @@ export async function buildApi(deps: ApiDeps): Promise<FastifyInstance> {
       if (err.code === 'FUNDING_REQUIRED' && err.details?.address) htlcFunding = { address: String(err.details.address), requiredSat: String(err.details.requiredSat ?? mesa.config!.amountInBase) };
       else logger.warn({ dealId: created.id, err: err.message }, 'funding do vendedor pendente');
     }
-    onCreated(created.id);
     await deps.audit.append({ actorType: 'user', actorId: mesa.payMasterId, category: 'portal.mesa.deal.created', dealId: created.id, payload: { mode: 'htlc-btc', vault: htlcFunding?.address ?? null } });
     return { ...await mesaDealView(await deps.deals.get(created.id)), htlcFunding };
   };
