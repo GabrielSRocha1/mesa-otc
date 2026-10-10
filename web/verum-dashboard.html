@@ -769,6 +769,12 @@ img,svg,canvas,video{max-width:100%}
         </table></div>
       </section>
 
+      <!-- Todas as operações (ativa + histórico) de todas as mesas — cada uma com link de visualização -->
+      <section class="card" id="opAllCard" style="display:none;margin-bottom:16px">
+        <div class="card-h"><div class="t"><svg viewBox="0 0 24 24" style="width:17px;height:17px;stroke:var(--blue);fill:none;stroke-width:2;vertical-align:-3px;margin-right:6px"><rect x="4" y="4" width="16" height="16" rx="2"/><path d="M8 9h8M8 13h5"/></svg>Todas as operações</div><span class="badge info" id="opAllCount">0</span></div>
+        <div class="op-deal-list" id="opAllList"></div>
+      </section>
+
       <div class="op-layout">
         <div class="op-main">
           <!-- Participantes -->
@@ -1176,6 +1182,34 @@ img,svg,canvas,video{max-width:100%}
   $$('[data-toast]').forEach(el=>el.addEventListener('click',()=>toast(el.dataset.toast,'info')));
 
   // nav — troca de view por aba
+  // Lista de TODAS as operações (todas as mesas, ativa + histórico) na aba Operações, com link por operação.
+  async function opLoadAll(){
+    if(!getTok()) return;
+    try{
+      const r=await pmApi('/v1/portal/operations'); const ops=(r&&r.operations)||[];
+      const card=$('#opAllCard'), box=$('#opAllList'); if(!box) return;
+      if($('#opAllCount')) $('#opAllCount').textContent=String(ops.length);
+      if(card) card.style.display=ops.length?'':'none';
+      box.innerHTML=ops.map(o=>{
+        const d=o.deal||{};
+        const pair=(d.assetIn||'—')+' → '+(d.assetOut||'—');
+        const dt=d.createdAt?new Date(d.createdAt).toLocaleString('pt-BR',{day:'2-digit',month:'2-digit',hour:'2-digit',minute:'2-digit'}):'';
+        const turn=(d.state==='AWAITING_SIGNATURES'&&d.turnRole)?(' · vez: '+(M3_ROLE[d.turnRole]||d.turnRole)):'';
+        const active=o.active?'<span style="font-size:10.5px;color:var(--blue);font-weight:700;margin-left:6px">ativa</span>':'';
+        return '<div class="op-deal-card" style="cursor:default">'
+          +'<div><div class="dpair">'+esc(pair)+active+'</div><div class="did">Mesa '+esc(o.mesaCode)+' · '+esc(d.id)+'</div><div class="dmeta">'+esc(o.networkLabel||'')+' · '+esc(dt)+' · '+(d.validSignatures||0)+'/'+(d.requiredSignatures||0)+' assinaturas'+esc(turn)+'</div></div>'
+          +'<div class="dright" style="display:flex;flex-direction:column;gap:6px;align-items:flex-end">'+opStateBadge(d.state)
+          +'<div style="display:flex;gap:6px;flex-wrap:wrap;justify-content:flex-end">'
+          +'<button class="btn" data-oa-link="'+esc(o.mesaId)+'" data-oa-op="'+esc(d.id)+'" title="Link somente-leitura" style="height:30px;font-size:11.5px"><svg viewBox="0 0 24 24" style="width:13px;height:13px;stroke:currentColor;fill:none;stroke-width:2;vertical-align:-2px"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V5a2 2 0 012-2h8"/></svg>Copiar link</button>'
+          +'<button class="btn" data-oa-mesa="'+esc(o.mesaId)+'" style="height:30px;font-size:11.5px">Ver mesa</button>'
+          +'<button class="btn" data-oa-del="'+esc(o.mesaId)+'" data-oa-delop="'+esc(d.id)+'" title="Excluir operação" style="height:30px;font-size:11.5px;border-color:var(--red);color:#fecaca">Excluir</button>'
+          +'</div></div></div>';
+      }).join('')||'<p style="color:var(--ink-3);font-size:12.5px;margin:0">Nenhuma operação ainda.</p>';
+      box.querySelectorAll('[data-oa-link]').forEach(b=>b.addEventListener('click',()=>{ const op=b.dataset.oaOp; const url=location.origin+'/mesa?mesa='+encodeURIComponent(b.dataset.oaLink)+(op?'&op='+encodeURIComponent(op):''); clip(url); toast('Link de visualização copiado (somente leitura)','ok'); }));
+      box.querySelectorAll('[data-oa-mesa]').forEach(b=>b.addEventListener('click',()=>{ showView('carteiras'); m3Open(b.dataset.oaMesa); }));
+      box.querySelectorAll('[data-oa-del]').forEach(b=>b.addEventListener('click',async()=>{ if(!confirm('Excluir esta operação?')) return; try{ await pmApi('/v1/portal/mesas/'+encodeURIComponent(b.dataset.oaDel)+'/deals/'+encodeURIComponent(b.dataset.oaDelop)+'/delete',{method:'POST',body:{}}); toast('Operação excluída','ok'); opLoadAll(); }catch(e){ toast(e.message||'Falha ao excluir','err'); } }));
+    }catch(e){}
+  }
   function showView(view){
     const target=document.getElementById('view-'+view);
     if(!target) return;
@@ -1185,7 +1219,7 @@ img,svg,canvas,video{max-width:100%}
     const main=document.querySelector('.content .page'); if(main) main.scrollTop=0;
     window.scrollTo(0,0);
     // A aba "Operações" abre direto a negociação com os dados salvos da mesa.
-    if(view==='operacao'){ try{ updateDraft(); refreshMesaDeals(); renderDealList(opDealsCache,opDeal&&opDeal.id); opRenderInfo(); if(typeof m3LoadList==='function') m3LoadList(); }catch(e){} }
+    if(view==='operacao'){ try{ updateDraft(); refreshMesaDeals(); renderDealList(opDealsCache,opDeal&&opDeal.id); opRenderInfo(); if(typeof m3LoadList==='function') m3LoadList(); opLoadAll(); }catch(e){} }
   }
   // ── Sidebar responsiva (mobile): gaveta aberta pelo hambúrguer ──────────────
   function setNav(open){

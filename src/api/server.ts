@@ -664,6 +664,8 @@ export async function buildApi(deps: ApiDeps): Promise<FastifyInstance> {
     return deps.mesa.mesaViewFor(mesa, { kind: 'admin' });
   });
   app.get('/v1/portal/mesas', async req => ({ mesas: await deps.mesa.listMesas(portalToken(req)) }));
+  // Todas as operações (ativa + histórico) de todas as mesas do PM — para a lista da aba Operações.
+  app.get('/v1/portal/operations', async req => ({ operations: await deps.mesa.listAllOperations(portalToken(req)) }));
   app.get('/v1/portal/mesas/:mesaId', async req => {
     const { mesaId } = req.params as { mesaId: string };
     const { mesa } = adminMesa(req, mesaId, false);

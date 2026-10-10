@@ -509,6 +509,23 @@ export class MesaService {
 
   private shortAddr(a: string): string { return a.length > 12 ? `${a.slice(0, 7)}…${a.slice(-3)}` : a; }
 
+  /** TODAS as operações (deals) das mesas do PM — ativa + histórico, mais recentes primeiro. Cada item
+   *  traz a mesa de origem para montar o link de visualização (/mesa?mesa=&op=). */
+  async listAllOperations(portalToken: string | undefined): Promise<Array<{ mesaId: string; mesaCode: string; networkLabel: string; active: boolean; deal: Record<string, unknown> }>> {
+    const pm = this.d.portal.requirePayMaster(portalToken, false);
+    const mesas = Object.values(this.d.portal.mesas()).filter(m => m.payMasterId === pm.id).sort((a, b) => b.createdAt - a.createdAt);
+    const out: Array<{ mesaId: string; mesaCode: string; networkLabel: string; active: boolean; deal: Record<string, unknown> }> = [];
+    for (const m of mesas) {
+      const ids = [...new Set([...(m.dealIds ?? []), ...(m.dealId ? [m.dealId] : [])])].reverse();
+      for (const id of ids) {
+        const deal = await this.d.getDeal(id).catch(() => null);
+        const summary = this.dealSummary(deal);
+        if (summary) out.push({ mesaId: m.mesaId, mesaCode: m.code, networkLabel: this.networksLabel(m), active: id === m.dealId, deal: summary });
+      }
+    }
+    return out;
+  }
+
   /** Resumo canônico de uma operação (deal) para a UI — mesma forma na mesa, na lista e no deep link. */
   private dealSummary(deal: Deal | null): Record<string, unknown> | null {
     if (!deal) return null;

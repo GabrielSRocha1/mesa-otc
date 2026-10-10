@@ -318,6 +318,12 @@ describe('validação diagnosticável do convite', () => {
     const av1 = (await app.api.inject({ method: 'GET', url: `/v1/portal/mesas/${mesa.mesaId}`, headers: pmHeaders(pm) })).json<{ deal: { id: string } | null; deals: { id: string }[] }>();
     expect(av1.deal?.id).toBe(dealId);
     expect(av1.deals.map(d => d.id)).toContain(dealId);
+    // lista agregada de TODAS as operações (aba Operações) traz a op com a mesa de origem
+    const allOps = (await app.api.inject({ method: 'GET', url: '/v1/portal/operations', headers: pmHeaders(pm) })).json<{ operations: { mesaId: string; mesaCode: string; active: boolean; deal: { id: string } }[] }>();
+    const mine = allOps.operations.find(o => o.deal.id === dealId);
+    expect(mine).toBeTruthy();
+    expect(mine!.mesaId).toBe(mesa.mesaId);
+    expect(mine!.active).toBe(true);
     expect((await app.api.inject({ method: 'PATCH', url: `/v1/portal/mesas/${mesa.mesaId}/config`, headers: pmHeaders(pm), payload: { discountBps: 5 } })).statusCode).toBe(409);
 
     // dealId que não pertence à mesa → 400
