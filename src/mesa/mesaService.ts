@@ -469,6 +469,35 @@ export class MesaService {
     void this.audit('mesa.cancelada', pm.id, { mesaId, reason: mesa.cancelled.reason });
   }
 
+  /** Exclui a mesa (remove da conta). Bloqueada se houver operação irreversível (fundos trancados). */
+  async deleteMesa(portalToken: string | undefined, mesaId: string): Promise<void> {
+    const pm = this.d.portal.requirePayMaster(portalToken);
+    const mesa = this.mesaOf(pm.id, mesaId);
+    if (await this.irreversibleOf(mesa)) throw new DomainError('VERSION_CONFLICT', 'Operação irreversível: fundos trancados no escrow — não é possível excluir a mesa.');
+    delete this.d.portal.mesas()[mesaId];
+    this.d.portal.persistMesas();
+    void this.audit('mesa.excluida', pm.id, { mesaId });
+  }
+
+  /** Exclui UMA operação (deal) da mesa. Bloqueada se a operação for irreversível. Se era a ativa,
+   *  destrava a mesa (approvedAt/termsHash) para permitir uma nova operação. */
+  async deleteMesaDeal(portalToken: string | undefined, mesaId: string, dealId: string): Promise<{ deal: Record<string, unknown> | null }> {
+    const pm = this.d.portal.requirePayMaster(portalToken);
+    const mesa = this.mesaOf(pm.id, mesaId);
+    if (mesa.dealId !== dealId && !(mesa.dealIds ?? []).includes(dealId)) throw new DomainError('INVALID_INPUT', 'Operação não pertence a esta mesa.');
+    const deal = await this.d.getDeal(dealId);
+    if (deal && this.isIrreversible(deal)) throw new DomainError('VERSION_CONFLICT', 'Operação irreversível: fundos trancados no escrow — não é possível excluir.');
+    mesa.dealIds = (mesa.dealIds ?? []).filter(id => id !== dealId);
+    if (mesa.dealId === dealId) {
+      mesa.dealId = mesa.dealIds.length ? (mesa.dealIds[mesa.dealIds.length - 1] as string) : null;
+      if (!mesa.dealId) { mesa.approvedAt = undefined; mesa.termsHash = undefined; } // mesa volta a aceitar nova operação
+    }
+    this.d.portal.persistMesas();
+    void this.audit('mesa.operacao.excluida', pm.id, { mesaId, dealId });
+    const active = mesa.dealId ? await this.d.getDeal(mesa.dealId) : null;
+    return { deal: this.dealSummary(active) };
+  }
+
   /* ---------- DTO recortado por papel (aplicado no BACKEND) ---------- */
 
   private shortAddr(a: string): string { return a.length > 12 ? `${a.slice(0, 7)}…${a.slice(-3)}` : a; }

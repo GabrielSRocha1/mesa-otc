@@ -806,6 +806,16 @@ export async function buildApi(deps: ApiDeps): Promise<FastifyInstance> {
     await deps.mesa.cancelMesa(portalToken(req), mesaId, b.reason);
     return { ok: true };
   });
+  // Exclusão (admin): remove a mesa inteira ou uma operação dela. Bloqueada se houver fundos trancados.
+  app.post('/v1/portal/mesas/:mesaId/delete', async req => {
+    const { mesaId } = req.params as { mesaId: string };
+    await deps.mesa.deleteMesa(portalToken(req), mesaId);
+    return { ok: true };
+  });
+  app.post('/v1/portal/mesas/:mesaId/deals/:dealId/delete', async req => {
+    const { mesaId, dealId } = req.params as { mesaId: string; dealId: string };
+    return deps.mesa.deleteMesaDeal(portalToken(req), mesaId, dealId);
+  });
 
   // --- público (página do convite) ---
   app.get('/v1/mesa-invites/:inviteId', async req => {

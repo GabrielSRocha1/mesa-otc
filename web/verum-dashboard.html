@@ -988,6 +988,7 @@ img,svg,canvas,video{max-width:100%}
             <button class="btn btn-primary btn-block" id="m3dApprove" type="button" style="margin-top:10px">Aprovar operação</button>
             <button class="btn btn-block" id="m3dSign" type="button" style="display:none;margin-top:8px">Assinar a vez da mesa</button>
             <button class="btn btn-block" id="m3dCancelMesa" type="button" style="margin-top:8px;border-color:var(--red);color:#fecaca">Cancelar mesa</button>
+            <button class="btn btn-block" id="m3dDeleteMesa" type="button" style="margin-top:8px;border-color:var(--red);color:#fecaca">Excluir mesa</button>
             <div id="m3dIrrev" style="display:none;margin-top:8px;font-size:12px;color:var(--amber);border:1px solid var(--line);border-radius:10px;padding:8px 10px">🔒 Operação irreversível — fundos trancados no escrow. O contrato segue até a extração da preimage (liquidação) ou a expiração do timelock (reembolso automático).</div>
           </div>
         </div>
@@ -2503,9 +2504,11 @@ img,svg,canvas,video{max-width:100%}
       const active=d.active?'<span style="font-size:10.5px;color:var(--blue);font-weight:700;margin-left:6px">ativa</span>':'';
       return '<div class="op-deal-card" style="cursor:default">'
         +'<div><div class="dpair">'+esc(pair)+active+'</div><div class="did">'+esc(d.id)+'</div><div class="dmeta">'+esc(dt)+' · '+(d.validSignatures||0)+'/'+(d.requiredSignatures||0)+' assinaturas'+esc(turn)+'</div></div>'
-        +'<div class="dright">'+opStateBadge(d.state)+'<button class="btn" data-m3-oplink="'+esc(d.id)+'" title="Link somente-leitura desta operação" style="height:30px;font-size:11.5px;margin-top:6px"><svg viewBox="0 0 24 24" style="width:13px;height:13px;stroke:currentColor;fill:none;stroke-width:2"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V5a2 2 0 012-2h8"/></svg>Copiar link de visualização</button></div></div>';
+        +'<div class="dright">'+opStateBadge(d.state)+'<button class="btn" data-m3-oplink="'+esc(d.id)+'" title="Link somente-leitura desta operação" style="height:30px;font-size:11.5px;margin-top:6px"><svg viewBox="0 0 24 24" style="width:13px;height:13px;stroke:currentColor;fill:none;stroke-width:2"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V5a2 2 0 012-2h8"/></svg>Copiar link de visualização</button>'
+        +'<button class="btn" data-m3-opdel="'+esc(d.id)+'" title="Excluir esta operação" style="height:30px;font-size:11.5px;margin-top:6px;margin-left:6px;border-color:var(--red);color:#fecaca">Excluir</button></div></div>';
     }).join('');
     box.querySelectorAll('[data-m3-oplink]').forEach(b=>b.addEventListener('click',e=>{ e.stopPropagation(); const url=location.origin+'/mesa?mesa='+encodeURIComponent(m3Sel)+'&op='+encodeURIComponent(b.dataset.m3Oplink); clip(url); toast('Link de visualização copiado — abre direto nesta operação (somente leitura)','ok'); }));
+    box.querySelectorAll('[data-m3-opdel]').forEach(b=>b.addEventListener('click',async e=>{ e.stopPropagation(); if(!confirm('Excluir esta operação? Ela sai da lista da mesa.')) return; try{ await pmApi('/v1/portal/mesas/'+encodeURIComponent(m3Sel)+'/deals/'+encodeURIComponent(b.dataset.m3Opdel)+'/delete',{method:'POST',body:{}}); toast('Operação excluída','ok'); m3Refresh(); }catch(err){ toast(err.message||'Falha ao excluir','err'); } }));
   }
   async function m3Refresh(){
     if(!m3Sel) return;
@@ -2690,6 +2693,7 @@ img,svg,canvas,video{max-width:100%}
     const ap=$('#m3dApprove'); if(ap) ap.addEventListener('click',m3Approve);
     const sg=$('#m3dSign'); if(sg) sg.addEventListener('click',m3Sign);
     const cm=$('#m3dCancelMesa'); if(cm) cm.addEventListener('click',async()=>{ const reason=prompt('Motivo do cancelamento:'); if(reason===null) return; try{ await pmApi('/v1/portal/mesas/'+m3Sel+'/cancel',{method:'POST',body:{reason}}); toast('Mesa cancelada','ok'); m3Refresh(); m3LoadList(); }catch(e){ toast(e.message,'err'); } });
+    const dm=$('#m3dDeleteMesa'); if(dm) dm.addEventListener('click',async()=>{ if(!confirm('Excluir esta mesa? Esta ação remove a mesa e não pode ser desfeita.')) return; try{ await pmApi('/v1/portal/mesas/'+m3Sel+'/delete',{method:'POST',body:{}}); toast('Mesa excluída','ok'); const d=$('#m3Detail'); if(d) d.style.display='none'; m3Sel=null; m3LoadList(); }catch(e){ toast(e.message,'err'); } });
     const os=$('#m3OpsSearch'); if(os) os.addEventListener('input',()=>m3LoadList());
     const of=$('#m3OpsFilter'); if(of) of.addEventListener('change',()=>m3LoadList());
     m3LoadList(); setInterval(m3LoadList,15000);
