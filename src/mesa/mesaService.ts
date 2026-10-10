@@ -98,6 +98,12 @@ export class MesaService {
       const chair: MesaChair = { chairId: 'ch_' + randomUUID(), role: c.role, expectedAsset: { network: asset.network || network, contractOrMint: asset.contractOrMint ?? null, decimals: asset.decimals, symbol: asset.symbol }, label: c.label?.trim() || undefined, wallet: null };
       // A cadeira Pay Master 1 é do próprio admin — já conectada com a wallet dele (quando houver).
       if (c.role === 'PAYMASTER_1' && pm.wallet) { chair.wallet = pm.wallet; chair.firstName = pm.name.split(/\s+/)[0]; chair.connectedAt = t; }
+      else {
+        // Preenche a cadeira com a carteira pré-conectada na aba "Carteiras" (sem convite). A posse
+        // real continua sendo provada na ASSINATURA da operação.
+        const desk = this.d.portal.deskWalletFor(pm, c.role);
+        if (desk) { chair.wallet = desk.link; chair.firstName = desk.name || CHAIR_ROLE_LABEL[c.role]; chair.connectedAt = t; }
+      }
       return chair;
     });
     const mesa: MesaRecord = { mesaId: 'mesa_' + randomUUID(), payMasterId: pm.id, code: this.d.portal.newMesaCode(), operationCode: `OP-${newInviteCode()}`, label: input.label?.trim() || undefined, network, chairs, approvals: {}, dealId: null, dealIds: [], createdAt: t, expiresAt: t + TABLE_TTL_MS };
@@ -368,17 +374,24 @@ export class MesaService {
    * O dono reconecta a Verum Wallet e assina um desafio provando posse da MESMA carteira; recebe um
    * token de participante novo. Não altera nada da mesa (o token de participante não muta config).
    */
-  async reenterChallenge(mesaId: string, input: { network: AuthNetwork; address: string }): Promise<{ message: string; nonce: string; expiresAt: number }> {
+  async reenterChallenge(mesaId: string, input: { network: AuthNetwork; address: string; addresses?: WalletAddress[] }): Promise<{ message: string; nonce: string; expiresAt: number; network: AuthNetwork; address: string }> {
     const mesa = this.mesaById(mesaId);
     if (!mesa) throw new DomainError('INVALID_INPUT', 'Mesa não encontrada.');
-    const chair = this.chairByWallet(mesa, input.address);
-    if (!chair) throw new DomainError('FORBIDDEN', 'Esta carteira não está conectada a nenhuma cadeira desta mesa.');
+    // O cliente pode identificar a cadeira por QUALQUER endereço multichain que a carteira exponha
+    // (chairByWallet casa a lista toda capturada no join) — tolerante a quem não tem a Solana no topo.
+    const candidates = [input.address, ...((input.addresses ?? []).map(a => a.address))].filter(Boolean);
+    let chair: MesaChair | undefined; for (const a of candidates) { chair = this.chairByWallet(mesa, a); if (chair) break; }
+    if (!chair || !chair.wallet) throw new DomainError('FORBIDDEN', 'Esta carteira não está conectada a nenhuma cadeira desta mesa.');
+    // A prova de posse usa a FAMÍLIA da rede da mesa e o endereço PRIMÁRIO da cadeira — o MESMO que
+    // assina as deals. Assim a sessão reentrante consegue assinar (signer === participante da deal).
+    const network = authNetworkFor(mesa.network);
+    const address = chair.wallet.address;
     const t = this.now();
     const nonce = randomBytes(16).toString('hex');
     const expiresAt = t + CHALLENGE_TTL_MS;
-    await this.d.store.insertNonce({ value: nonce, kind: 'challenge', dealId: null, revision: null, role: chair.role, subject: JSON.stringify({ k: 'mesa-reenter', mesaId, chairId: chair.chairId, network: input.network, address: input.address.trim() }), issuedAt: t, expiresAt, consumedAt: null });
-    void this.audit('mesa.reentrada.desafio', 'public', { mesaId, chairId: chair.chairId, network: input.network, address: input.address.trim() });
-    return { message: this.challengeMessage(mesa, chair, chair.firstName ?? 'participante', input.address.trim(), input.network, nonce, expiresAt), nonce, expiresAt };
+    await this.d.store.insertNonce({ value: nonce, kind: 'challenge', dealId: null, revision: null, role: chair.role, subject: JSON.stringify({ k: 'mesa-reenter', mesaId, chairId: chair.chairId, network, address }), issuedAt: t, expiresAt, consumedAt: null });
+    void this.audit('mesa.reentrada.desafio', 'public', { mesaId, chairId: chair.chairId, network, address });
+    return { message: this.challengeMessage(mesa, chair, chair.firstName ?? 'participante', address, network, nonce, expiresAt), nonce, expiresAt, network, address };
   }
 
   async reenterMesa(mesaId: string, input: { network: AuthNetwork; address: string; nonce: string; signature: string }): Promise<{ token: string; mesaId: string; chairId: string; role: MesaChairRole }> {
@@ -466,6 +479,30 @@ export class MesaService {
 
   private shortAddr(a: string): string { return a.length > 12 ? `${a.slice(0, 7)}…${a.slice(-3)}` : a; }
 
+  /** Resumo canônico de uma operação (deal) para a UI — mesma forma na mesa, na lista e no deep link. */
+  private dealSummary(deal: Deal | null): Record<string, unknown> | null {
+    if (!deal) return null;
+    return {
+      id: deal.id, state: deal.state, createdAt: deal.createdAt,
+      requiredSignatures: deal.requiredSignatures, validSignatures: deal.validSignatures,
+      turnRole: deal.turnRole ?? null, turnExpiresAt: deal.turnExpiresAt ?? null, expiresAt: deal.expiresAt,
+      assetIn: deal.draft?.assetIn?.code ?? null, assetOut: deal.draft?.assetOut?.code ?? null, amountInBase: deal.draft?.amountInBase ?? null,
+      signed: deal.signatures.filter(s => s.status === 'valid' && s.revision === deal.revision).map(s => s.role),
+    };
+  }
+
+  /** Resumo de UMA operação específica da mesa (deep link /mesa?mesa=&op=). Verifica que a operação
+   *  pertence à mesa; autoriza participante (sessão da própria mesa) ou admin (dono). Só dados públicos. */
+  async mesaDealSummary(mesaId: string, dealId: string, _viewer: { kind: 'admin' } | { kind: 'participant'; chairId: string }): Promise<{ deal: Record<string, unknown> | null; irreversible: boolean }> {
+    const mesa = this.mesaById(mesaId);
+    if (!mesa) throw new DomainError('INVALID_INPUT', 'Mesa não encontrada.');
+    const belongs = mesa.dealId === dealId || (mesa.dealIds ?? []).includes(dealId);
+    if (!belongs) throw new DomainError('INVALID_INPUT', 'Operação não pertence a esta mesa.');
+    const deal = await this.d.getDeal(dealId);
+    if (!deal) throw new DomainError('INVALID_INPUT', 'Operação não encontrada.');
+    return { deal: this.dealSummary(deal), irreversible: this.isIrreversible(deal) };
+  }
+
   async mesaViewFor(mesa: MesaRecord, viewer: { kind: 'admin' } | { kind: 'participant'; chairId: string }): Promise<Record<string, unknown>> {
     const now = this.now();
     const invites = await this.d.store.listMesaInvites(mesa.mesaId);
@@ -478,12 +515,16 @@ export class MesaService {
       approvedAt: mesa.approvedAt ?? null, termsHash: mesa.termsHash ?? null,
       // Trava de irrevogabilidade exposta ao frontend: canCancel=false → UI remove "Cancelar mesa".
       irreversible: this.isIrreversible(deal), canCancel: !mesa.cancelled && !this.isIrreversible(deal),
-      deal: deal ? { id: deal.id, state: deal.state, requiredSignatures: deal.requiredSignatures, validSignatures: deal.validSignatures, turnRole: deal.turnRole ?? null, turnExpiresAt: deal.turnExpiresAt ?? null, expiresAt: deal.expiresAt, signed: deal.signatures.filter(s => s.status === 'valid' && s.revision === deal.revision).map(s => s.role) } : null,
+      deal: this.dealSummary(deal),
     };
     if (viewer.kind === 'admin') {
       const invByChair = new Map(invites.filter(i => i.status === 'PENDING' && i.expiresAt > now).map(i => [i.chairId, i]));
+      // Todas as operações desta mesa (ativa + histórico, mais recentes primeiro) — cada uma tem link próprio.
+      const dealIds = [...new Set([...(mesa.dealIds ?? []), ...(mesa.dealId ? [mesa.dealId] : [])])].reverse();
+      const dealsFull = await Promise.all(dealIds.map(id => this.d.getDeal(id).catch(() => null)));
+      const deals = dealsFull.filter((d): d is Deal => !!d).map(d => ({ ...this.dealSummary(d)!, active: d.id === mesa.dealId }));
       return {
-        ...base, label: mesa.label ?? null, config: mesa.config ?? null, approvals: mesa.approvals,
+        ...base, label: mesa.label ?? null, config: mesa.config ?? null, approvals: mesa.approvals, deals,
         chairs: mesa.chairs.map(c => ({
           chairId: c.chairId, role: c.role, roleLabel: CHAIR_ROLE_LABEL[c.role], label: c.label ?? null,
           expectedAsset: c.expectedAsset, firstName: c.firstName ?? null, connectedAt: c.connectedAt ?? null,

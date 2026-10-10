@@ -332,6 +332,12 @@ export async function buildApi(deps: ApiDeps): Promise<FastifyInstance> {
   app.post('/v1/portal/alerts/read', async req => { deps.portal.markAlertsRead(portalToken(req)); return { ok: true }; });
   app.post('/v1/portal/wallet/connect', async req => { const b = parse(z.object({ address: z.string().min(8).max(120), network: z.string().min(2).max(40), addresses: WalletAddressesZ }), req.body); return deps.portal.connectWallet(portalToken(req), b); });
   app.post('/v1/portal/wallet/disconnect', async req => { deps.portal.disconnectWallet(portalToken(req)); return { ok: true }; });
+  // Aba "Carteiras": conecta/lista/desconecta as carteiras dos 4 papéis na CONTA — reusadas para
+  // preencher as cadeiras ao criar a mesa (sem convite). Posse real provada na assinatura.
+  const SlotRoleZ = z.enum(['SELLER', 'BUYER', 'PAYMASTER_1', 'PAYMASTER_2']);
+  app.get('/v1/portal/desk-wallets', async req => ({ wallets: deps.portal.listDeskWallets(portalToken(req)) }));
+  app.post('/v1/portal/desk-wallets/connect', async req => { const b = parse(z.object({ role: SlotRoleZ, address: z.string().min(8).max(120), network: z.string().min(2).max(40), addresses: WalletAddressesZ, name: z.string().max(30).optional() }), req.body); return { wallets: deps.portal.connectDeskWallet(portalToken(req), b) }; });
+  app.post('/v1/portal/desk-wallets/disconnect', async req => { const b = parse(z.object({ role: SlotRoleZ }), req.body); return { wallets: deps.portal.disconnectDeskWallet(portalToken(req), b.role) }; });
   app.post('/v1/portal/mesa/code', async (req, reply) => { const r = deps.portal.generateCode(portalToken(req)); void reply.code(201); return r; });
   app.get('/v1/portal/mesa/code', async req => ({ code: deps.portal.currentCode(portalToken(req)) }));
   app.get('/v1/portal/mesa/code/:code', async req => { const { code } = req.params as { code: string }; const r = deps.portal.resolveCode(code); if (!r) throw new DomainError('INVALID_INPUT', 'Código inválido ou expirado'); return r; });
@@ -354,7 +360,7 @@ export async function buildApi(deps: ApiDeps): Promise<FastifyInstance> {
       id: d.id, state: d.state, createdAt: d.createdAt, amountInBase: d.draft?.amountInBase ?? null, requiredSignatures: d.requiredSignatures, validSignatures: d.validSignatures,
       turnRole: d.turnRole ?? null, turnExpiresAt: d.turnExpiresAt ?? null, expiresAt: d.expiresAt,
       signed: d.signatures.filter(s => s.status === 'valid' && s.revision === d.revision).map(s => s.role),
-      participants: d.participants.map(p => ({ role: p.role, address: p.address })),
+      participants: d.participants.map(p => ({ role: p.role, address: p.address, network: p.network })),
       settlementMode: ev ? 'evm' as const : 'local' as const,
       demo: !!(deps.dev?.demo && d.participants.some(p => deps.dev!.demo!.addresses.has(p.address))),
       escrowContract: legs[0]?.escrowContract ?? null, escrowChainId: ev?.chainId ?? null, explorerBase: ev?.explorerBase ?? null,
@@ -839,7 +845,7 @@ export async function buildApi(deps: ApiDeps): Promise<FastifyInstance> {
   // por assinatura; devolve um token de participante novo (o antigo expira em 24h).
   app.post('/v1/mesas/:mesaId/reenter/challenge', async (req, reply) => {
     const { mesaId } = req.params as { mesaId: string };
-    const b = parse(z.object({ network: AuthNetZ, address: z.string().min(8).max(120) }), req.body);
+    const b = parse(z.object({ network: AuthNetZ, address: z.string().min(8).max(120), addresses: WalletAddressesZ }), req.body);
     const r = await deps.mesa.reenterChallenge(mesaId, { ...b, network: b.network as AuthNetwork });
     void reply.code(201); return r;
   });
@@ -893,6 +899,18 @@ export async function buildApi(deps: ApiDeps): Promise<FastifyInstance> {
     }
     const { mesa } = adminMesa(req, mesaId, false);
     return balancePreCheck(mesa);
+  });
+  // Operação ESPECÍFICA da mesa (deep link /mesa?mesa=&op=): resumo somente-leitura de um deal do
+  // histórico/ativo. Participante da própria mesa OU admin dono. Verifica que o deal pertence à mesa.
+  app.get('/v1/mesas/:mesaId/deal/:dealId', async req => {
+    const { mesaId, dealId } = req.params as { mesaId: string; dealId: string };
+    const mesaClaim = req.session?.mesa;
+    if (mesaClaim && mesaClaim.mesaId === mesaId) {
+      if (!deps.mesa.mesaById(mesaId)) throw new DomainError('INVALID_INPUT', 'Mesa não encontrada');
+      return deps.mesa.mesaDealSummary(mesaId, dealId, { kind: 'participant', chairId: mesaClaim.chairId });
+    }
+    const { mesa } = adminMesa(req, mesaId, false);
+    return deps.mesa.mesaDealSummary(mesa.mesaId, dealId, { kind: 'admin' });
   });
   // Participante tenta editar a configuração → 403 (a edição é exclusiva do admin).
   app.patch('/v1/mesas/:mesaId/config', async req => {

@@ -688,6 +688,7 @@ img,svg,canvas,video{max-width:100%}
 
     <nav class="nav">
       <a href="#" class="active" data-view="carteiras"><svg viewBox="0 0 24 24"><rect x="3" y="6" width="18" height="13" rx="2"/><path d="M16 12h2M3 10h18"/></svg>ABRIR MESA</a>
+      <a href="#" data-view="wallets"><svg viewBox="0 0 24 24"><rect x="2" y="5" width="20" height="14" rx="2"/><path d="M16 12h.01M2 10h20"/></svg>Carteiras</a>
       <a href="#" data-view="operacao"><svg viewBox="0 0 24 24"><rect x="4" y="4" width="16" height="16" rx="2"/><path d="M8 9h8M8 13h5"/></svg>Operações</a>
       <a href="#" data-view="seguranca"><svg viewBox="0 0 24 24"><path d="M12 3l7 3v5c0 5-3 8-7 10-4-2-7-5-7-10V6z"/><path d="M9 12l2 2 4-4"/></svg>Segurança</a>
       <a href="#" data-view="config"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3.2"/><path d="M19 12a7 7 0 00-.1-1.3l2-1.5-2-3.4-2.3 1a7 7 0 00-2.2-1.3L14 3h-4l-.4 2.5a7 7 0 00-2.2 1.3l-2.3-1-2 3.4 2 1.5A7 7 0 005 12c0 .4 0 .9.1 1.3l-2 1.5 2 3.4 2.3-1a7 7 0 002.2 1.3L10 21h4l.4-2.5a7 7 0 002.2-1.3l2.3 1 2-3.4-2-1.5c.1-.4.1-.9.1-1.3z"/></svg>Configurações</a>
@@ -967,6 +968,10 @@ img,svg,canvas,video{max-width:100%}
           <div class="fh" id="m3dPlan" style="flex-basis:100%;color:var(--blue)"></div>
         </div>
         <div class="op-parts" id="m3dChairs"></div>
+        <div id="m3dOpsWrap" style="display:none;margin-top:14px">
+          <div class="card-h" style="margin-bottom:6px"><div class="t" style="font-size:13.5px">Operações desta mesa <span style="color:var(--ink-3);font-weight:400">· cada uma tem link próprio</span></div></div>
+          <div id="m3dOps" class="op-deal-list"></div>
+        </div>
         <div class="grid" style="grid-template-columns:1fr 1fr;margin-top:14px">
           <div>
             <div class="card-h" style="margin-bottom:6px"><div class="t" style="font-size:13.5px">Configuração da operação</div></div>
@@ -1046,6 +1051,17 @@ img,svg,canvas,video{max-width:100%}
         <div class="ph-actions"><span class="badge info" id="mesaCount">—</span></div>
       </div>
       <div class="vgrid wide" id="mesaSlots">
+        <section class="card"><div class="state" style="padding:8px 0"><div class="spin" style="width:22px;height:22px;border:2px solid rgba(255,255,255,.25);border-top-color:#fff;border-radius:50%;animation:sp .7s linear infinite;margin:0 auto"></div></div></section>
+      </div>
+    </section>
+
+    <!-- ===================== VIEW: CARTEIRAS (pré-conexão das 4 carteiras da conta) ===================== -->
+    <section class="view" id="view-wallets">
+      <div class="page-head">
+        <div><h1>Carteiras</h1><p>Conecte aqui as carteiras dos papéis. Ao criar uma mesa, as cadeiras já vêm preenchidas com estas carteiras — sem convites. A posse é provada quando cada um assina a operação.</p></div>
+        <div class="ph-actions"><span class="badge info" id="wCount">0 conectadas</span></div>
+      </div>
+      <div class="vgrid wide" id="wSlots">
         <section class="card"><div class="state" style="padding:8px 0"><div class="spin" style="width:22px;height:22px;border:2px solid rgba(255,255,255,.25);border-top-color:#fff;border-radius:50%;animation:sp .7s linear infinite;margin:0 auto"></div></div></section>
       </div>
     </section>
@@ -1171,6 +1187,47 @@ img,svg,canvas,video{max-width:100%}
   $$('[data-toast]').forEach(el=>el.addEventListener('click',()=>toast(el.dataset.toast,'info')));
 
   // nav — troca de view por aba
+  // ── Aba "Carteiras": conecta as carteiras dos 4 papéis NA CONTA (reusadas ao criar a mesa) ──
+  const W_ROLES=[['SELLER','Vendedor'],['BUYER','Comprador'],['PAYMASTER_1','Pay Master 1'],['PAYMASTER_2','Pay Master 2']];
+  let wCache={};
+  async function walletsRefresh(){ if(!getTok()) return; try{ const r=await pmApi('/v1/portal/desk-wallets'); wCache=(r&&r.wallets)||{}; renderWallets(); }catch(e){} }
+  function renderWallets(){
+    const box=$('#wSlots'); if(!box) return;
+    const n=W_ROLES.filter(([r])=>wCache[r]).length;
+    const cc=$('#wCount'); if(cc) cc.textContent=n+' conectada'+(n===1?'':'s');
+    box.innerHTML=W_ROLES.map(([role,label])=>{
+      const w=wCache[role]; const link=w&&w.link;
+      const head='<div class="card-h"><div class="t">'+label+'</div>'+(link?'<span class="badge ok">✓ Conectada</span>':'<span class="badge wait">Não conectada</span>')+'</div>';
+      let body;
+      if(link){
+        const nets=(link.addresses&&link.addresses.length)?link.addresses.length:1;
+        body='<div style="font-size:13px;color:var(--ink-2)">'+(w.name?esc(w.name)+' · ':'')+'<span class="mono">'+esc(shortAddr(link.address))+'</span></div>'
+          +'<div style="font-size:12px;color:var(--ink-3);margin-top:3px">Rede: '+esc(link.network)+(nets>1?(' · multichain ('+nets+' redes)'):'')+'</div>'
+          +'<div style="margin-top:10px"><button class="btn btn-danger" data-wdisc="'+role+'" style="height:34px">Desconectar</button></div>';
+      } else {
+        body='<div style="font-size:12.5px;color:var(--ink-3)">Conecte a Verum Wallet deste papel — pode ser a sua (você operando) ou a da pessoa.</div>'
+          +'<div style="margin-top:10px"><input class="inp" data-wname="'+role+'" placeholder="Nome (opcional)" maxlength="30" style="height:38px;margin-bottom:8px"><button class="btn btn-primary" data-wconn="'+role+'" style="height:38px;width:100%">Conectar Verum Wallet</button></div>';
+      }
+      return '<section class="card">'+head+body+'</section>';
+    }).join('');
+    box.querySelectorAll('[data-wconn]').forEach(b=>b.addEventListener('click',()=>wConnect(b.dataset.wconn)));
+    box.querySelectorAll('[data-wdisc]').forEach(b=>b.addEventListener('click',()=>wDisconnect(b.dataset.wdisc)));
+  }
+  async function wConnect(role){
+    const nameEl=document.querySelector('[data-wname="'+role+'"]'); const name=nameEl?nameEl.value.trim():'';
+    const btn=document.querySelector('[data-wconn="'+role+'"]'); if(btn){ btn.disabled=true; btn.textContent='Conectando…'; }
+    try{
+      let w; try{ w=await connectWallet('solana'); }catch(ex){ if(ex&&ex.code==='NO_WALLET'){ toast('Abrindo o OTC dentro da Verum Wallet…','info'); openInVerumBrowser(); return; } throw ex; }
+      const addresses=await collectVerumAddresses(w.address).catch(()=>[]);
+      await pmApi('/v1/portal/desk-wallets/connect',{method:'POST',body:{role,address:w.address,network:'solana',addresses,name:name||undefined}});
+      toast('Carteira conectada — ela vai preencher a cadeira na próxima mesa','ok');
+      walletsRefresh();
+    }catch(e){ toast(e.message||'Falha ao conectar','err'); if(btn){ btn.disabled=false; btn.textContent='Conectar Verum Wallet'; } }
+  }
+  async function wDisconnect(role){
+    if(!confirm('Desconectar a carteira deste papel?')) return;
+    try{ await pmApi('/v1/portal/desk-wallets/disconnect',{method:'POST',body:{role}}); walletsRefresh(); }catch(e){ toast(e.message||'Falha ao desconectar','err'); }
+  }
   function showView(view){
     const target=document.getElementById('view-'+view);
     if(!target) return;
@@ -1181,6 +1238,7 @@ img,svg,canvas,video{max-width:100%}
     window.scrollTo(0,0);
     // A aba "Operações" abre direto a negociação com os dados salvos da mesa.
     if(view==='operacao'){ try{ updateDraft(); refreshMesaDeals(); renderDealList(opDealsCache,opDeal&&opDeal.id); opRenderInfo(); if(typeof m3LoadList==='function') m3LoadList(); }catch(e){} }
+    if(view==='wallets'){ try{ walletsRefresh(); }catch(e){} }
   }
   // ── Sidebar responsiva (mobile): gaveta aberta pelo hambúrguer ──────────────
   function setNav(open){
@@ -1977,13 +2035,17 @@ img,svg,canvas,video{max-width:100%}
   const B58='123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz';
   function b58encode(bytes){ let x=0n; for(const b of bytes) x=x*256n+BigInt(b); let out=''; while(x>0n){ out=B58[Number(x%58n)]+out; x/=58n; } let z=0; for(const b of bytes){ if(b===0) z++; else break; } return '1'.repeat(z)+(out||''); }
   async function solSignMessage(prov,message){ const enc=new TextEncoder().encode(message); const res=await prov.signMessage(enc,'utf8'); const sig=(res&&res.signature)?res.signature:res; return b58encode(sig instanceof Uint8Array?sig:new Uint8Array(sig)); }
+  // Família de auth suportada no backend p/ uma chainKey (igual ao authNetworkFor do servidor).
+  const AUTH_EVM_KEYS=['ethereum','bsc','polygon','arbitrum','base','avalanche','cronos','optimism'];
+  function authNetFor(net){ if(net==='bitcoin') return 'bitcoin'; if(net==='tron') return 'tron'; if(AUTH_EVM_KEYS.indexOf(net)>=0) return 'ethereum'; return 'solana'; }
   // Sessão de carteira (challenge → assina → verify) só para assinar a operação. Token separado do portal.
-  async function walletSession(prov,address){
-    const ch=await (await fetch(API+'/v1/auth/challenge?network=solana&address='+encodeURIComponent(address))).json();
+  // net-aware: assina o desafio no padrão da família (Solana/EVM/Tron/BTC) via pReenterSign.
+  async function walletSession(net,address){
+    const ch=await (await fetch(API+'/v1/auth/challenge?network='+encodeURIComponent(net)+'&address='+encodeURIComponent(address))).json();
     if(!ch||!ch.message||!ch.nonce) throw new Error('Desafio de autenticação indisponível');
     const issuedAt=(ch.message.match(/Emitido em: (.+)/)||[])[1]; const expiresAt=(ch.message.match(/Expira em: (.+)/)||[])[1];
-    const signature=await solSignMessage(prov,ch.message);
-    const v=await (await fetch(API+'/v1/auth/verify',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({network:'solana',address,nonce:ch.nonce,signature,issuedAt,expiresAt})})).json();
+    const signature=await pReenterSign(net,address,ch.message);
+    const v=await (await fetch(API+'/v1/auth/verify',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({network:net,address,nonce:ch.nonce,signature,issuedAt,expiresAt})})).json();
     if(!v||!v.token) throw new Error((v&&(v.message||v.error))||'Falha na autenticação da carteira');
     return v.token;
   }
@@ -2007,34 +2069,43 @@ img,svg,canvas,video{max-width:100%}
         toast('Assinatura registrada · '+(OP_STEP_LABEL[d.turnRole]||d.turnRole)+(all?' · todas assinadas! Liquidando no contrato…':''),'ok');
         refreshMesaDeal(); return;
       }
-      const prov=solProvider(); if(!prov) throw new Error('Verum Wallet (Solana) não encontrada nesta aba');
-      __dbg('signTurn connect'); const r=await prov.connect(); const address=(r&&r.publicKey?r.publicKey:prov.publicKey).toString();
-      if(turn && address!==turn.address) throw new Error('Carteira conectada ('+shortAddr(address)+') não é a do papel da vez: '+OP_STEP_LABEL[d.turnRole]+' ('+shortAddr(turn.address)+')');
-      const wtok=await walletSession(prov,address); const auth={authorization:'Bearer '+wtok};
-      // ── Passo ON-CHAIN (escrow canônico): a Verum Wallet assina a PRÓPRIA transação do contrato
-      // (seller_sign deposita o principal; buyer_sign idem; PMs só avançam o estado). Só depois o
-      // aval da mesa é registrado — o backend detecta o passo já feito e não tenta reassinar.
+      // Família de auth/assinatura do papel da vez (Solana/EVM/Tron/BTC). Conecta a carteira
+      // CERTA e obtém o endereço que DEVE bater com o do papel.
+      const net=authNetFor((turn&&turn.network)||'solana');
+      let address;
+      if(net==='solana'){ const prov=solProvider(); if(!prov) throw new Error('Verum Wallet (Solana) não encontrada nesta aba'); __dbg('signTurn connect'); const r=await prov.connect(); address=(r&&r.publicKey?r.publicKey:prov.publicKey).toString(); }
+      else if(net==='ethereum'){ const p=await findVerumEthProvider(); if(!p) throw new Error('Provider EVM da Verum Wallet não injetado nesta aba.'); const accs=await p.request({method:'eth_requestAccounts'}); address=accs&&accs[0]; }
+      else { const prov=solProvider(); if(prov){ try{ await prov.connect(); }catch(e){} } const list=await collectVerumAddresses(prov&&prov.publicKey?String(prov.publicKey):'',net).catch(()=>[]); const hit=(list||[]).find(a=>authNetFor(a.network)===net); address=hit&&hit.address; if(!address) throw new Error('A Verum Wallet não expôs endereço '+net+' para este papel.'); }
+      if(turn && String(address).toLowerCase()!==String(turn.address).toLowerCase()) throw new Error('Carteira conectada ('+shortAddr(address)+') não é a do papel da vez: '+OP_STEP_LABEL[d.turnRole]+' ('+shortAddr(turn.address)+')');
+      const wtok=await walletSession(net,address); const auth={authorization:'Bearer '+wtok};
+      // ── Passo ON-CHAIN (escrow canônico): a Verum Wallet assina a PRÓPRIA transação do contrato.
+      // Só depois o aval da mesa é registrado — o backend detecta o passo já feito e não reassina.
       const stepRes=await fetch(API+'/v1/deals/'+d.id+'/onchain-tx',{headers:auth});
       if(stepRes.ok){
         const step=await stepRes.json();
         if(step&&step.kind==='solana'&&step.transactionBase64){
+          const prov=solProvider();
           if(btn) btn.textContent='Confirme na Verum Wallet…';
           const raw=Uint8Array.from(atob(step.transactionBase64),c=>c.charCodeAt(0));
-          if(typeof prov.signTransaction!=='function') throw new Error('Esta versão da Verum Wallet não assina transações — atualize o app');
+          if(!prov||typeof prov.signTransaction!=='function') throw new Error('Esta versão da Verum Wallet não assina transações — atualize o app');
           const signed=await prov.signTransaction(raw);
           const toB64=(x)=>{ if(typeof x==='string') return x; const u=x instanceof Uint8Array?x:(x&&typeof x.serialize==='function'?x.serialize():Uint8Array.from(x)); let s=''; for(const b of u) s+=String.fromCharCode(b); return btoa(s); };
           if(btn) btn.textContent='Enviando à rede…';
           const bc=await fetch(API+'/v1/deals/'+d.id+'/onchain-tx',{method:'POST',headers:{...auth,'content-type':'application/json','idempotency-key':d.id+':'+d.turnRole+':onchain'},body:JSON.stringify({signedTransactionBase64:toB64(signed)})});
           const bo=await bc.json().catch(()=>({})); if(!bc.ok) throw new Error(bo.message||bo.error||('Transação on-chain rejeitada ('+bc.status+')'));
           toast('Transação confirmada on-chain · '+(bo.txHash?shortAddr(bo.txHash):''),'ok');
-        } else if(step&&step.kind&&step.kind!=='done'&&step.kind!=='solana'){
-          throw new Error('Esta rede ('+step.kind+') exige carteira EVM/Tron para o passo on-chain');
+        } else if(step&&step.kind==='evm'){
+          if(btn) btn.textContent='Confirme na Verum Wallet…';
+          await evmOnchainStep(step, body=>fetch(API+'/v1/deals/'+d.id+'/onchain-tx',{method:'POST',headers:{...auth,'content-type':'application/json','idempotency-key':d.id+':'+d.turnRole+':onchain'},body:JSON.stringify(body)}).then(x=>x.json()));
+        } else if(step&&step.kind&&step.kind!=='done'&&step.kind!=='solana'&&step.kind!=='evm'){
+          throw new Error('Esta rede ('+step.kind+') ainda não suporta o passo on-chain pela carteira nesta tela');
         }
       } // 400 = rede simulada/keyring dev: o backend cuida do passo on-chain sozinho
       if(btn) btn.textContent='Registrando aval…';
       const env=await (await fetch(API+'/v1/deals/'+d.id+'/approval-envelope',{headers:auth})).json();
       if(!env||!env.message||!env.payload) throw new Error((env&&(env.message||env.error))||'Envelope indisponível');
-      const signature=await solSignMessage(prov,env.message);
+      // Aval da mesa no esquema da rede (Solana ed25519 / EVM EIP-712 / Tron TIP-191 / BTC BIP-137).
+      const signature=await pSignEnvelope(env);
       const res=await fetch(API+'/v1/deals/'+d.id+'/approvals',{method:'POST',headers:{...auth,'content-type':'application/json','idempotency-key':d.id+':'+d.turnRole+':'+env.payload.nonce},body:JSON.stringify({role:d.turnRole,signature,nonce:env.payload.nonce})});
       const out=await res.json().catch(()=>({})); if(!res.ok) throw new Error(out.message||out.error||('Assinatura rejeitada ('+res.status+')'));
       toast('Assinatura registrada · '+OP_STEP_LABEL[d.turnRole]+(out.state==='SETTLEMENT_VALIDATION'?' · todas assinadas!':''),'ok');
@@ -2474,6 +2545,22 @@ img,svg,canvas,video{max-width:100%}
     const ttl=$('#m3dTtl'); if(ttl) ttl.textContent='Mesa expira em '+fmtCountdown(m3Cache.expiresAt).replace(' restantes','');
     const tt=$('#m3dTurn'); if(tt){ const d=m3Cache.deal; if(d&&d.turnExpiresAt&&d.state==='AWAITING_SIGNATURES'){ tt.style.display=''; tt.textContent='Assinatura: '+fmtCountdown(d.turnExpiresAt).replace(' restantes',''); } else tt.style.display='none'; }
   }
+  // Lista de operações da mesa v3 (ativa + histórico) com link por operação (/mesa?mesa=&op=<dealId>).
+  function renderM3Ops(deals){
+    const wrap=$('#m3dOpsWrap'), box=$('#m3dOps'); if(!box) return;
+    if(!deals||!deals.length){ if(wrap) wrap.style.display='none'; box.innerHTML=''; return; }
+    if(wrap) wrap.style.display='';
+    box.innerHTML=deals.map(d=>{
+      const pair=(d.assetIn||'—')+' → '+(d.assetOut||'—');
+      const dt=d.createdAt?new Date(d.createdAt).toLocaleString('pt-BR',{day:'2-digit',month:'2-digit',hour:'2-digit',minute:'2-digit'}):'';
+      const turn=(d.state==='AWAITING_SIGNATURES'&&d.turnRole)?(' · vez: '+(M3_ROLE[d.turnRole]||d.turnRole)):'';
+      const active=d.active?'<span style="font-size:10.5px;color:var(--blue);font-weight:700;margin-left:6px">ativa</span>':'';
+      return '<div class="op-deal-card" style="cursor:default">'
+        +'<div><div class="dpair">'+esc(pair)+active+'</div><div class="did">'+esc(d.id)+'</div><div class="dmeta">'+esc(dt)+' · '+(d.validSignatures||0)+'/'+(d.requiredSignatures||0)+' assinaturas'+esc(turn)+'</div></div>'
+        +'<div class="dright">'+opStateBadge(d.state)+'<button class="btn" data-m3-oplink="'+esc(d.id)+'" style="height:30px;font-size:11.5px;margin-top:6px"><svg viewBox="0 0 24 24" style="width:13px;height:13px;stroke:currentColor;fill:none;stroke-width:2"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V5a2 2 0 012-2h8"/></svg>Copiar link</button></div></div>';
+    }).join('');
+    box.querySelectorAll('[data-m3-oplink]').forEach(b=>b.addEventListener('click',e=>{ e.stopPropagation(); const url=location.origin+'/mesa?mesa='+encodeURIComponent(m3Sel)+'&op='+encodeURIComponent(b.dataset.m3Oplink); clip(url); toast('Link da operação copiado — abre direto nesta operação','ok'); }));
+  }
   async function m3Refresh(){
     if(!m3Sel) return;
     try{
@@ -2497,6 +2584,8 @@ img,svg,canvas,video{max-width:100%}
       // para voltarem à operação quando quiserem (sessão lembrada ou reconexão da carteira).
       const opLink=location.origin+'/mesa?mesa='+encodeURIComponent(m3Sel);
       const opBtn=$('#m3dOpLink'); if(opBtn){ opBtn.onclick=()=>{ clip(opLink); toast('Link da operação copiado — envie aos participantes','ok'); }; }
+      // Lista de operações (ativa + histórico), cada uma com link próprio /mesa?mesa=&op=<dealId>.
+      renderM3Ops(m.deals||[]);
       $('#m3dOpCode').textContent=m.operationCode?('Operação '+m.operationCode):'';
       $('#m3dPlan').textContent=m.settlement?('Liquidação: '+m.settlement.summary):'';
       // Config em valores humanos: converte unidades base/bps usando os decimais das cadeiras.
@@ -2662,6 +2751,9 @@ img,svg,canvas,video{max-width:100%}
 
   /* ================= MODO PARTICIPANTE (mesa v3) ================= */
   const P_MESA=(new URLSearchParams(location.search)).get('mesa')||'';
+  // Deep link de operação específica (/mesa?mesa=&op=<dealId>): quando presente, a visão abre NESSA
+  // operação (histórico/ativa) em vez da ativa da mesa. Somente leitura, exceto se for a vez do papel.
+  const P_OP=(new URLSearchParams(location.search)).get('op')||'';
   let P_TOK='';
   (function(){ try{ const m=/[#&]pt=([^&]+)/.exec(location.hash); if(m){ P_TOK=decodeURIComponent(m[1]); try{ sessionStorage.setItem('verum_mesa_pt_'+P_MESA,P_TOK); localStorage.setItem('verum_mesa_pt_'+P_MESA,P_TOK); }catch(e){} history.replaceState(null,'',location.pathname+location.search); } if(!P_TOK&&P_MESA){ try{ P_TOK=sessionStorage.getItem('verum_mesa_pt_'+P_MESA)||localStorage.getItem('verum_mesa_pt_'+P_MESA)||''; }catch(e){} } }catch(e){} })();
   const P_ON=!!(P_MESA&&P_TOK);
@@ -2728,6 +2820,11 @@ img,svg,canvas,video{max-width:100%}
     if(pReentering) return;
     try{
       pDto=await pApi('/v1/mesas/'+encodeURIComponent(P_MESA));
+      // Deep link: troca a operação exibida pela pedida no ?op= (se pertencer à mesa). Best-effort —
+      // se falhar/não pertencer, mantém a ativa.
+      if(P_OP && pDto && (!pDto.deal || pDto.deal.id!==P_OP)){
+        try{ const r=await pApi('/v1/mesas/'+encodeURIComponent(P_MESA)+'/deal/'+encodeURIComponent(P_OP)); if(r&&r.deal){ pDto.deal=r.deal; if(r.irreversible!=null) pDto.irreversible=r.irreversible; } }catch(e){}
+      }
       if(Date.now()-pBalAt>15000){ pBalAt=Date.now(); pApi('/v1/mesas/'+encodeURIComponent(P_MESA)+'/precheck').then(b=>{ pBal=b; pRender(); }).catch(()=>{}); }
       pRender(); pTick();
     }catch(e){ if(e.status===401||e.status===403){ try{ sessionStorage.removeItem('verum_mesa_pt_'+P_MESA); localStorage.removeItem('verum_mesa_pt_'+P_MESA); }catch(x){} P_TOK=''; pReentry('Sessão expirada — reconecte para continuar vendo a operação.'); } }
@@ -2768,12 +2865,28 @@ img,svg,canvas,video{max-width:100%}
       const payload={ types:{ EIP712Domain:[{name:'name',type:'string'},{name:'version',type:'string'},{name:'chainId',type:'uint256'},{name:'verifyingContract',type:'address'}], ...td.types }, domain:td.domain, primaryType:td.primaryType, message:td.message };
       return p.request({ method:'eth_signTypedData_v4', params:[addr, JSON.stringify(payload)] });
     }
-    if(env.network==='bitcoin'){
-      const w=window; const u=w.unisat||(w.verum&&w.verum.bitcoin)||null;
-      if(!u||!u.signMessage) throw new Error('A Verum Wallet desta aba não expõe assinatura Bitcoin (BIP-137). Atualize a carteira.');
-      return u.signMessage(env.message,'ecdsa');
+    if(env.network==='bitcoin'||env.network==='tron'){
+      // Superfície ÚNICA da Verum (multichain): BIP-137 (bitcoin) / TIP-191 (tron) via
+      // signPersonalMessage — mesma assinatura que o SignatureEngine verifica no submit.
+      // Sem dependência de UniSat/TronLink: tudo pela carteira já conectada.
+      const chainKey=env.network==='bitcoin'?'bitcoin':'tron';
+      const prov=solProvider(); if(!prov) throw new Error('Abra esta mesa dentro da Verum Wallet para assinar.');
+      if(typeof prov.signPersonalMessage!=='function') throw new Error('Esta Verum Wallet não expõe assinatura '+(env.network==='bitcoin'?'Bitcoin (BIP-137)':'Tron (TIP-191)')+'. Atualize a carteira.');
+      try{ await prov.connect(); }catch(e){}
+      const r=await prov.signPersonalMessage(chainKey,env.message);
+      const sig=(r&&r.signature!==undefined)?r.signature:r;
+      if(!sig) throw new Error('A Verum Wallet não devolveu a assinatura '+chainKey+'.');
+      return sig;
     }
     throw new Error('Rede de assinatura não suportada nesta tela: '+env.network);
+  }
+  // Assinatura da REENTRADA no esquema da família resolvida pelo backend (mesma superfície Verum:
+  // Solana ed25519 / EVM EIP-191 / Tron TIP-191 / BTC BIP-137).
+  async function pReenterSign(net,address,message){
+    if(net==='solana'){ const p=solProvider(); if(!p) throw new Error('Verum Wallet não detectada.'); return solSignMessage(p,message); }
+    if(net==='ethereum'){ const p=await findVerumEthProvider(); if(!p) throw new Error('Provider EVM da Verum Wallet não injetado nesta aba.'); try{ await p.request({method:'eth_requestAccounts'}); }catch(e){} return p.request({method:'personal_sign',params:[message,address]}); }
+    if(net==='bitcoin'||net==='tron'){ const p=solProvider(); if(!p||typeof p.signPersonalMessage!=='function') throw new Error('Esta Verum Wallet não expõe assinatura '+net+'. Atualize a carteira.'); try{ await p.connect(); }catch(e){} const rr=await p.signPersonalMessage(net,message); const sig=(rr&&rr.signature!==undefined)?rr.signature:rr; if(!sig) throw new Error('A Verum Wallet não devolveu a assinatura '+net+'.'); return sig; }
+    throw new Error('Rede de reentrada não suportada: '+net);
   }
   async function pSign(){
     const btn=$('#pRvSign'); if(btn){ btn.disabled=true; btn.textContent='Assinando na Verum Wallet…'; }
@@ -2820,15 +2933,19 @@ img,svg,canvas,video{max-width:100%}
       try{
         const prov=solProvider(); if(!prov) throw new Error('Verum Wallet não detectada nesta aba.');
         const r=await prov.connect(); const pk=(r&&r.publicKey)?r.publicKey:prov.publicKey;
-        const address=(pk&&pk.toBase58)?pk.toBase58():(pk?String(pk):'');
-        if(!address||address.indexOf('[object')>=0) throw new Error('Não foi possível ler o endereço da carteira.');
+        const solAddr=(pk&&pk.toBase58)?pk.toBase58():(pk?String(pk):'');
+        if(!solAddr||solAddr.indexOf('[object')>=0) throw new Error('Não foi possível ler o endereço da carteira.');
         btn.textContent='Gerando autorização…';
-        const chR=await fetch(API+'/v1/mesas/'+encodeURIComponent(P_MESA)+'/reenter/challenge',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({network:'solana',address})});
+        // Identifica a cadeira por QUALQUER endereço multichain; o backend responde a FAMÍLIA da rede
+        // da mesa e o endereço PRIMÁRIO a assinar (o mesmo que assina as deals).
+        const addresses=await collectVerumAddresses(solAddr).catch(()=>[]);
+        const chR=await fetch(API+'/v1/mesas/'+encodeURIComponent(P_MESA)+'/reenter/challenge',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({network:'solana',address:solAddr,addresses})});
         const ch=await chR.json(); if(!chR.ok) throw new Error(ch.message||'Esta carteira não pertence a esta mesa.');
+        const net=ch.network||'solana'; const signAddr=ch.address||solAddr;
         btn.textContent='Deslize para assinar…';
-        const signature=await solSignMessage(prov,ch.message);
+        const signature=await pReenterSign(net,signAddr,ch.message);
         btn.textContent='Entrando…';
-        const reR=await fetch(API+'/v1/mesas/'+encodeURIComponent(P_MESA)+'/reenter',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({network:'solana',address,nonce:ch.nonce,signature})});
+        const reR=await fetch(API+'/v1/mesas/'+encodeURIComponent(P_MESA)+'/reenter',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({network:net,address:signAddr,nonce:ch.nonce,signature})});
         const re=await reR.json(); if(!reR.ok) throw new Error(re.message||'Falha ao reentrar.');
         P_TOK=re.token;
         try{ sessionStorage.setItem('verum_mesa_pt_'+P_MESA,P_TOK); localStorage.setItem('verum_mesa_pt_'+P_MESA,P_TOK); }catch(e){}

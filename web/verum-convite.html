@@ -90,11 +90,11 @@ h1{font-size:22px;margin-bottom:8px}
                  BUYER:{label:'Comprador',cls:'r-buy',ico:'<path d="M4 21V8l8-5 8 5v13"/><path d="M9 21v-6h6v6"/>'},
                  PAYMASTER_2:{label:'Pay Master 2',cls:'r-pm2',ico:'<circle cx="9" cy="8" r="3"/><path d="M3.5 19a5.5 5.5 0 0111 0M17 7a2.5 2.5 0 010 5"/>'} };
   const NETLABEL = { multichain:'Multichain (Verum)', ethereum:'Ethereum', solana:'Solana', bitcoin:'Bitcoin', bsc:'BNB Smart Chain', polygon:'Polygon', tron:'Tron', arbitrum:'Arbitrum One', base:'Base', avalanche:'Avalanche C-Chain', cronos:'Cronos EVM', optimism:'Optimism', xrp:'XRP Ledger', zcash:'Zcash', ton:'TON', aptos:'Aptos', near:'NEAR', algorand:'Algorand', stellar:'Stellar' };
-  // Assinatura só funciona p/ solana/ethereum/bitcoin no backend. Verum é Solana
-  // por baixo e o getAddresses traz todas as redes — então mapeamos a rede
-  // escolhida para uma auth suportada (EVM→ethereum, bitcoin→bitcoin, resto→solana).
+  // Mapeia a rede escolhida p/ a FAMÍLIA de auth suportada no backend
+  // (authNetworkFor): bitcoin→bitcoin, tron→tron, EVM→ethereum, resto→solana.
+  // A Verum assina cada família no seu padrão (Ed25519 / EIP-191|712 / TIP-191 / BIP-137).
   const EVM_KEYS=['ethereum','bsc','polygon','arbitrum','base','avalanche','cronos','optimism'];
-  function authNetFor(net){ if(net==='bitcoin') return 'bitcoin'; if(EVM_KEYS.indexOf(net)>=0) return 'ethereum'; return 'solana'; }
+  function authNetFor(net){ if(net==='bitcoin') return 'bitcoin'; if(net==='tron') return 'tron'; if(EVM_KEYS.indexOf(net)>=0) return 'ethereum'; return 'solana'; }
 
   function toast(msg,type){ const el=document.createElement('div'); el.className='toast '+(type||''); el.textContent=msg; $('#toasts').appendChild(el); setTimeout(()=>{el.style.opacity='0';el.style.transition='opacity .3s';setTimeout(()=>el.remove(),300);},3200); }
 
@@ -285,14 +285,32 @@ h1{font-size:22px;margin-bottom:8px}
       if(!pk) throw walletErr('Não foi possível ler o endereço da carteira Solana','NO_WALLET');
       return {address:pk.toString(),network};
     }
-    if(network==='bitcoin'){ if(!w.unisat) throw walletErr('Carteira Bitcoin (Unisat) não encontrada','NO_WALLET'); const [address]=await w.unisat.requestAccounts(); return {address,network}; }
+    if(network==='bitcoin'||network==='tron'){
+      // Endereço vem da PRÓPRIA Verum (getAddresses), não de UniSat/TronLink.
+      const p=solProvider(); if(!p) throw walletErr('Carteira Verum Wallet não encontrada','NO_WALLET');
+      try{ await p.connect(); }catch(e){}
+      if(typeof p.getAddresses!=='function') throw walletErr('Esta Verum Wallet não expõe endereços multichain. Atualize a carteira.','NO_WALLET');
+      const r=await p.getAddresses(); const list=(r&&Array.isArray(r.addresses))?r.addresses:[];
+      const hit=list.find(a=>a&&a.network===network&&a.address);
+      if(!hit) throw walletErr('A Verum Wallet não tem endereço '+network+' disponível.','NO_WALLET');
+      return {address:hit.address,network};
+    }
     throw walletErr('Rede não suportada','NO_WALLET');
   }
   async function signMessage(network,address,message){
     const w=window;
     if(network==='ethereum'){ const p=ethProvider||w.ethereum; if(!p) throw walletErr('Verum Wallet (EVM) não encontrada','NO_WALLET'); return p.request({method:'personal_sign',params:[message,address]}); }
     if(network==='solana'){ const p=solProvider(); if(!p) throw walletErr('Carteira Verum Wallet não encontrada','NO_WALLET'); return signSolana(p,message,address); }
-    if(network==='bitcoin') return w.unisat.signMessage(message,'ecdsa');
+    if(network==='bitcoin'||network==='tron'){
+      // Superfície ÚNICA da Verum: BIP-137 (bitcoin) / TIP-191 (tron) via signPersonalMessage —
+      // mesmo esquema que o backend verifica. Sem UniSat/TronLink.
+      const p=solProvider(); if(!p) throw walletErr('Carteira Verum Wallet não encontrada','NO_WALLET');
+      if(typeof p.signPersonalMessage!=='function') throw walletErr('Esta Verum Wallet não expõe assinatura '+(network==='bitcoin'?'Bitcoin (BIP-137)':'Tron (TIP-191)')+'. Atualize a carteira.','NO_WALLET');
+      const r=await withTimeout(p.signPersonalMessage(network,message),120000,'signPersonalMessage '+network);
+      const sig=(r&&r.signature!==undefined)?r.signature:r;
+      if(!sig) throw walletErr('A Verum Wallet não devolveu a assinatura '+network+'.','BAD_SIG_SHAPE');
+      return sig;
+    }
     throw walletErr('Rede não suportada','NO_WALLET');
   }
 
@@ -461,22 +479,36 @@ h1{font-size:22px;margin-bottom:8px}
     // Celular sem provider injetado → abre ESTE convite dentro do navegador da Verum (síncrono no clique).
     if(!verumProvider()){ toast('Abrindo na Verum Wallet…'); openInVerumBrowser(); return; }
     try{
+      // Rede de auth da cadeira (mapeada da rede da mesa): a prova de posse e a assinatura
+      // usam o padrão da família — Solana (Ed25519), EVM (EIP-191), Tron (TIP-191), BTC (BIP-137).
+      const net=authNetFor(v3Info.network);
       v3Busy(true,'Conectando Verum Wallet…');
       const prov=verumProvider();
-      const r=await prov.connect();
-      const pk=(r&&r.publicKey)?r.publicKey:prov.publicKey;
-      if(!pk) throw new Error('Não foi possível ler o endereço da Verum Wallet');
-      const address=normalizeSolAddress(pk);
+      let address, signAt;
+      if(net==='solana'){
+        const r=await prov.connect();
+        window.__verumConnectAddresses=(r&&Array.isArray(r.addresses)&&r.addresses.length)?r.addresses:null;
+        const pk=(r&&r.publicKey)?r.publicKey:prov.publicKey;
+        if(!pk) throw new Error('Não foi possível ler o endereço da Verum Wallet');
+        address=normalizeSolAddress(pk);
+        // A assinatura Solana é capturada do canal CRU da carteira (signSolana): o provider nativo
+        // não a entrega no retorno da Promise do signMessage.
+        signAt=(msg)=>signSolana(prov,msg,address);
+      } else {
+        // EVM/Tron/Bitcoin: endereço e assinatura vêm da PRÓPRIA Verum (connectWallet + signMessage).
+        const w=await connectWallet(net);
+        address=w.address;
+        signAt=(msg)=>signMessage(net,address,msg);
+      }
       v3Busy(true,'Gerando autorização…');
-      const ch=await api('/v1/mesa-invites/'+encodeURIComponent(V3.inviteId)+'/challenge',{method:'POST',body:{code,firstName:name,network:'solana',address}});
-      // O usuário DESLIZA para assinar na Verum Wallet — é a prova de posse. A assinatura é
-      // capturada do canal cru da carteira (signSolana), pois o provider nativo não a entrega no
-      // retorno da Promise. slice(0,30): o backend rejeita a lista inteira acima de 50 itens.
+      const ch=await api('/v1/mesa-invites/'+encodeURIComponent(V3.inviteId)+'/challenge',{method:'POST',body:{code,firstName:name,network:net,address}});
+      // O usuário DESLIZA/aprova para assinar na Verum Wallet — é a prova de posse.
+      // slice(0,30): o backend rejeita a lista inteira acima de 50 itens.
       v3Busy(true,'Deslize para assinar na Verum Wallet…');
-      const signature=await signSolana(prov,ch.message,address);
+      const signature=await signAt(ch.message);
       v3Busy(true,'Confirmando posse…');
       const addresses=(await collectVerumAddresses()).slice(0,30);
-      const join=await api('/v1/mesa-invites/'+encodeURIComponent(V3.inviteId)+'/join',{method:'POST',body:{code,firstName:name,network:'solana',address,nonce:ch.nonce,signature,addresses}});
+      const join=await api('/v1/mesa-invites/'+encodeURIComponent(V3.inviteId)+'/join',{method:'POST',body:{code,firstName:name,network:net,address,nonce:ch.nonce,signature,addresses}});
       // Redireciona DIRETO para a operação (visão do participante, somente leitura). Guarda o token
       // também em sessionStorage p/ a mesa recuperá-lo mesmo se o fragmento #pt se perder.
       const dest='/mesa?mesa='+encodeURIComponent(join.mesaId)+'#pt='+encodeURIComponent(join.token);

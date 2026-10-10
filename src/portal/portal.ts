@@ -33,7 +33,7 @@ export interface DeskSecurity {
 }
 export type SecurityAlertType = 'new_wallet' | '2fa_enabled' | '2fa_disabled' | 'idle_logout';
 export interface SecurityAlert { id: string; type: SecurityAlertType; at: number; message: string; read: boolean }
-export interface PayMaster { id: string; name: string; email: string; org: string; salt: string; passHash: string; createdAt: number; wallet: WalletLink | null; mesaDealId?: string | null; mesaDealIds?: string[]; security?: DeskSecurity; knownWallets?: string[]; alerts?: SecurityAlert[]; demo?: boolean }
+export interface PayMaster { id: string; name: string; email: string; org: string; salt: string; passHash: string; createdAt: number; wallet: WalletLink | null; mesaDealId?: string | null; mesaDealIds?: string[]; security?: DeskSecurity; knownWallets?: string[]; alerts?: SecurityAlert[]; demo?: boolean; /** Carteiras pré-conectadas na conta (aba Carteiras), por papel — reusadas para preencher as cadeiras ao criar a mesa. */ deskWallets?: Partial<Record<SlotRole, { name?: string; link: WalletLink }>> }
 export interface PortalSession { token: string; payMasterId: string; createdAt: number; expiresAt: number; lastSeenAt: number }
 export interface MesaCode { code: string; uid: string; payMasterId: string; createdAt: number; expiresAt: number }
 
@@ -209,6 +209,43 @@ export class PortalService {
     this.noteWallet(pm, pm.wallet, 'Pay Master 1');
     this.write();
     return pm.wallet;
+  }
+
+  /** Conecta a carteira de um PAPEL na conta (aba Carteiras) — usada para preencher a cadeira ao criar
+   *  a mesa, sem convite. A posse real continua sendo provada na ASSINATURA da operação. */
+  connectDeskWallet(token: string | undefined, input: { role: SlotRole; address: string; network: string; addresses?: WalletAddress[]; name?: string }): Partial<Record<SlotRole, { name?: string; link: WalletLink }>> {
+    const s = this.session(token);
+    const pm = this.pm(s.payMasterId);
+    const address = input.address.trim();
+    if (address.length < 8 || address.length > 120) throw new DomainError('INVALID_INPUT', 'Endereço de carteira inválido');
+    const link = this.walletLink(address, input.network, input.addresses);
+    const name = input.name?.trim() ? input.name.trim().slice(0, 30) : undefined;
+    pm.deskWallets = { ...(pm.deskWallets ?? {}), [input.role]: { name, link } };
+    if (input.role === 'PAYMASTER_1') pm.wallet = link; // PM1 é o próprio admin — mantém pm.wallet em sincronia
+    this.noteWallet(pm, link, input.role);
+    this.write();
+    return this.listDeskWallets(token);
+  }
+  disconnectDeskWallet(token: string | undefined, role: SlotRole): Partial<Record<SlotRole, { name?: string; link: WalletLink }>> {
+    const s = this.session(token);
+    const pm = this.pm(s.payMasterId);
+    const next = { ...(pm.deskWallets ?? {}) }; delete next[role];
+    pm.deskWallets = next;
+    if (role === 'PAYMASTER_1') pm.wallet = null;
+    this.write();
+    return this.listDeskWallets(token);
+  }
+  listDeskWallets(token: string | undefined): Partial<Record<SlotRole, { name?: string; link: WalletLink }>> {
+    const s = this.session(token);
+    const pm = this.pm(s.payMasterId);
+    const out: Partial<Record<SlotRole, { name?: string; link: WalletLink }>> = { ...(pm.deskWallets ?? {}) };
+    if (pm.wallet && !out['PAYMASTER_1']) out['PAYMASTER_1'] = { link: pm.wallet }; // compat: PM1 conectado pelo fluxo antigo
+    return out;
+  }
+  /** Leitura p/ o MesaService: carteira pré-conectada de um papel (ou null). */
+  deskWalletFor(pm: PayMaster, role: SlotRole): { name?: string; link: WalletLink } | null {
+    if (role === 'PAYMASTER_1') return pm.deskWallets?.['PAYMASTER_1'] ?? (pm.wallet ? { link: pm.wallet } : null);
+    return pm.deskWallets?.[role] ?? null;
   }
 
   /** Higieniza e deduplica os endereços multichain; marca multichain se >1 rede. Público: reutilizado pelo MesaService. */
