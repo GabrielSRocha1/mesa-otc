@@ -974,6 +974,15 @@ img,svg,canvas,video{max-width:100%}
           <div class="fh" id="m3dPlan" style="flex-basis:100%;color:var(--blue)"></div>
         </div>
         <div class="op-parts" id="m3dChairs"></div>
+        <!-- Esteira de assinaturas (layout rico da aba Operações, com dados reais da mesa) -->
+        <section id="m3dEsteiraWrap" style="display:none;margin-top:14px;padding:14px;border:1px solid var(--line);border-radius:12px;background:var(--bg-2)">
+          <div class="op-ms-head">
+            <div class="op-ic"><svg viewBox="0 0 24 24" style="width:22px;height:22px;stroke:currentColor;fill:none;stroke-width:2"><path d="M12 3l7 3v5c0 5-3 8-7 10-4-2-7-5-7-10V6z"/><path d="M9 12l2 2 4-4"/></svg></div>
+            <div><div class="st" style="font-family:var(--f-head);font-weight:700;font-size:15px">Assinaturas Multisig</div><div class="ss" style="font-size:12px;color:var(--ink-3)">Vendedor → Pay Master 1 → Pay Master 2 → Comprador · 5 min por vez</div></div>
+            <div class="op-ms-prog"><span id="m3dSigTxt" style="font-size:12px;color:var(--ink-2)">—</span><div class="op-bar"><span id="m3dSigBar" style="width:0%"></span></div><b id="m3dSigPct" style="font-size:12.5px">0%</b></div>
+          </div>
+          <div class="op-steps" id="m3dEsteira" style="margin-top:12px"></div>
+        </section>
         <div id="m3dOpsWrap" style="display:none;margin-top:14px">
           <div class="card-h" style="margin-bottom:6px"><div class="t" style="font-size:13.5px">Operações desta mesa <span style="color:var(--ink-3);font-weight:400">· cada uma tem link próprio</span></div></div>
           <div id="m3dOps" class="op-deal-list"></div>
@@ -2565,6 +2574,32 @@ img,svg,canvas,video{max-width:100%}
     box.querySelectorAll('[data-m3-oplink]').forEach(b=>b.addEventListener('click',e=>{ e.stopPropagation(); const url=location.origin+'/mesa?mesa='+encodeURIComponent(m3Sel)+'&op='+encodeURIComponent(b.dataset.m3Oplink); clip(url); toast('Link de visualização copiado — abre direto nesta operação (somente leitura)','ok'); }));
     box.querySelectorAll('[data-m3-opdel]').forEach(b=>b.addEventListener('click',async e=>{ e.stopPropagation(); if(!confirm('Excluir esta operação? Ela sai da lista da mesa.')) return; try{ await pmApi('/v1/portal/mesas/'+encodeURIComponent(m3Sel)+'/deals/'+encodeURIComponent(b.dataset.m3Opdel)+'/delete',{method:'POST',body:{}}); toast('Operação excluída','ok'); m3Refresh(); }catch(err){ toast(err.message||'Falha ao excluir','err'); } }));
   }
+  // Esteira de assinaturas do detalhe da mesa (layout rico da aba Operações) com dados REAIS.
+  function m3RenderEsteira(m){
+    const wrap=$('#m3dEsteiraWrap'), steps=$('#m3dEsteira'); if(!steps) return;
+    const d=m&&m.deal;
+    if(!d){ if(wrap) wrap.style.display='none'; steps.innerHTML=''; return; }
+    if(wrap) wrap.style.display='';
+    const order=OP_SIGN_ORDER.filter(r=>(m.chairs||[]).some(c=>c.role===r));
+    const signed=new Set(d.signed||[]);
+    const addrOf=r=>{ const c=(m.chairs||[]).find(x=>x.role===r); const a=c&&c.wallet&&(c.wallet.address||c.wallet); return a?shortAddr(a):''; };
+    let sCls='lock', sMeta='Aguardando as assinaturas';
+    if(['FULLY_SIGNED','SETTLEMENT_VALIDATION'].includes(d.state)){ sCls='turn'; sMeta='Validando liquidação…'; }
+    else if(d.state==='SETTLING'){ sCls='turn'; sMeta='Executando no contrato…'; }
+    else if(d.state==='SETTLED'){ sCls='done'; sMeta='Liquidada no contrato'; }
+    else if(['BLOCKED','REFUNDING','REFUNDED','EXPIRED','CANCELLED'].includes(d.state)){ sMeta='Não liquidada ('+d.state+')'; }
+    const settleStep='<div class="op-step '+sCls+'"><div class="line"></div><div class="dot">'+OP_DOT[sCls]+'</div><div class="nm">Liquidação via contrato</div><div class="meta">'+esc(sMeta)+'</div><div class="addr2"></div></div>';
+    steps.innerHTML=order.map((r,i)=>{
+      const isSigned=signed.has(r), isTurn=d.turnRole===r; const cls=isSigned?'done':isTurn?'turn':'lock';
+      const meta=isSigned?'Assinado':isTurn?'Sua vez de assinar':('Aguardando '+(OP_STEP_LABEL[order[i-1]]||'anterior'));
+      const chip=(isTurn&&d.turnExpiresAt)?'<div class="op-turn-chip" data-turn-exp="'+d.turnExpiresAt+'"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 8v4l2 2"/></svg><span class="op-turn-cd">'+fmtCountdown(d.turnExpiresAt)+'</span></div>':'';
+      return '<div class="op-step '+cls+'"><div class="line"></div><div class="dot">'+OP_DOT[cls]+'</div><div class="nm">'+esc(OP_STEP_LABEL[r]||r)+'</div><div class="meta">'+esc(meta)+'</div>'+chip+'<div class="addr2">'+esc(addrOf(r))+'</div></div>';
+    }).join('')+settleStep;
+    const req=d.requiredSignatures||order.length, val=d.validSignatures||0, pct=req?Math.round(val/req*100):0;
+    if($('#m3dSigTxt')) $('#m3dSigTxt').textContent=val+' de '+req+' assinaturas';
+    if($('#m3dSigBar')) $('#m3dSigBar').style.width=pct+'%';
+    if($('#m3dSigPct')) $('#m3dSigPct').textContent=pct+'%';
+  }
   async function m3Refresh(){
     if(!m3Sel) return;
     try{
@@ -2578,9 +2613,12 @@ img,svg,canvas,video{max-width:100%}
         const conn=!!c.wallet;
         const inviteBtn=(!conn&&c.role!=='PAYMASTER_1')?'<button class="btn" data-m3-inv="'+esc(c.chairId)+'" style="height:34px;font-size:12.5px;margin-top:8px">Convidar participante</button>':'';
         const revoke=(conn&&!m.approvedAt&&c.role!=='PAYMASTER_1')?'<button class="btn" data-m3-rvk="'+esc(c.chairId)+'" style="height:30px;font-size:11.5px;margin-top:6px;border-color:var(--red);color:#fecaca">Revogar conexão</button>':'';
+        // Badge de assinatura (quando há operação): ✓ Assinou / Vez de assinar / Conectado.
+        const dd=m.deal; let sigBadge='';
+        if(conn&&dd){ if((dd.signed||[]).includes(c.role)) sigBadge='<span class="badge ok" style="margin-top:6px;display:inline-block">✓ Assinou</span>'; else if(dd.state==='AWAITING_SIGNATURES'&&dd.turnRole===c.role) sigBadge='<span class="badge wait" style="margin-top:6px;display:inline-block">→ Vez de assinar</span>'; else sigBadge='<span class="badge info" style="margin-top:6px;display:inline-block">Aguardando</span>'; }
         return '<div class="op-part"><div class="nm">'+esc(M3_ROLE[c.role]||c.role)+(c.label?' <span style="color:var(--ink-3);font-weight:400;font-size:11.5px">· '+esc(c.label)+'</span>':'')+'</div>'
           +'<div style="font-size:12.5px;color:var(--ink-2)">'+(conn?('✓ '+esc(c.firstName||'')+' · <span class="mono">'+esc(shortAddr(c.wallet.address))+'</span>'):(c.invite?'Convite enviado — aguardando conexão':'Aguardando convite'))+'</div>'
-          +'<div style="font-size:12px;color:var(--ink-3)">Ativo: '+esc(c.expectedAsset.symbol)+'</div>'+inviteBtn+revoke+'</div>';
+          +'<div style="font-size:12px;color:var(--ink-3)">Ativo: '+esc(c.expectedAsset.symbol)+'</div>'+(sigBadge?('<div>'+sigBadge+'</div>'):'')+inviteBtn+revoke+'</div>';
       }).join('');
       chairs.querySelectorAll('[data-m3-inv]').forEach(b=>b.addEventListener('click',()=>m3Invite(b.dataset.m3Inv)));
       chairs.querySelectorAll('[data-m3-rvk]').forEach(b=>b.addEventListener('click',async()=>{ if(!confirm('Revogar a conexão desta cadeira? O participante precisará de um novo convite.')) return; try{ await pmApi('/v1/portal/mesas/'+m3Sel+'/chairs/'+b.dataset.m3Rvk+'/revoke',{method:'POST',body:{}}); m3Refresh(); }catch(e){ toast(e.message,'err'); } }));
@@ -2588,7 +2626,8 @@ img,svg,canvas,video{max-width:100%}
       // para voltarem à operação quando quiserem (sessão lembrada ou reconexão da carteira).
       const opLink=location.origin+'/mesa?mesa='+encodeURIComponent(m3Sel);
       const opBtn=$('#m3dOpLink'); if(opBtn){ opBtn.onclick=()=>{ clip(opLink); toast('Link de visualização copiado — envie aos participantes (somente leitura)','ok'); }; }
-      // Lista de operações (ativa + histórico), cada uma com link próprio /mesa?mesa=&op=<dealId>.
+      // Esteira de assinaturas (layout rico) + lista de operações, com dados reais.
+      m3RenderEsteira(m);
       renderM3Ops(m.deals||[]);
       $('#m3dOpCode').textContent=m.operationCode?('Operação '+m.operationCode):'';
       $('#m3dPlan').textContent=m.settlement?('Liquidação: '+m.settlement.summary):'';
