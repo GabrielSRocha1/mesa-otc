@@ -687,7 +687,8 @@ img,svg,canvas,video{max-width:100%}
     </div>
 
     <nav class="nav">
-      <a href="#" class="active" data-view="carteiras"><svg viewBox="0 0 24 24"><rect x="4" y="4" width="16" height="16" rx="2"/><path d="M8 9h8M8 13h5"/></svg>Operações</a>
+      <a href="#" class="active" data-view="carteiras"><svg viewBox="0 0 24 24"><rect x="3" y="6" width="18" height="13" rx="2"/><path d="M16 12h2M3 10h18"/></svg>ABRIR MESA</a>
+      <a href="#" data-view="operacao"><svg viewBox="0 0 24 24"><rect x="4" y="4" width="16" height="16" rx="2"/><path d="M8 9h8M8 13h5"/></svg>Operações</a>
       <a href="#" data-view="seguranca"><svg viewBox="0 0 24 24"><path d="M12 3l7 3v5c0 5-3 8-7 10-4-2-7-5-7-10V6z"/><path d="M9 12l2 2 4-4"/></svg>Segurança</a>
       <a href="#" data-view="config"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3.2"/><path d="M19 12a7 7 0 00-.1-1.3l2-1.5-2-3.4-2.3 1a7 7 0 00-2.2-1.3L14 3h-4l-.4 2.5a7 7 0 00-2.2 1.3l-2.3-1-2 3.4 2 1.5A7 7 0 005 12c0 .4 0 .9.1 1.3l-2 1.5 2 3.4 2.3-1a7 7 0 002.2 1.3L10 21h4l.4-2.5a7 7 0 002.2-1.3l2.3 1 2-3.4-2-1.5c.1-.4.1-.9.1-1.3z"/></svg>Configurações</a>
     </nav>
@@ -739,10 +740,163 @@ img,svg,canvas,video{max-width:100%}
 
     <!-- ===================== VIEW: NOVA OPERAÇÃO ===================== -->
     <!-- ===================== VIEW: OPERAÇÕES (Negociação OTC — dados salvos da mesa) ===================== -->
+    <section class="view" id="view-operacao">
+      <div class="op-head">
+        <div class="titw"><h1>Operações</h1><p>Dados salvos da mesa criada: carteiras, taxas e detalhes da negociação.</p></div>
+        <div class="op-status">
+          <span class="op-badge run"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 8v4l2 2"/></svg>Em andamento</span>
+          <span class="op-exp">Expira em <b style="color:var(--ink-2)">00:45:32</b></span>
+        </div>
+      </div>
+
+      <!-- Mesas v3: lista com badges, filtro e busca -->
+      <section class="card" id="m3OpsCard" style="display:none;margin-bottom:16px">
+        <div class="card-h"><div class="t"><svg viewBox="0 0 24 24" style="width:17px;height:17px;stroke:var(--blue);fill:none;stroke-width:2;vertical-align:-3px;margin-right:6px"><rect x="3" y="6" width="18" height="13" rx="2"/><path d="M16 12h2M3 10h18"/></svg>Mesas</div>
+          <div style="display:flex;gap:8px;align-items:center">
+            <input class="inp" id="m3OpsSearch" placeholder="Buscar por código…" style="height:34px;width:170px;font-size:12.5px">
+            <select class="inp" id="m3OpsFilter" style="height:34px;width:170px;font-size:12.5px">
+              <option value="">Todos os status</option>
+              <option value="ACTIVE">Ativa</option><option value="WAITING_CONNECTIONS">Aguardando conexões</option>
+              <option value="WAITING_SIGNATURES">Aguardando assinaturas</option><option value="SIGNING">Assinatura em andamento</option>
+              <option value="COMPLETED">Concluída</option><option value="EXPIRED">Expirada</option>
+              <option value="CANCELLED">Cancelada</option><option value="FAILED">Falha</option>
+            </select>
+          </div>
+        </div>
+        <div class="tbl-wrap"><table class="tbl">
+          <thead><tr><th>Código</th><th>Participantes</th><th>Valor</th><th>Status</th><th></th></tr></thead>
+          <tbody id="m3OpsRows"></tbody>
+        </table></div>
+      </section>
+
+      <!-- Todas as operações (ativa + histórico) de todas as mesas — cada uma com link de visualização -->
+      <section class="card" id="opAllCard" style="display:none;margin-bottom:16px">
+        <div class="card-h"><div class="t"><svg viewBox="0 0 24 24" style="width:17px;height:17px;stroke:var(--blue);fill:none;stroke-width:2;vertical-align:-3px;margin-right:6px"><rect x="4" y="4" width="16" height="16" rx="2"/><path d="M8 9h8M8 13h5"/></svg>Todas as operações</div><span class="badge info" id="opAllCount">0</span></div>
+        <div class="op-deal-list" id="opAllList"></div>
+      </section>
+
+      <div class="op-layout">
+        <div class="op-main">
+          <!-- Participantes -->
+          <div class="op-parts" id="opParts">
+            <div class="op-part">
+              <div class="ph"><div class="op-coin" style="background:var(--btc)">₿</div><div><div class="nm">Vendedor <span class="op-tag">BTC</span></div><div class="addr">bc1qxy2kg…9f3a</div></div></div>
+              <div class="foot"><div><div class="bal">0.8421 BTC</div><div class="usd">≈ $54,320.12</div></div><span class="op-conn"><i></i>Conectado</span></div>
+            </div>
+            <div class="op-part">
+              <div class="ph"><div class="op-coin" style="background:linear-gradient(135deg,#9945FF,#14F195)">◎</div><div><div class="nm">Comprador <span class="op-tag">SOL</span></div><div class="addr">7xK9…91Ac</div></div></div>
+              <div class="foot"><div><div class="bal">12.5324 SOL</div><div class="usd">≈ $2,487.65</div></div><span class="op-conn"><i></i>Conectado</span></div>
+            </div>
+            <div class="op-part">
+              <div class="ph"><div class="op-coin" style="background:#627eea">◆</div><div><div class="nm">Pay Master 1 <span class="op-tag">ETH</span></div><div class="addr">0x82a…A91F</div></div></div>
+              <div class="foot"><div><div class="bal">3.2500 ETH</div><div class="usd">≈ $9,842.17</div></div><span class="op-conn"><i></i>Conectado</span></div>
+            </div>
+            <div class="op-part">
+              <div class="ph"><div class="op-coin" style="background:#8a63d2">◆</div><div><div class="nm">Pay Master 2 <span class="op-tag">ETH</span></div><div class="addr">9H2q…P81D</div></div></div>
+              <div class="foot"><div><div class="bal">2.7800 ETH</div><div class="usd">≈ $8,410.32</div></div><span class="op-conn"><i></i>Conectado</span></div>
+            </div>
+          </div>
+
+          <!-- Comprador / Vendedor -->
+          <div class="op-flow">
+            <section class="op-side op-deliver">
+              <div class="sh"><div class="op-ic"><svg viewBox="0 0 24 24"><path d="M12 3v18M17 8l-5-5-5 5"/></svg></div><div><div class="st">Comprador</div><div class="ss">Toque no token para trocar o ativo</div></div><div class="tokfield" id="opDelField" style="margin-left:auto"></div></div>
+              <div class="op-assetbox"><div class="op-coin" id="opDelIcon" style="background:var(--btc)">₿</div><div><div class="nm" id="opDelSym">BTC</div><div class="usd" style="font-size:12px;color:var(--ink-3)" id="opDelName">Bitcoin</div></div><div class="amt" style="flex:1"><input class="op-amt-in" id="opDelAmt" value="500" inputmode="decimal" spellcheck="false"><div class="sub" id="opDelUsd">≈ $0.00</div></div></div>
+              <div id="opDelAvail" style="display:flex;justify-content:space-between;align-items:center;font-size:11.5px;color:var(--ink-3);margin:-6px 0 12px"><span id="opDelAvailTxt">Disponível: —</span><button type="button" id="opDelMax" class="op-tag" style="border:1px solid var(--line-2);cursor:pointer;background:var(--panel-3)">Máx</button></div>
+              <div class="op-rows" id="opDelRows">
+                <div class="row"><span class="k">Preço de referência (USD)</span><span class="v" id="opDelPrice">—</span></div>
+                <div class="row"><span class="k" id="opDelDescLbl">Deságio</span><span class="v" id="opDelDesc">—</span></div>
+                <div class="row"><span class="k">Valor líquido (USD)</span><span class="v" id="opDelNet">—</span></div>
+              </div>
+            </section>
+            <div class="op-swap" id="opSwap" title="Inverter comprador e vendedor"><svg viewBox="0 0 24 24"><path d="M7 10l-3 3 3 3M4 13h11M17 14l3-3-3-3M20 11H9"/></svg></div>
+            <section class="op-side op-receive">
+              <div class="sh"><div class="op-ic"><svg viewBox="0 0 24 24"><circle cx="9" cy="8" r="3"/><path d="M3.5 19a5.5 5.5 0 0111 0M17 7a2.5 2.5 0 010 5"/></svg></div><div><div class="st">Vendedor</div><div class="ss">Toque no token para trocar o ativo</div></div><div class="tokfield" id="opRecvField" style="margin-left:auto"></div></div>
+              <div class="op-assetbox"><div class="op-coin" id="opRecvIcon" style="background:var(--usdt)">₮</div><div><div class="nm" id="opRecvSym">USDT</div><div class="usd" style="font-size:12px;color:var(--ink-3)" id="opRecvName">Tether (Solana)</div></div><div class="amt" style="flex:1"><div class="big" id="opRecvAmt">0,00 USDT</div><div class="sub" id="opRecvUsd">≈ $0.00</div></div></div>
+              <div class="op-rows" id="opRecvRows">
+                <div class="row" id="opNetRow"><span class="k">Rede</span><span class="v"><select class="op-sel" id="opRecvNet"></select></span></div>
+                <div class="row"><span class="k">Taxa de rede (estimada)</span><span class="v" id="opRecvFee">$12,50</span></div>
+                <div class="row"><span class="k">Valor líquido</span><span class="v" id="opRecvNetVal">—</span></div>
+                <div class="row"><span class="k">Endereço de destino</span><span class="v copy" id="opRecvDest" data-copy="" style="cursor:pointer">—</span></div>
+              </div>
+            </section>
+          </div>
+
+          <!-- Assinaturas Multisig -->
+          <section class="card">
+            <div class="op-ms-head">
+              <div class="op-ic"><svg viewBox="0 0 24 24" style="width:22px;height:22px;stroke:currentColor;fill:none;stroke-width:2"><path d="M12 3l7 3v5c0 5-3 8-7 10-4-2-7-5-7-10V6z"/><path d="M9 12l2 2 4-4"/></svg></div>
+              <div><div class="st" style="font-family:var(--f-head);font-weight:700;font-size:16px">Assinaturas Multisig</div><div class="ss" style="font-size:12px;color:var(--ink-3)">Assinatura sequencial: Vendedor → Pay Master 1 → Pay Master 2 → Comprador. Cada participante tem 5 minutos na sua vez.</div></div>
+              <div class="op-ms-prog"><span id="opSigTxt" style="font-size:12px;color:var(--ink-2)">— assinaturas</span><div class="op-bar"><span id="opSigBar" style="width:0%"></span></div><b id="opSigPct" style="font-size:12.5px">0%</b></div>
+            </div>
+            <div style="display:flex;flex-wrap:wrap;align-items:center;gap:12px;margin:2px 0 14px;padding:11px 13px;border:1px solid var(--line);border-radius:11px;background:var(--bg-2)">
+              <div style="flex:1;font-size:12.5px;color:var(--ink-3)" id="opDealStatus">Nenhuma operação ativa na mesa. Conecte as 4 carteiras e inicie.</div>
+              <button class="btn btn-primary" id="opStartDeal" type="button" style="height:38px"><svg viewBox="0 0 24 24"><path d="M4 12h13M11 6l6 6-6 6"/></svg>Iniciar operação</button>
+              <button class="btn btn-primary" id="opSignTurn" type="button" style="height:38px;display:none"><svg viewBox="0 0 24 24"><path d="M4 20h4l10-10-4-4L4 16v4z"/><path d="M13.5 6.5l4 4"/></svg>Assinar minha vez</button>
+              <button class="btn" id="opNewDeal" type="button" style="height:38px;display:none"><svg viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg>Criar nova operação</button>
+              <button class="btn" id="opShareDeal" type="button" style="height:38px;display:none" title="Link somente-leitura desta operação"><svg viewBox="0 0 24 24"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V5a2 2 0 012-2h8"/></svg>Copiar link de visualização</button>
+            </div>
+            <div class="op-steps" id="opSteps">
+              <div class="op-step done"><div class="line"></div><div class="dot"><svg viewBox="0 0 24 24"><path d="M5 13l4 4L19 7"/></svg></div><div class="nm">Vendedor</div><div class="meta">Assinado em 12/05/2025 14:21</div><div class="addr2">bc1qxy2kg…9f3a</div></div>
+              <div class="op-step turn"><div class="line"></div><div class="dot"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 8v4l2 2"/></svg></div><div class="nm">Pay Master 1</div><div class="meta">Sua vez de assinar</div><div class="op-turn-chip"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 8v4l2 2"/></svg>4m58s restantes</div><div class="addr2">0x82a…A91F</div></div>
+              <div class="op-step lock"><div class="line"></div><div class="dot"><svg viewBox="0 0 24 24"><rect x="5" y="11" width="14" height="9" rx="2"/><path d="M8 11V8a4 4 0 018 0v3"/></svg></div><div class="nm">Pay Master 2</div><div class="meta">Aguardando Pay Master 1</div><div class="addr2">9H2q…P81D</div></div>
+              <div class="op-step lock"><div class="line"></div><div class="dot"><svg viewBox="0 0 24 24"><rect x="5" y="11" width="14" height="9" rx="2"/><path d="M8 11V8a4 4 0 018 0v3"/></svg></div><div class="nm">Comprador</div><div class="meta">Aguardando Pay Master 2</div><div class="addr2">7xK9…91Ac</div></div>
+            </div>
+          </section>
+
+          <!-- Contrato de liquidação (modo EVM): escrow real + transferências BTC→Vendedor / USDT→Comprador -->
+          <section class="card" id="opContractCard" style="display:none">
+            <div class="card-h"><div class="t"><svg viewBox="0 0 24 24" style="width:17px;height:17px;stroke:var(--blue);fill:none;stroke-width:2;vertical-align:-3px;margin-right:6px"><path d="M9 12h6M9 8h6M9 16h3"/><rect x="4" y="3" width="16" height="18" rx="2"/></svg>Contrato de liquidação</div><span class="badge info" id="opCtrChain">EVM</span></div>
+            <div class="kv" id="opCtrRows"></div>
+          </section>
+        </div>
+
+        <!-- Aside: Resumo -->
+        <aside class="op-aside">
+          <section class="card">
+            <div class="card-h"><div class="t"><svg viewBox="0 0 24 24" style="width:17px;height:17px;stroke:var(--blue);fill:none;stroke-width:2;vertical-align:-3px;margin-right:6px"><path d="M6 3h9l5 5v13a1 1 0 01-1 1H6a1 1 0 01-1-1V4a1 1 0 011-1z"/><path d="M14 3v6h6"/></svg>Resumo da Operação</div></div>
+            <div style="font-size:11px;color:var(--ink-3);margin-top:6px">Ativo do comprador</div>
+            <div class="op-sum-asset"><div class="op-coin" id="opSumDelIcon" style="background:var(--btc)">₿</div><div><div class="val" id="opSumDelVal">—</div><div class="sub" id="opSumDelUsd">—</div></div></div>
+            <div style="font-size:11px;color:var(--ink-3)">Ativo do vendedor</div>
+            <div class="op-sum-asset"><div class="op-coin" id="opSumRecvIcon" style="background:var(--usdt)">₮</div><div><div class="val" id="opSumRecvVal">—</div><div class="sub" id="opSumRecvUsd">—</div></div></div>
+            <div class="op-rows" style="margin-top:6px">
+              <div class="row"><span class="k">Valor base (bruto)</span><span class="v" id="opSumGross">—</span></div>
+              <div class="row"><span class="k" id="opSumDescLbl">Deságio</span><span class="v" style="color:var(--red)" id="opSumDesc">—</span></div>
+              <div class="row"><span class="k" id="opSumCommLbl">Taxa de comissão</span><span class="v" style="color:var(--red)" id="opSumComm">—</span></div>
+              <div id="opSumCommWho" style="display:flex;flex-wrap:wrap;align-items:center;gap:6px;padding:2px 0 8px"></div>
+              <div class="row"><span class="k">Taxa da plataforma (0,03%)</span><span class="v" style="color:var(--red)" id="opSumPlatform">—</span></div>
+              <div class="row"><span class="k">Taxa de rede (estimada)</span><span class="v" style="color:var(--red)" id="opSumFee">—</span></div>
+            </div>
+            <div class="op-net"><span class="lbl">Valor líquido</span><span class="val" id="opSumNet">—</span></div>
+          </section>
+
+          <section class="card">
+            <div class="card-h"><div class="t">Informações da Negociação</div><span class="badge wait" id="opInfoMode">Simulação</span></div>
+            <div class="kv">
+              <div class="r"><span class="k">Código da operação</span><span class="v mono" id="opInfoCode">—</span></div>
+              <div class="r"><span class="k">Status</span><span class="v" id="opInfoState">—</span></div>
+              <div class="r"><span class="k">Criada em</span><span class="v" id="opInfoCreated">—</span></div>
+              <div class="r"><span class="k">Expiração</span><span class="v" id="opInfoExp">—</span></div>
+              <div class="r"><span class="k">Rede de liquidação</span><span class="v" id="opInfoNet">—</span></div>
+              <div class="r"><span class="k">Contrato de liquidação</span><span class="v mono" id="opInfoContract">—</span></div>
+              <div class="r"><span class="k">Comissão</span><span class="v" id="opInfoComm">—</span></div>
+              <div class="r"><span class="k">Deságio</span><span class="v" id="opInfoDesc">—</span></div>
+              <div class="r"><span class="k">Slippage máximo</span><span class="v" id="opInfoSlip">—</span></div>
+              <div class="r"><span class="k">Carteiras da mesa</span><span class="v" id="opInfoWallets">—</span></div>
+              <div class="r"><span class="k">Ordem de assinatura</span><span class="v" style="font-size:11px">Vendedor → PM 1 → PM 2 → Comprador</span></div>
+            </div>
+            <p id="opInfoSimNote" style="font-size:11px;color:var(--ink-3);margin:10px 0 0">Valores simulados a partir do rascunho — nada foi enviado à mesa. Ao clicar em "Iniciar operação" estes dados criam a operação real.</p>
+            <button class="btn btn-primary btn-block" style="margin-top:16px;height:46px" data-toast="Abrindo assinatura…"><svg viewBox="0 0 24 24"><path d="M4 20h4l10-10-4-4L4 16v4z"/><path d="M13.5 6.5l4 4"/></svg>Revisar e Assinar</button>
+            <button class="btn btn-block" style="margin-top:10px;height:44px" data-toast="Negociação cancelada">Cancelar Negociação</button>
+          </section>
+        </aside>
+      </div>
+    </section>
+
     <!-- ===================== VIEW: CARTEIRAS ===================== -->
     <section class="view active" id="view-carteiras">
       <div class="page-head">
-        <div><h1>Operações</h1><p>Crie a mesa, convide as carteiras (prova de posse na conexão), configure e aprove. O acompanhamento e as assinaturas aparecem na esteira, na própria mesa.</p></div>
+        <div><h1>ABRIR MESA</h1><p>Crie mesas com cadeiras e convites. A wallet de cada participante é identificada na conexão, com prova de posse — você nunca cadastra o endereço de ninguém.</p></div>
         <div class="ph-actions"><button class="btn btn-primary" id="m3New" type="button"><svg viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg>Criar mesa</button></div>
       </div>
 
@@ -806,12 +960,6 @@ img,svg,canvas,video{max-width:100%}
       <section class="card" id="m3ListCard" style="margin-bottom:16px">
         <div class="card-h"><div class="t"><svg viewBox="0 0 24 24" style="width:17px;height:17px;stroke:var(--blue);fill:none;stroke-width:2;vertical-align:-3px;margin-right:6px"><rect x="3" y="6" width="18" height="13" rx="2"/><path d="M16 12h2M3 10h18"/></svg>Minhas mesas</div><span class="badge info" id="m3Count">0</span></div>
         <div id="m3List"><p style="color:var(--ink-3);font-size:12.5px;margin:0">Nenhuma mesa criada ainda. Toque em "Criar mesa".</p></div>
-      </section>
-
-      <!-- Todas as operações (ativa + histórico) de todas as mesas — cada uma com link de visualização -->
-      <section class="card" id="opAllCard" style="display:none;margin-bottom:16px">
-        <div class="card-h"><div class="t"><svg viewBox="0 0 24 24" style="width:17px;height:17px;stroke:var(--blue);fill:none;stroke-width:2;vertical-align:-3px;margin-right:6px"><rect x="4" y="4" width="16" height="16" rx="2"/><path d="M8 9h8M8 13h5"/></svg>Todas as operações</div><span class="badge info" id="opAllCount">0</span></div>
-        <div class="op-deal-list" id="opAllList"></div>
       </section>
 
       <!-- ===== Mesas v3: detalhe da mesa selecionada ===== -->
@@ -908,14 +1056,14 @@ img,svg,canvas,video{max-width:100%}
         </div>
       </section>
 
-      <!-- Operações da mesa / fluxo legado — oculto na fusão (acompanhamento é por "Todas as operações" + detalhe da mesa) -->
-      <section class="card" style="margin-bottom:16px;display:none">
+      <!-- Operações da mesa (movida da página Operação): cada operação é um card; clicar abre na esteira -->
+      <section class="card" style="margin-bottom:16px">
         <div class="card-h"><div class="t"><svg viewBox="0 0 24 24" style="width:17px;height:17px;stroke:var(--blue);fill:none;stroke-width:2;vertical-align:-3px;margin-right:6px"><rect x="4" y="4" width="16" height="16" rx="2"/><path d="M8 9h8M8 13h5"/></svg>Operações da mesa</div><span class="badge info" id="opListCount">0</span></div>
         <div class="op-deal-list" id="opDealList"><p style="color:var(--ink-3);font-size:12.5px;margin:0">Nenhuma operação criada ainda. Use "Iniciar operação" abaixo.</p></div>
       </section>
 
       <div class="page-head" style="margin-top:8px">
-        <div><h2 style="font-size:17px;margin:0">Sua carteira (Pay Master)</h2><p>Conecte a sua Verum Wallet — ela ocupa a cadeira de Pay Master nas mesas que você criar.</p></div>
+        <div><h2 style="font-size:17px;margin:0">Mesa rápida (legada)</h2><p>Fluxo anterior com 4 carteiras fixas da conta.</p></div>
         <div class="ph-actions"><span class="badge info" id="mesaCount">—</span></div>
       </div>
       <div class="vgrid wide" id="mesaSlots">
@@ -1073,9 +1221,6 @@ img,svg,canvas,video{max-width:100%}
     }catch(e){}
   }
   function showView(view){
-    // FUSÃO: a aba "Operações" e a tela de mesa são UMA só (view-carteiras). Chamadas antigas a
-    // 'operacao' caem na tela única — sem alternância de telas.
-    if(view==='operacao') view='carteiras';
     const target=document.getElementById('view-'+view);
     if(!target) return;
     $$('.view').forEach(v=>v.classList.remove('active'));
@@ -1083,7 +1228,8 @@ img,svg,canvas,video{max-width:100%}
     $$('.nav a').forEach(x=>x.classList.toggle('active', x.dataset.view===view));
     const main=document.querySelector('.content .page'); if(main) main.scrollTop=0;
     window.scrollTo(0,0);
-    if(view==='carteiras'){ try{ opLoadAll(); if(typeof m3LoadList==='function') m3LoadList(); }catch(e){} }
+    // A aba "Operações" abre direto a negociação com os dados salvos da mesa.
+    if(view==='operacao'){ try{ updateDraft(); refreshMesaDeals(); renderDealList(opDealsCache,opDeal&&opDeal.id); opRenderInfo(); if(typeof m3LoadList==='function') m3LoadList(); opLoadAll(); }catch(e){} }
   }
   // ── Sidebar responsiva (mobile): gaveta aberta pelo hambúrguer ──────────────
   function setNav(open){
@@ -1547,10 +1693,9 @@ img,svg,canvas,video{max-width:100%}
     const wrap=$('#mesaSlots'); if(!wrap) return;
     portfolioByRole={}; // recomputado por slotCard nos slots confirmados
     const byRole={}; (view.slots||[]).forEach(s=>byRole[s.role]=s);
-    // Fusão: só a carteira do PRÓPRIO admin (PM1). Vendedor/Comprador/PM2 conectam pelas cadeiras da mesa (convites v3).
-    wrap.innerHTML=MESA_ROLES.filter(cfg=>cfg.role==='PAYMASTER_1').map(cfg=>slotCard(cfg,byRole[cfg.role])).join('');
-    const pm1=byRole['PAYMASTER_1'];
-    const cc=$('#mesaCount'); if(cc) cc.textContent=(pm1&&pm1.status==='confirmed')?'conectada':'não conectada';
+    wrap.innerHTML=MESA_ROLES.map(cfg=>slotCard(cfg,byRole[cfg.role])).join('');
+    const connected=(view.slots||[]).filter(s=>s.status==='confirmed').length;
+    const cc=$('#mesaCount'); if(cc) cc.textContent=connected+'/4 conectadas';
     bindMesaActions();
   }
   async function refreshMesa(){ if(!getTok()||mesaBusy||mesaConnecting) return; mesaBusy=true; try{ const view=await pmApi('/v1/portal/mesa'); renderMesa(view); opMesa=view; if(typeof opOnMesa==='function') opOnMesa(); }catch(ex){ /* silencioso durante polling */ }finally{ mesaBusy=false; } }
@@ -2369,14 +2514,31 @@ img,svg,canvas,video{max-width:100%}
       const box=$('#m3List'); if(box){
         box.innerHTML = mesas.length? mesas.map(m=>'<div class="r" style="display:flex;gap:10px;align-items:center;justify-content:space-between;padding:10px 0;border-bottom:1px solid var(--line)">'
           +'<div><span class="mono" style="font-size:12.5px">'+esc(m.code)+'</span>'+(m.operationCode?' <span class="mono" style="color:var(--blue);font-size:12px">· '+esc(m.operationCode)+'</span>':'')+(m.networkLabel?' <span style="color:var(--ink-3);font-size:12px">· '+esc(m.networkLabel)+'</span>':'')+(m.label?' <span style="color:var(--ink-3);font-size:12px">· '+esc(m.label)+'</span>':'')+'<div style="font-size:12px;color:var(--ink-3)">'+m.chairs.map(c=>esc((M3_ROLE[c.role]||c.role)+(c.firstName?(' · '+c.firstName):''))+(c.connected?' ✓':'')).join(' · ')+'</div></div>'
-          +'<div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;justify-content:flex-end">'+m3Badge(m.status)+'<button class="btn" data-m3-open="'+esc(m.mesaId)+'" style="height:34px;font-size:12.5px">Ver mesa</button><button class="btn" data-m3-vlink="'+esc(m.mesaId)+'" data-m3-vlinkop="'+esc(m.dealId||'')+'" title="Link somente-leitura da operação" style="height:34px;font-size:12.5px"><svg viewBox="0 0 24 24" style="width:13px;height:13px;stroke:currentColor;fill:none;stroke-width:2;vertical-align:-2px"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V5a2 2 0 012-2h8"/></svg>Copiar link</button><button class="btn" data-m3-del="'+esc(m.mesaId)+'" title="Excluir mesa" style="height:34px;font-size:12.5px;border-color:var(--red);color:#fecaca">Excluir</button></div></div>').join('')
+          +'<div style="display:flex;gap:8px;align-items:center">'+m3Badge(m.status)+'<button class="btn" data-m3-open="'+esc(m.mesaId)+'" style="height:34px;font-size:12.5px">Ver mesa</button><button class="btn" data-m3-del="'+esc(m.mesaId)+'" title="Excluir mesa" style="height:34px;font-size:12.5px;border-color:var(--red);color:#fecaca">Excluir</button></div></div>').join('')
           : '<p style="color:var(--ink-3);font-size:12.5px;margin:0">Nenhuma mesa criada ainda. Toque em "Criar mesa".</p>';
         box.querySelectorAll('[data-m3-open]').forEach(b=>b.addEventListener('click',()=>m3Open(b.dataset.m3Open)));
-        box.querySelectorAll('[data-m3-vlink]').forEach(b=>b.addEventListener('click',()=>{ const op=b.dataset.m3Vlinkop; const url=location.origin+'/mesa?mesa='+encodeURIComponent(b.dataset.m3Vlink)+(op?'&op='+encodeURIComponent(op):''); clip(url); toast('Link de visualização copiado (somente leitura)','ok'); }));
         box.querySelectorAll('[data-m3-del]').forEach(b=>b.addEventListener('click',()=>m3DeleteMesa(b.dataset.m3Del)));
       }
+      m3RenderOps(mesas);
       return mesas;
     }catch(e){ return []; }
+  }
+  function m3RenderOps(mesas){
+    const card=$('#m3OpsCard'); if(!card) return;
+    const q=($('#m3OpsSearch')&&$('#m3OpsSearch').value.trim().toUpperCase())||'';
+    const f=($('#m3OpsFilter')&&$('#m3OpsFilter').value)||'';
+    const list=(mesas||[]).filter(m=>(!q||m.code.toUpperCase().includes(q))&&(!f||m.status===f));
+    card.style.display=(mesas&&mesas.length)?'':'none';
+    const rows=$('#m3OpsRows'); if(!rows) return;
+    rows.innerHTML=list.map(m=>'<tr><td class="mono">'+esc(m.code)+(m.operationCode?'<br><span style="color:var(--blue);font-size:11px">'+esc(m.operationCode)+'</span>':'')+'</td>'
+      +'<td style="font-size:12px">'+m.chairs.map(c=>esc((M3_ROLE[c.role]||c.role)+(c.firstName?(': '+c.firstName):''))).join('<br>')+'</td>'
+      +'<td class="mono">'+esc(m.amount||'—')+'</td><td>'+m3Badge(m.status)+'</td>'
+      +'<td style="display:flex;gap:6px;flex-wrap:wrap"><button class="btn" data-m3-goto="'+esc(m.mesaId)+'" style="height:32px;font-size:12px">Ver mesa</button>'
+      +'<button class="btn" data-m3-vlink="'+esc(m.mesaId)+'" data-m3-vlinkop="'+esc(m.dealId||'')+'" title="Link somente-leitura da operação" style="height:32px;font-size:12px"><svg viewBox="0 0 24 24" style="width:13px;height:13px;stroke:currentColor;fill:none;stroke-width:2;vertical-align:-2px"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V5a2 2 0 012-2h8"/></svg>Copiar link</button>'
+      +'<button class="btn" data-m3-tdel="'+esc(m.mesaId)+'" title="Excluir mesa" style="height:32px;font-size:12px;border-color:var(--red);color:#fecaca">Excluir</button></td></tr>').join('')||'<tr><td colspan="5" style="color:var(--ink-3)">Nenhuma mesa com esse filtro.</td></tr>';
+    rows.querySelectorAll('[data-m3-goto]').forEach(b=>b.addEventListener('click',()=>{ showView('carteiras'); m3Open(b.dataset.m3Goto); }));
+    rows.querySelectorAll('[data-m3-vlink]').forEach(b=>b.addEventListener('click',()=>{ const op=b.dataset.m3Vlinkop; const url=location.origin+'/mesa?mesa='+encodeURIComponent(b.dataset.m3Vlink)+(op?'&op='+encodeURIComponent(op):''); clip(url); toast('Link de visualização copiado (somente leitura)','ok'); }));
+    rows.querySelectorAll('[data-m3-tdel]').forEach(b=>b.addEventListener('click',()=>m3DeleteMesa(b.dataset.m3Tdel)));
   }
   function m3Open(mesaId){ m3Sel=mesaId; $('#m3Detail').style.display=''; m3Refresh(); if(!m3Timer) m3Timer=setInterval(m3Refresh,5000); if(!m3TickT) m3TickT=setInterval(m3Tick,1000); }
   async function m3DeleteMesa(mesaId){
@@ -2604,9 +2766,6 @@ img,svg,canvas,video{max-width:100%}
   }
   function m3Init(){
     const nb=$('#m3New'); if(nb) nb.addEventListener('click',m3OpenCreate);
-    // Entrada única: "Criar mesa" na aba Operações leva ao fluxo rico de criação/gestão.
-    const ocm=$('#opCreateMesa'); if(ocm) ocm.addEventListener('click',()=>{ showView('carteiras'); if(typeof m3OpenCreate==='function') m3OpenCreate(); });
-    const mb=$('#m3Back'); if(mb) mb.addEventListener('click',()=>showView('operacao'));
     const cc=$('#m3cCancel'); if(cc) cc.addEventListener('click',()=>m3Step(0));
     // Navegação do wizard: 1 Mesa → 2 Ativos → 3 Valores/taxas → 4 Revisão.
     const on=(id,fn)=>{ const el=$(id); if(el) el.addEventListener('click',fn); };
@@ -2629,6 +2788,8 @@ img,svg,canvas,video{max-width:100%}
     const sg=$('#m3dSign'); if(sg) sg.addEventListener('click',m3Sign);
     const cm=$('#m3dCancelMesa'); if(cm) cm.addEventListener('click',async()=>{ const reason=prompt('Motivo do cancelamento:'); if(reason===null) return; try{ await pmApi('/v1/portal/mesas/'+m3Sel+'/cancel',{method:'POST',body:{reason}}); toast('Mesa cancelada','ok'); m3Refresh(); m3LoadList(); }catch(e){ toast(e.message,'err'); } });
     const dm=$('#m3dDeleteMesa'); if(dm) dm.addEventListener('click',()=>m3DeleteMesa(m3Sel));
+    const os=$('#m3OpsSearch'); if(os) os.addEventListener('input',()=>m3LoadList());
+    const of=$('#m3OpsFilter'); if(of) of.addEventListener('change',()=>m3LoadList());
     m3LoadList(); setInterval(m3LoadList,15000);
   }
 
@@ -2855,7 +3016,7 @@ img,svg,canvas,video{max-width:100%}
   loadNetCatalog();
   // Guard de auth: sem login/cadastro (token) → vai direto pro cadastro do portal.
   if(!getTok()){ goToRegister(); }
-  else { integratePortal(); mesaInit(); securityInit(); m3Init(); showView('carteiras'); }
+  else { integratePortal(); mesaInit(); securityInit(); m3Init(); }
 })();
 </script>
 </body>
