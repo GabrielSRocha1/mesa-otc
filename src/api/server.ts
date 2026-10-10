@@ -332,12 +332,6 @@ export async function buildApi(deps: ApiDeps): Promise<FastifyInstance> {
   app.post('/v1/portal/alerts/read', async req => { deps.portal.markAlertsRead(portalToken(req)); return { ok: true }; });
   app.post('/v1/portal/wallet/connect', async req => { const b = parse(z.object({ address: z.string().min(8).max(120), network: z.string().min(2).max(40), addresses: WalletAddressesZ }), req.body); return deps.portal.connectWallet(portalToken(req), b); });
   app.post('/v1/portal/wallet/disconnect', async req => { deps.portal.disconnectWallet(portalToken(req)); return { ok: true }; });
-  // Aba "Carteiras": conecta/lista/desconecta as carteiras dos 4 papéis na CONTA — reusadas para
-  // preencher as cadeiras ao criar a mesa (sem convite). Posse real provada na assinatura.
-  const SlotRoleZ = z.enum(['SELLER', 'BUYER', 'PAYMASTER_1', 'PAYMASTER_2']);
-  app.get('/v1/portal/desk-wallets', async req => ({ wallets: deps.portal.listDeskWallets(portalToken(req)) }));
-  app.post('/v1/portal/desk-wallets/connect', async req => { const b = parse(z.object({ role: SlotRoleZ, address: z.string().min(8).max(120), network: z.string().min(2).max(40), addresses: WalletAddressesZ, name: z.string().max(30).optional() }), req.body); return { wallets: deps.portal.connectDeskWallet(portalToken(req), b) }; });
-  app.post('/v1/portal/desk-wallets/disconnect', async req => { const b = parse(z.object({ role: SlotRoleZ }), req.body); return { wallets: deps.portal.disconnectDeskWallet(portalToken(req), b.role) }; });
   app.post('/v1/portal/mesa/code', async (req, reply) => { const r = deps.portal.generateCode(portalToken(req)); void reply.code(201); return r; });
   app.get('/v1/portal/mesa/code', async req => ({ code: deps.portal.currentCode(portalToken(req)) }));
   app.get('/v1/portal/mesa/code/:code', async req => { const { code } = req.params as { code: string }; const r = deps.portal.resolveCode(code); if (!r) throw new DomainError('INVALID_INPUT', 'Código inválido ou expirado'); return r; });

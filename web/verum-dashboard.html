@@ -688,7 +688,6 @@ img,svg,canvas,video{max-width:100%}
 
     <nav class="nav">
       <a href="#" class="active" data-view="carteiras"><svg viewBox="0 0 24 24"><rect x="3" y="6" width="18" height="13" rx="2"/><path d="M16 12h2M3 10h18"/></svg>ABRIR MESA</a>
-      <a href="#" data-view="wallets"><svg viewBox="0 0 24 24"><rect x="2" y="5" width="20" height="14" rx="2"/><path d="M16 12h.01M2 10h20"/></svg>Carteiras</a>
       <a href="#" data-view="operacao"><svg viewBox="0 0 24 24"><rect x="4" y="4" width="16" height="16" rx="2"/><path d="M8 9h8M8 13h5"/></svg>Operações</a>
       <a href="#" data-view="seguranca"><svg viewBox="0 0 24 24"><path d="M12 3l7 3v5c0 5-3 8-7 10-4-2-7-5-7-10V6z"/><path d="M9 12l2 2 4-4"/></svg>Segurança</a>
       <a href="#" data-view="config"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3.2"/><path d="M19 12a7 7 0 00-.1-1.3l2-1.5-2-3.4-2.3 1a7 7 0 00-2.2-1.3L14 3h-4l-.4 2.5a7 7 0 00-2.2 1.3l-2.3-1-2 3.4 2 1.5A7 7 0 005 12c0 .4 0 .9.1 1.3l-2 1.5 2 3.4 2.3-1a7 7 0 002.2 1.3L10 21h4l.4-2.5a7 7 0 002.2-1.3l2.3 1 2-3.4-2-1.5c.1-.4.1-.9.1-1.3z"/></svg>Configurações</a>
@@ -1055,17 +1054,6 @@ img,svg,canvas,video{max-width:100%}
       </div>
     </section>
 
-    <!-- ===================== VIEW: CARTEIRAS (pré-conexão das 4 carteiras da conta) ===================== -->
-    <section class="view" id="view-wallets">
-      <div class="page-head">
-        <div><h1>Carteiras</h1><p>Conecte aqui as carteiras dos papéis. Ao criar uma mesa, as cadeiras já vêm preenchidas com estas carteiras — sem convites. A posse é provada quando cada um assina a operação.</p></div>
-        <div class="ph-actions"><span class="badge info" id="wCount">0 conectadas</span></div>
-      </div>
-      <div class="vgrid wide" id="wSlots">
-        <section class="card"><div class="state" style="padding:8px 0"><div class="spin" style="width:22px;height:22px;border:2px solid rgba(255,255,255,.25);border-top-color:#fff;border-radius:50%;animation:sp .7s linear infinite;margin:0 auto"></div></div></section>
-      </div>
-    </section>
-
     <!-- ===================== VIEW: SEGURANÇA ===================== -->
     <section class="view" id="view-seguranca">
       <div class="page-head">
@@ -1187,47 +1175,6 @@ img,svg,canvas,video{max-width:100%}
   $$('[data-toast]').forEach(el=>el.addEventListener('click',()=>toast(el.dataset.toast,'info')));
 
   // nav — troca de view por aba
-  // ── Aba "Carteiras": conecta as carteiras dos 4 papéis NA CONTA (reusadas ao criar a mesa) ──
-  const W_ROLES=[['SELLER','Vendedor'],['BUYER','Comprador'],['PAYMASTER_1','Pay Master 1'],['PAYMASTER_2','Pay Master 2']];
-  let wCache={};
-  async function walletsRefresh(){ if(!getTok()) return; try{ const r=await pmApi('/v1/portal/desk-wallets'); wCache=(r&&r.wallets)||{}; renderWallets(); }catch(e){} }
-  function renderWallets(){
-    const box=$('#wSlots'); if(!box) return;
-    const n=W_ROLES.filter(([r])=>wCache[r]).length;
-    const cc=$('#wCount'); if(cc) cc.textContent=n+' conectada'+(n===1?'':'s');
-    box.innerHTML=W_ROLES.map(([role,label])=>{
-      const w=wCache[role]; const link=w&&w.link;
-      const head='<div class="card-h"><div class="t">'+label+'</div>'+(link?'<span class="badge ok">✓ Conectada</span>':'<span class="badge wait">Não conectada</span>')+'</div>';
-      let body;
-      if(link){
-        const nets=(link.addresses&&link.addresses.length)?link.addresses.length:1;
-        body='<div style="font-size:13px;color:var(--ink-2)">'+(w.name?esc(w.name)+' · ':'')+'<span class="mono">'+esc(shortAddr(link.address))+'</span></div>'
-          +'<div style="font-size:12px;color:var(--ink-3);margin-top:3px">Rede: '+esc(link.network)+(nets>1?(' · multichain ('+nets+' redes)'):'')+'</div>'
-          +'<div style="margin-top:10px"><button class="btn btn-danger" data-wdisc="'+role+'" style="height:34px">Desconectar</button></div>';
-      } else {
-        body='<div style="font-size:12.5px;color:var(--ink-3)">Conecte a Verum Wallet deste papel — pode ser a sua (você operando) ou a da pessoa.</div>'
-          +'<div style="margin-top:10px"><input class="inp" data-wname="'+role+'" placeholder="Nome (opcional)" maxlength="30" style="height:38px;margin-bottom:8px"><button class="btn btn-primary" data-wconn="'+role+'" style="height:38px;width:100%">Conectar Verum Wallet</button></div>';
-      }
-      return '<section class="card">'+head+body+'</section>';
-    }).join('');
-    box.querySelectorAll('[data-wconn]').forEach(b=>b.addEventListener('click',()=>wConnect(b.dataset.wconn)));
-    box.querySelectorAll('[data-wdisc]').forEach(b=>b.addEventListener('click',()=>wDisconnect(b.dataset.wdisc)));
-  }
-  async function wConnect(role){
-    const nameEl=document.querySelector('[data-wname="'+role+'"]'); const name=nameEl?nameEl.value.trim():'';
-    const btn=document.querySelector('[data-wconn="'+role+'"]'); if(btn){ btn.disabled=true; btn.textContent='Conectando…'; }
-    try{
-      let w; try{ w=await connectWallet('solana'); }catch(ex){ if(ex&&ex.code==='NO_WALLET'){ toast('Abrindo o OTC dentro da Verum Wallet…','info'); openInVerumBrowser(); return; } throw ex; }
-      const addresses=await collectVerumAddresses(w.address).catch(()=>[]);
-      await pmApi('/v1/portal/desk-wallets/connect',{method:'POST',body:{role,address:w.address,network:'solana',addresses,name:name||undefined}});
-      toast('Carteira conectada — ela vai preencher a cadeira na próxima mesa','ok');
-      walletsRefresh();
-    }catch(e){ toast(e.message||'Falha ao conectar','err'); if(btn){ btn.disabled=false; btn.textContent='Conectar Verum Wallet'; } }
-  }
-  async function wDisconnect(role){
-    if(!confirm('Desconectar a carteira deste papel?')) return;
-    try{ await pmApi('/v1/portal/desk-wallets/disconnect',{method:'POST',body:{role}}); walletsRefresh(); }catch(e){ toast(e.message||'Falha ao desconectar','err'); }
-  }
   function showView(view){
     const target=document.getElementById('view-'+view);
     if(!target) return;
@@ -1238,7 +1185,6 @@ img,svg,canvas,video{max-width:100%}
     window.scrollTo(0,0);
     // A aba "Operações" abre direto a negociação com os dados salvos da mesa.
     if(view==='operacao'){ try{ updateDraft(); refreshMesaDeals(); renderDealList(opDealsCache,opDeal&&opDeal.id); opRenderInfo(); if(typeof m3LoadList==='function') m3LoadList(); }catch(e){} }
-    if(view==='wallets'){ try{ walletsRefresh(); }catch(e){} }
   }
   // ── Sidebar responsiva (mobile): gaveta aberta pelo hambúrguer ──────────────
   function setNav(open){

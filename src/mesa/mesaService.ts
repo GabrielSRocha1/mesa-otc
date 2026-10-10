@@ -98,12 +98,6 @@ export class MesaService {
       const chair: MesaChair = { chairId: 'ch_' + randomUUID(), role: c.role, expectedAsset: { network: asset.network || network, contractOrMint: asset.contractOrMint ?? null, decimals: asset.decimals, symbol: asset.symbol }, label: c.label?.trim() || undefined, wallet: null };
       // A cadeira Pay Master 1 é do próprio admin — já conectada com a wallet dele (quando houver).
       if (c.role === 'PAYMASTER_1' && pm.wallet) { chair.wallet = pm.wallet; chair.firstName = pm.name.split(/\s+/)[0]; chair.connectedAt = t; }
-      else {
-        // Preenche a cadeira com a carteira pré-conectada na aba "Carteiras" (sem convite). A posse
-        // real continua sendo provada na ASSINATURA da operação.
-        const desk = this.d.portal.deskWalletFor(pm, c.role);
-        if (desk) { chair.wallet = desk.link; chair.firstName = desk.name || CHAIR_ROLE_LABEL[c.role]; chair.connectedAt = t; }
-      }
       return chair;
     });
     const mesa: MesaRecord = { mesaId: 'mesa_' + randomUUID(), payMasterId: pm.id, code: this.d.portal.newMesaCode(), operationCode: `OP-${newInviteCode()}`, label: input.label?.trim() || undefined, network, chairs, approvals: {}, dealId: null, dealIds: [], createdAt: t, expiresAt: t + TABLE_TTL_MS };
