@@ -511,7 +511,10 @@ h1{font-size:22px;margin-bottom:8px}
       const join=await api('/v1/mesa-invites/'+encodeURIComponent(V3.inviteId)+'/join',{method:'POST',body:{code,firstName:name,network:net,address,nonce:ch.nonce,signature,addresses}});
       // Redireciona DIRETO para a operação (visão do participante, somente leitura). Guarda o token
       // também em sessionStorage p/ a mesa recuperá-lo mesmo se o fragmento #pt se perder.
-      const dest='/mesa?mesa='+encodeURIComponent(join.mesaId)+'#pt='+encodeURIComponent(join.token);
+      // Se a mesa já tem operação ABERTA, cai exatamente nela (&op=<dealId>).
+      let opq='';
+      try{ const mv=await api('/v1/mesas/'+encodeURIComponent(join.mesaId),{token:join.token}); if(mv&&mv.deal&&mv.deal.id) opq='&op='+encodeURIComponent(mv.deal.id); }catch(e){}
+      const dest='/mesa?mesa='+encodeURIComponent(join.mesaId)+opq+'#pt='+encodeURIComponent(join.token);
       // Guarda o token em session E localStorage: a reentrada "lembra no aparelho" (localStorage
       // sobrevive a fechar o app); o fragmento #pt pode ser descartado pelo dapp-browser.
       try{ sessionStorage.setItem('verum_mesa_pt_'+join.mesaId, join.token); }catch(e){}
