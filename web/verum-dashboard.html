@@ -943,7 +943,7 @@ img,svg,canvas,video{max-width:100%}
         <section class="card">
           <div class="card-h"><div class="t">Sessão & acesso</div></div>
           <div class="form-row"><div><div class="fl">Autenticação de dois fatores</div><div class="fh">Exigir 2FA para assinar operações</div></div><button class="sw" id="secTwoFactor" data-toggle data-security="twoFactor"></button></div>
-          <div class="form-row"><div><div class="fl">Bloqueio por inatividade</div><div class="fh">Encerrar sessão após 10 min</div></div><button class="sw on" id="secIdleLock" data-toggle data-security="idleLock"></button></div>
+          <div class="form-row"><div><div class="fl">Bloqueio por inatividade</div><div class="fh">Encerrar sessão após 30 min (desligado por padrão)</div></div><button class="sw" id="secIdleLock" data-toggle data-security="idleLock"></button></div>
           <div class="form-row"><div><div class="fl">Alerta de nova carteira</div><div class="fh">Notificar ao conectar carteira nova</div></div><button class="sw" id="secNewWalletAlert" data-toggle data-security="newWalletAlert"></button></div>
         </section>
       </div>
@@ -2148,7 +2148,7 @@ img,svg,canvas,video{max-width:100%}
 
   /* ---------- Segurança da mesa (2FA TOTP, inatividade, alerta de carteira) — espelha o backend ---------- */
   // Estado real vindo do backend; os toggles refletem e alteram o servidor.
-  let secState={ twoFactor:{enabled:false}, idleLock:{enabled:true,timeoutMs:600000}, newWalletAlert:{enabled:false} };
+  let secState={ twoFactor:{enabled:false}, idleLock:{enabled:false,timeoutMs:1800000}, newWalletAlert:{enabled:false} };
   const is2FAOn=()=>!!(secState.twoFactor&&secState.twoFactor.enabled);
   function secLabel(k){ return k==='idleLock'?'Bloqueio por inatividade':(k==='newWalletAlert'?'Alerta de nova carteira':'2FA'); }
   function reflectSecurity(){
