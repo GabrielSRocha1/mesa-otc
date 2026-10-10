@@ -914,11 +914,11 @@ img,svg,canvas,video{max-width:100%}
         <div class="op-deal-list" id="opDealList"><p style="color:var(--ink-3);font-size:12.5px;margin:0">Nenhuma operação criada ainda. Use "Iniciar operação" abaixo.</p></div>
       </section>
 
-      <div class="page-head" style="margin-top:8px;display:none">
-        <div><h2 style="font-size:17px;margin:0">Mesa rápida (legada)</h2><p>Fluxo anterior com 4 carteiras fixas da conta.</p></div>
+      <div class="page-head" style="margin-top:8px">
+        <div><h2 style="font-size:17px;margin:0">Sua carteira (Pay Master)</h2><p>Conecte a sua Verum Wallet — ela ocupa a cadeira de Pay Master nas mesas que você criar.</p></div>
         <div class="ph-actions"><span class="badge info" id="mesaCount">—</span></div>
       </div>
-      <div class="vgrid wide" id="mesaSlots" style="display:none">
+      <div class="vgrid wide" id="mesaSlots">
         <section class="card"><div class="state" style="padding:8px 0"><div class="spin" style="width:22px;height:22px;border:2px solid rgba(255,255,255,.25);border-top-color:#fff;border-radius:50%;animation:sp .7s linear infinite;margin:0 auto"></div></div></section>
       </div>
     </section>
@@ -1547,9 +1547,10 @@ img,svg,canvas,video{max-width:100%}
     const wrap=$('#mesaSlots'); if(!wrap) return;
     portfolioByRole={}; // recomputado por slotCard nos slots confirmados
     const byRole={}; (view.slots||[]).forEach(s=>byRole[s.role]=s);
-    wrap.innerHTML=MESA_ROLES.map(cfg=>slotCard(cfg,byRole[cfg.role])).join('');
-    const connected=(view.slots||[]).filter(s=>s.status==='confirmed').length;
-    const cc=$('#mesaCount'); if(cc) cc.textContent=connected+'/4 conectadas';
+    // Fusão: só a carteira do PRÓPRIO admin (PM1). Vendedor/Comprador/PM2 conectam pelas cadeiras da mesa (convites v3).
+    wrap.innerHTML=MESA_ROLES.filter(cfg=>cfg.role==='PAYMASTER_1').map(cfg=>slotCard(cfg,byRole[cfg.role])).join('');
+    const pm1=byRole['PAYMASTER_1'];
+    const cc=$('#mesaCount'); if(cc) cc.textContent=(pm1&&pm1.status==='confirmed')?'conectada':'não conectada';
     bindMesaActions();
   }
   async function refreshMesa(){ if(!getTok()||mesaBusy||mesaConnecting) return; mesaBusy=true; try{ const view=await pmApi('/v1/portal/mesa'); renderMesa(view); opMesa=view; if(typeof opOnMesa==='function') opOnMesa(); }catch(ex){ /* silencioso durante polling */ }finally{ mesaBusy=false; } }
