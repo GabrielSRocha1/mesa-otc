@@ -526,6 +526,31 @@ export class MesaService {
     return out;
   }
 
+  /** Visão PÚBLICA (somente-leitura, sem sessão) de uma mesa — base do link /ver/<mesaId>. Mostra o que
+   *  foi preenchido: config (valores/taxas), cadeiras (papel, ativo, nome, conectado, endereço curto) e
+   *  o status + a operação resumida (se já existir). Não expõe convites/links/notas (mesmo recorte do participante). */
+  async mesaPublicView(mesaId: string): Promise<Record<string, unknown>> {
+    const mesa = this.d.portal.mesas()[mesaId];
+    if (!mesa) throw new DomainError('INVALID_INPUT', 'Mesa não encontrada.');
+    const now = this.now();
+    const invites = await this.d.store.listMesaInvites(mesa.mesaId);
+    const deal = mesa.dealId ? await this.d.getDeal(mesa.dealId) : null;
+    const status = deriveMesaStatus(mesa, invites, deal, now);
+    return {
+      mesaId: mesa.mesaId, code: mesa.code, operationCode: mesa.operationCode ?? null,
+      network: mesa.network, networkLabel: this.networksLabel(mesa), status,
+      createdAt: mesa.createdAt, expiresAt: mesa.expiresAt, serverTime: now,
+      config: mesa.config ? { amountInBase: mesa.config.amountInBase ?? null, buyerAmountInBase: mesa.config.buyerAmountInBase ?? null, discountBps: mesa.config.discountBps, commissionBps: mesa.config.commissionBps, commissionPayer: mesa.config.commissionPayer ?? null } : null,
+      chairs: mesa.chairs.map(c => ({
+        role: c.role, roleLabel: CHAIR_ROLE_LABEL[c.role],
+        asset: c.expectedAsset.symbol, network: c.expectedAsset.network,
+        firstName: c.firstName ?? null, connected: !!c.wallet,
+        wallet: c.wallet ? this.shortAddr(c.wallet.address) : null,
+      })),
+      deal: this.dealSummary(deal),
+    };
+  }
+
   /** Resumo canônico de uma operação (deal) para a UI — mesma forma na mesa, na lista e no deep link. */
   private dealSummary(deal: Deal | null): Record<string, unknown> | null {
     if (!deal) return null;

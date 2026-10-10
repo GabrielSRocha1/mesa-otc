@@ -239,6 +239,12 @@ export async function buildApi(deps: ApiDeps): Promise<FastifyInstance> {
       participants: d.participants.map(p => ({ role: p.role, address: shortAddr(p.address), network: p.network, signed: signed.has(p.role), isTurn: d.turnRole === p.role })),
     };
   });
+  // VISUALIZAÇÃO PÚBLICA (somente-leitura) de uma MESA por id — base do link /ver/:mesaId. Mostra config
+  // + cadeiras + status; funciona logo após criar (antes de aprovar). Sem sessão; recorte do participante.
+  app.get('/v1/mesas/:mesaId/public-view', async req => {
+    const { mesaId } = req.params as { mesaId: string };
+    return deps.mesa.mesaPublicView(mesaId);
+  });
   app.get('/v1/deals/:id/timeline', async req => { const s = requireSession(req); const { id } = req.params as { id: string }; const d = await deps.deals.get(id); deps.deals.view(d, s.address, s.role === 'operator'); return deps.store.listDealEvents(id); });
   app.post('/v1/deals/:id/participants/:role/bind', async (req, reply) => { const s = requireSession(req); const { id, role } = req.params as { id: string; role: Role }; return idempotent(req, reply, async () => deps.deals.view(await deps.deals.connectWallet(id, parse(RoleZ, role), s.address, s.address), s.address)); });
   app.post('/v1/deals/:id/verify', async (req, reply) => { const s = requireSession(req); const { id } = req.params as { id: string }; return idempotent(req, reply, async () => deps.deals.view(await deps.deals.verify(id, s.address), s.address)); });
@@ -958,7 +964,7 @@ export async function buildApi(deps: ApiDeps): Promise<FastifyInstance> {
   const prepHtmlNoSW = (path: string): string => withProvider(injectPwaNoSW(withApiMeta(path)));
   if (deps.mesaHtmlPath) { const mesa = prepHtml(deps.mesaHtmlPath); for (const p of ['/mesa', '/operacao', '/operacoes', '/abrir-mesa']) app.get(p, async (_req, reply) => sendHtml(reply, mesa)); }
   // Visualização pública (somente-leitura) de uma operação — link compartilhável /op/:dealId.
-  if (deps.operacaoHtmlPath) { const op = prepHtml(deps.operacaoHtmlPath); for (const p of ['/op', '/op/:dealId']) app.get(p, async (_req, reply) => sendHtml(reply, op)); }
+  if (deps.operacaoHtmlPath) { const op = prepHtml(deps.operacaoHtmlPath); for (const p of ['/op', '/op/:dealId', '/ver', '/ver/:mesaId']) app.get(p, async (_req, reply) => sendHtml(reply, op)); }
   if (deps.portalHtmlPath) { const portalHtml = prepHtml(deps.portalHtmlPath); for (const p of ['/portal', '/cadastro', '/login']) app.get(p, async (_req, reply) => sendHtml(reply, portalHtml)); }
   if (deps.conviteHtmlPath) { const convite = prepHtmlNoSW(deps.conviteHtmlPath); for (const p of ['/convite', '/convite/:token', '/invite', '/invite/:token', '/otc/convite/:token']) app.get(p, async (_req, reply) => sendHtml(reply, convite)); }
   // Provider da Verum (window.verum) — só ativa quando embutido no iframe do navegador dApp da Verum.

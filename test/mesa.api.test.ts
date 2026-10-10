@@ -324,6 +324,14 @@ describe('validação diagnosticável do convite', () => {
     expect(mine).toBeTruthy();
     expect(mine!.mesaId).toBe(mesa.mesaId);
     expect(mine!.active).toBe(true);
+    // visualização PÚBLICA (somente-leitura) da MESA — base do link /ver/:mesaId (funciona sem login)
+    const mpub = await app.api.inject({ method: 'GET', url: `/v1/mesas/${mesa.mesaId}/public-view` });
+    expect(mpub.statusCode, mpub.body).toBe(200);
+    const mpubBody = mpub.json<{ code: string; chairs: { roleLabel: string; asset: string; connected: boolean }[]; config: { discountBps: number } | null }>();
+    expect(mpubBody.code).toBeTruthy();
+    expect(mpubBody.chairs.length).toBeGreaterThanOrEqual(3);
+    expect(mpubBody.config?.discountBps).toBe(100);
+    expect((await app.api.inject({ method: 'GET', url: '/v1/mesas/mesa_inexistente/public-view' })).statusCode).toBe(400);
     // visualização PÚBLICA (somente-leitura) da operação — base do link compartilhável /op/:dealId
     const pub = await app.api.inject({ method: 'GET', url: `/v1/operations/${dealId}/view` });
     expect(pub.statusCode, pub.body).toBe(200);
