@@ -125,13 +125,13 @@ export class MesaService {
   /** Mesa por id (participante já autorizado pela sessão). */
   mesaById(mesaId: string): MesaRecord | null { return this.d.portal.mesas()[mesaId] ?? null; }
 
-  async listMesas(portalToken: string | undefined): Promise<{ mesaId: string; code: string; operationCode: string | null; label?: string; network: string; networkLabel: string; status: MesaStatus; chairs: { role: MesaChairRole; firstName: string | null; connected: boolean }[]; amount: string | null; createdAt: number; expiresAt: number }[]> {
+  async listMesas(portalToken: string | undefined): Promise<{ mesaId: string; code: string; operationCode: string | null; label?: string; network: string; networkLabel: string; status: MesaStatus; dealId: string | null; chairs: { role: MesaChairRole; firstName: string | null; connected: boolean }[]; amount: string | null; createdAt: number; expiresAt: number }[]> {
     const pm = this.d.portal.requirePayMaster(portalToken, false);
     const mesas = Object.values(this.d.portal.mesas()).filter(m => m.payMasterId === pm.id).sort((a, b) => b.createdAt - a.createdAt);
     const out = [];
     for (const m of mesas) {
       const status = await this.statusOf(m);
-      out.push({ mesaId: m.mesaId, code: m.code, operationCode: m.operationCode ?? null, label: m.label, network: m.network, networkLabel: this.networksLabel(m), status, chairs: m.chairs.map(c => ({ role: c.role, firstName: c.firstName ?? null, connected: !!c.wallet })), amount: m.config?.amountInBase ?? null, createdAt: m.createdAt, expiresAt: m.expiresAt });
+      out.push({ mesaId: m.mesaId, code: m.code, operationCode: m.operationCode ?? null, label: m.label, network: m.network, networkLabel: this.networksLabel(m), status, dealId: m.dealId ?? null, chairs: m.chairs.map(c => ({ role: c.role, firstName: c.firstName ?? null, connected: !!c.wallet })), amount: m.config?.amountInBase ?? null, createdAt: m.createdAt, expiresAt: m.expiresAt });
     }
     return out;
   }

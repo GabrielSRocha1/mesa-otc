@@ -2484,8 +2484,11 @@ img,svg,canvas,video{max-width:100%}
     rows.innerHTML=list.map(m=>'<tr><td class="mono">'+esc(m.code)+(m.operationCode?'<br><span style="color:var(--blue);font-size:11px">'+esc(m.operationCode)+'</span>':'')+'</td>'
       +'<td style="font-size:12px">'+m.chairs.map(c=>esc((M3_ROLE[c.role]||c.role)+(c.firstName?(': '+c.firstName):''))).join('<br>')+'</td>'
       +'<td class="mono">'+esc(m.amount||'—')+'</td><td>'+m3Badge(m.status)+'</td>'
-      +'<td style="display:flex;gap:6px"><button class="btn" data-m3-goto="'+esc(m.mesaId)+'" style="height:32px;font-size:12px">Ver mesa</button><button class="btn" data-m3-tdel="'+esc(m.mesaId)+'" title="Excluir mesa" style="height:32px;font-size:12px;border-color:var(--red);color:#fecaca">Excluir</button></td></tr>').join('')||'<tr><td colspan="5" style="color:var(--ink-3)">Nenhuma mesa com esse filtro.</td></tr>';
+      +'<td style="display:flex;gap:6px;flex-wrap:wrap"><button class="btn" data-m3-goto="'+esc(m.mesaId)+'" style="height:32px;font-size:12px">Ver mesa</button>'
+      +'<button class="btn" data-m3-vlink="'+esc(m.mesaId)+'" data-m3-vlinkop="'+esc(m.dealId||'')+'" title="Link somente-leitura da operação" style="height:32px;font-size:12px"><svg viewBox="0 0 24 24" style="width:13px;height:13px;stroke:currentColor;fill:none;stroke-width:2;vertical-align:-2px"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V5a2 2 0 012-2h8"/></svg>Copiar link</button>'
+      +'<button class="btn" data-m3-tdel="'+esc(m.mesaId)+'" title="Excluir mesa" style="height:32px;font-size:12px;border-color:var(--red);color:#fecaca">Excluir</button></td></tr>').join('')||'<tr><td colspan="5" style="color:var(--ink-3)">Nenhuma mesa com esse filtro.</td></tr>';
     rows.querySelectorAll('[data-m3-goto]').forEach(b=>b.addEventListener('click',()=>{ showView('carteiras'); m3Open(b.dataset.m3Goto); }));
+    rows.querySelectorAll('[data-m3-vlink]').forEach(b=>b.addEventListener('click',()=>{ const op=b.dataset.m3Vlinkop; const url=location.origin+'/mesa?mesa='+encodeURIComponent(b.dataset.m3Vlink)+(op?'&op='+encodeURIComponent(op):''); clip(url); toast('Link de visualização copiado (somente leitura)','ok'); }));
     rows.querySelectorAll('[data-m3-tdel]').forEach(b=>b.addEventListener('click',()=>m3DeleteMesa(b.dataset.m3Tdel)));
   }
   function m3Open(mesaId){ m3Sel=mesaId; $('#m3Detail').style.display=''; m3Refresh(); if(!m3Timer) m3Timer=setInterval(m3Refresh,5000); if(!m3TickT) m3TickT=setInterval(m3Tick,1000); }
