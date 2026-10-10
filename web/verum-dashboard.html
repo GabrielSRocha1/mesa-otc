@@ -687,8 +687,7 @@ img,svg,canvas,video{max-width:100%}
     </div>
 
     <nav class="nav">
-      <a href="#" class="active" data-view="carteiras"><svg viewBox="0 0 24 24"><rect x="3" y="6" width="18" height="13" rx="2"/><path d="M16 12h2M3 10h18"/></svg>ABRIR MESA</a>
-      <a href="#" data-view="operacao"><svg viewBox="0 0 24 24"><rect x="4" y="4" width="16" height="16" rx="2"/><path d="M8 9h8M8 13h5"/></svg>Operações</a>
+      <a href="#" class="active" data-view="operacao"><svg viewBox="0 0 24 24"><rect x="4" y="4" width="16" height="16" rx="2"/><path d="M8 9h8M8 13h5"/></svg>Operações</a>
       <a href="#" data-view="seguranca"><svg viewBox="0 0 24 24"><path d="M12 3l7 3v5c0 5-3 8-7 10-4-2-7-5-7-10V6z"/><path d="M9 12l2 2 4-4"/></svg>Segurança</a>
       <a href="#" data-view="config"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3.2"/><path d="M19 12a7 7 0 00-.1-1.3l2-1.5-2-3.4-2.3 1a7 7 0 00-2.2-1.3L14 3h-4l-.4 2.5a7 7 0 00-2.2 1.3l-2.3-1-2 3.4 2 1.5A7 7 0 005 12c0 .4 0 .9.1 1.3l-2 1.5 2 3.4 2.3-1a7 7 0 002.2 1.3L10 21h4l.4-2.5a7 7 0 002.2-1.3l2.3 1 2-3.4-2-1.5c.1-.4.1-.9.1-1.3z"/></svg>Configurações</a>
     </nav>
@@ -740,9 +739,10 @@ img,svg,canvas,video{max-width:100%}
 
     <!-- ===================== VIEW: NOVA OPERAÇÃO ===================== -->
     <!-- ===================== VIEW: OPERAÇÕES (Negociação OTC — dados salvos da mesa) ===================== -->
-    <section class="view" id="view-operacao">
+    <section class="view active" id="view-operacao">
       <div class="op-head">
-        <div class="titw"><h1>Operações</h1><p>Dados salvos da mesa criada: carteiras, taxas e detalhes da negociação.</p></div>
+        <div class="titw"><h1>Operações</h1><p>Crie a mesa, convide as carteiras, configure, aprove e assine — tudo aqui.</p></div>
+        <button class="btn btn-primary" id="opCreateMesa" type="button" style="height:40px"><svg viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg>Criar mesa</button>
         <div class="op-status">
           <span class="op-badge run"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 8v4l2 2"/></svg>Em andamento</span>
           <span class="op-exp">Expira em <b style="color:var(--ink-2)">00:45:32</b></span>
@@ -894,10 +894,10 @@ img,svg,canvas,video{max-width:100%}
     </section>
 
     <!-- ===================== VIEW: CARTEIRAS ===================== -->
-    <section class="view active" id="view-carteiras">
+    <section class="view" id="view-carteiras">
       <div class="page-head">
-        <div><h1>ABRIR MESA</h1><p>Crie mesas com cadeiras e convites. A wallet de cada participante é identificada na conexão, com prova de posse — você nunca cadastra o endereço de ninguém.</p></div>
-        <div class="ph-actions"><button class="btn btn-primary" id="m3New" type="button"><svg viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg>Criar mesa</button></div>
+        <div><h1>Mesa</h1><p>Crie a mesa, convide as carteiras (prova de posse na conexão), configure e aprove. O acompanhamento e as assinaturas aparecem na esteira.</p></div>
+        <div class="ph-actions" style="display:flex;gap:8px"><button class="btn" id="m3Back" type="button"><svg viewBox="0 0 24 24"><path d="M19 12H5M11 6l-6 6 6 6"/></svg>Voltar para Operações</button><button class="btn btn-primary" id="m3New" type="button"><svg viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg>Criar mesa</button></div>
       </div>
 
       <!-- ===== Cadastro da mesa: wizard em 4 passos curtos ===== -->
@@ -1225,7 +1225,9 @@ img,svg,canvas,video{max-width:100%}
     if(!target) return;
     $$('.view').forEach(v=>v.classList.remove('active'));
     target.classList.add('active');
-    $$('.nav a').forEach(x=>x.classList.toggle('active', x.dataset.view===view));
+    // 'carteiras' (criar/gerir mesa) faz parte da experiência de Operações — mantém a aba destacada.
+    const navView = view==='carteiras' ? 'operacao' : view;
+    $$('.nav a').forEach(x=>x.classList.toggle('active', x.dataset.view===navView));
     const main=document.querySelector('.content .page'); if(main) main.scrollTop=0;
     window.scrollTo(0,0);
     // A aba "Operações" abre direto a negociação com os dados salvos da mesa.
@@ -2766,6 +2768,9 @@ img,svg,canvas,video{max-width:100%}
   }
   function m3Init(){
     const nb=$('#m3New'); if(nb) nb.addEventListener('click',m3OpenCreate);
+    // Entrada única: "Criar mesa" na aba Operações leva ao fluxo rico de criação/gestão.
+    const ocm=$('#opCreateMesa'); if(ocm) ocm.addEventListener('click',()=>{ showView('carteiras'); if(typeof m3OpenCreate==='function') m3OpenCreate(); });
+    const mb=$('#m3Back'); if(mb) mb.addEventListener('click',()=>showView('operacao'));
     const cc=$('#m3cCancel'); if(cc) cc.addEventListener('click',()=>m3Step(0));
     // Navegação do wizard: 1 Mesa → 2 Ativos → 3 Valores/taxas → 4 Revisão.
     const on=(id,fn)=>{ const el=$(id); if(el) el.addEventListener('click',fn); };
@@ -3016,7 +3021,7 @@ img,svg,canvas,video{max-width:100%}
   loadNetCatalog();
   // Guard de auth: sem login/cadastro (token) → vai direto pro cadastro do portal.
   if(!getTok()){ goToRegister(); }
-  else { integratePortal(); mesaInit(); securityInit(); m3Init(); }
+  else { integratePortal(); mesaInit(); securityInit(); m3Init(); showView('operacao'); }
 })();
 </script>
 </body>
