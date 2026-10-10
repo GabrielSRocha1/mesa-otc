@@ -2609,16 +2609,37 @@ img,svg,canvas,video{max-width:100%}
       $('#m3dCode').textContent=m.code;
       $('#m3dStatus').outerHTML='<span id="m3dStatus">'+m3Badge(m.status)+'</span>';
       const chairs=$('#m3dChairs');
+      // Saldos do precheck (por papel) p/ exibir no card, como na aba Operações.
+      const balByRole={}; ((m3Bal&&m3Bal.chairs)||[]).forEach(b=>{ balByRole[b.role]=b; });
       chairs.innerHTML=(m.chairs||[]).map(c=>{
         const conn=!!c.wallet;
-        const inviteBtn=(!conn&&c.role!=='PAYMASTER_1')?'<button class="btn" data-m3-inv="'+esc(c.chairId)+'" style="height:34px;font-size:12.5px;margin-top:8px">Convidar participante</button>':'';
-        const revoke=(conn&&!m.approvedAt&&c.role!=='PAYMASTER_1')?'<button class="btn" data-m3-rvk="'+esc(c.chairId)+'" style="height:30px;font-size:11.5px;margin-top:6px;border-color:var(--red);color:#fecaca">Revogar conexão</button>':'';
-        // Badge de assinatura (quando há operação): ✓ Assinou / Vez de assinar / Conectado.
+        const sym=(c.expectedAsset&&c.expectedAsset.symbol)||'?';
+        const net=(c.expectedAsset&&c.expectedAsset.network)||'';
+        const coin=opCoinBadge(sym,'#243357',opChainIcon(net));
+        // Linha de identidade: nome + endereço (ou estado do convite).
+        const idLine=conn
+          ? esc(c.firstName||'—')+' · <span class="mono">'+esc(shortAddr(c.wallet.address))+'</span>'
+          : (c.invite?'Convite enviado — aguardando conexão':'Aguardando convite');
+        // Status (bolinha verde/cinza) — conectado vs. pendente.
+        const connTag=conn
+          ? '<span class="op-conn"><i></i>Conectado</span>'
+          : '<span class="op-conn" style="color:var(--ink-3)"><i style="background:var(--ink-3);box-shadow:none"></i>Pendente</span>';
+        // Saldo real (quando houver precheck) — exigido/disponível + gás.
+        const b=balByRole[c.role]; const num=n=>(n==null?'—':Number(n).toLocaleString('pt-BR',{maximumFractionDigits:6}));
+        let balBlock='<div class="bal" style="color:var(--ink-3);font-size:13px">'+esc(sym)+'</div>';
+        if(b&&b.assetRequired!=null){
+          const okA=b.assetOk?'var(--green)':'var(--red)';
+          balBlock='<div class="bal" style="color:'+okA+';font-size:15px">'+num(b.assetAmount)+' '+esc(sym)+'</div><div class="usd">exigido: '+num(b.assetRequired)+(b.gasOk!=null?(' · gás '+(b.gasOk?'✓':'✗')):'')+'</div>';
+        }
+        // Badge de assinatura (quando há operação).
         const dd=m.deal; let sigBadge='';
-        if(conn&&dd){ if((dd.signed||[]).includes(c.role)) sigBadge='<span class="badge ok" style="margin-top:6px;display:inline-block">✓ Assinou</span>'; else if(dd.state==='AWAITING_SIGNATURES'&&dd.turnRole===c.role) sigBadge='<span class="badge wait" style="margin-top:6px;display:inline-block">→ Vez de assinar</span>'; else sigBadge='<span class="badge info" style="margin-top:6px;display:inline-block">Aguardando</span>'; }
-        return '<div class="op-part"><div class="nm">'+esc(M3_ROLE[c.role]||c.role)+(c.label?' <span style="color:var(--ink-3);font-weight:400;font-size:11.5px">· '+esc(c.label)+'</span>':'')+'</div>'
-          +'<div style="font-size:12.5px;color:var(--ink-2)">'+(conn?('✓ '+esc(c.firstName||'')+' · <span class="mono">'+esc(shortAddr(c.wallet.address))+'</span>'):(c.invite?'Convite enviado — aguardando conexão':'Aguardando convite'))+'</div>'
-          +'<div style="font-size:12px;color:var(--ink-3)">Ativo: '+esc(c.expectedAsset.symbol)+'</div>'+(sigBadge?('<div>'+sigBadge+'</div>'):'')+inviteBtn+revoke+'</div>';
+        if(conn&&dd){ if((dd.signed||[]).includes(c.role)) sigBadge='<span class="badge ok" style="margin-top:8px;display:inline-block">✓ Assinou</span>'; else if(dd.state==='AWAITING_SIGNATURES'&&dd.turnRole===c.role) sigBadge='<span class="badge wait" style="margin-top:8px;display:inline-block">→ Vez de assinar</span>'; else sigBadge='<span class="badge info" style="margin-top:8px;display:inline-block">Aguardando assinatura</span>'; }
+        const inviteBtn=(!conn&&c.role!=='PAYMASTER_1')?'<button class="btn" data-m3-inv="'+esc(c.chairId)+'" style="height:32px;font-size:12px;margin-top:8px;width:100%">Convidar participante</button>':'';
+        const revoke=(conn&&!m.approvedAt&&c.role!=='PAYMASTER_1')?'<button class="btn" data-m3-rvk="'+esc(c.chairId)+'" style="height:30px;font-size:11.5px;margin-top:6px;width:100%;border-color:var(--red);color:#fecaca">Revogar conexão</button>':'';
+        return '<div class="op-part">'
+          +'<div class="ph">'+coin+'<div><div class="nm">'+esc(M3_ROLE[c.role]||c.role)+' <span class="op-tag">'+esc(sym)+'</span></div><div class="addr">'+idLine+'</div></div></div>'
+          +'<div class="foot"><div>'+balBlock+'</div>'+connTag+'</div>'
+          +(sigBadge?('<div>'+sigBadge+'</div>'):'')+inviteBtn+revoke+'</div>';
       }).join('');
       chairs.querySelectorAll('[data-m3-inv]').forEach(b=>b.addEventListener('click',()=>m3Invite(b.dataset.m3Inv)));
       chairs.querySelectorAll('[data-m3-rvk]').forEach(b=>b.addEventListener('click',async()=>{ if(!confirm('Revogar a conexão desta cadeira? O participante precisará de um novo convite.')) return; try{ await pmApi('/v1/portal/mesas/'+m3Sel+'/chairs/'+b.dataset.m3Rvk+'/revoke',{method:'POST',body:{}}); m3Refresh(); }catch(e){ toast(e.message,'err'); } }));
