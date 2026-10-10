@@ -52,7 +52,7 @@ export interface DevDemo { keyring: import('../portal/demo.js').DemoMesaKeyring;
 /** Modo EVM dev: contrato real (Sepolia/anvil), keyring de EOAs dev e mint dos tokens mock. */
 export interface DevEvmKeyring { addressFor(owner: string): string; accountByAddress(address: string): import('viem/accounts').PrivateKeyAccount | null }
 export interface DevEvm { chainId: string; escrow: string; tbtc: `0x${string}`; tusdt: `0x${string}`; explorerBase: string | null; keyring: DevEvmKeyring; mintToken: (token: `0x${string}`, to: string, amount: bigint) => Promise<void> }
-export interface ApiDeps { deals: DealEngine; settlement: SettlementEngine; price: PriceEngine; liquidity: LiquidityEngine; router: RouterEngine; registry: AssetRegistry; adapters?: AdapterRegistry; platformFeeBps: number; networkCostUsd: (n: Network) => Promise<string>; auth: WalletAuth; portal: PortalService; identity: IdentityService; identityDev?: { email: FakeEmailChannel; sms: FakeSmsChannel }; rooms: RoomService; proposals: ProposalService; mesa: MesaService; balanceReaders?: BalanceReaders; store: Store; audit: AuditLog; mesaHtmlPath?: string; portalHtmlPath?: string; conviteHtmlPath?: string; env: string; rateLimit?: { windowMs: number; max: number }; dev?: DevMint }
+export interface ApiDeps { deals: DealEngine; settlement: SettlementEngine; price: PriceEngine; liquidity: LiquidityEngine; router: RouterEngine; registry: AssetRegistry; adapters?: AdapterRegistry; platformFeeBps: number; networkCostUsd: (n: Network) => Promise<string>; auth: WalletAuth; portal: PortalService; identity: IdentityService; identityDev?: { email: FakeEmailChannel; sms: FakeSmsChannel }; rooms: RoomService; proposals: ProposalService; mesa: MesaService; balanceReaders?: BalanceReaders; store: Store; audit: AuditLog; mesaHtmlPath?: string; portalHtmlPath?: string; conviteHtmlPath?: string; operacaoHtmlPath?: string; env: string; rateLimit?: { windowMs: number; max: number }; dev?: DevMint }
 declare module 'fastify' { interface FastifyRequest { session: Session | null } }
 
 const NetworkZ = z.enum(['bitcoin', 'ethereum', 'solana', 'zcash', 'tron']); const RoleZ = z.enum(['SELLER', 'BUYER', 'PAYMASTER_1', 'PAYMASTER_2']);
@@ -221,6 +221,24 @@ export async function buildApi(deps: ApiDeps): Promise<FastifyInstance> {
   app.post('/v1/deals', async (req, reply) => { const s = requireSession(req); const r = await idempotent(req, reply, async () => { const d = await deps.deals.create(req.body, s.address); return deps.deals.view(d, s.address); }); void reply.code(201); return r; });
   app.get('/v1/deals', async req => { const s = requireSession(req); const list = await deps.store.listDeals(s.role === 'operator' ? {} : { participant: s.address }); return list.map(short); });
   app.get('/v1/deals/:id', async req => { const s = requireSession(req); const { id } = req.params as { id: string }; const d = await deps.deals.get(id); return deps.deals.view(d, s.address, s.role === 'operator'); });
+  // VISUALIZAÇÃO PÚBLICA (somente-leitura) de uma operação por id — base do link compartilhável
+  // /op/:dealId (inclui as operações do fluxo legado). Id OTC é não-adivinhável; expõe só o resumo.
+  app.get('/v1/operations/:dealId/view', async req => {
+    const { dealId } = req.params as { dealId: string };
+    const d = await deps.deals.get(dealId).catch(() => null);
+    if (!d) throw new DomainError('INVALID_INPUT', 'Operação não encontrada');
+    const shortAddr = (a: string): string => a.length > 12 ? `${a.slice(0, 7)}…${a.slice(-3)}` : a;
+    const signed = new Set(d.signatures.filter(s => s.status === 'valid' && s.revision === d.revision).map(s => s.role));
+    const legIn = d.terms?.legs[0]; const legOut = d.terms?.legs[1];
+    return {
+      id: d.id, state: d.state, createdAt: d.createdAt, expiresAt: d.expiresAt,
+      turnRole: d.turnRole ?? null, turnExpiresAt: d.turnExpiresAt ?? null,
+      requiredSignatures: d.requiredSignatures, validSignatures: d.validSignatures,
+      assetIn: d.draft?.assetIn?.code ?? legIn?.asset.code ?? null, assetOut: d.draft?.assetOut?.code ?? legOut?.asset.code ?? null,
+      amountInBase: d.draft?.amountInBase ?? null,
+      participants: d.participants.map(p => ({ role: p.role, address: shortAddr(p.address), network: p.network, signed: signed.has(p.role), isTurn: d.turnRole === p.role })),
+    };
+  });
   app.get('/v1/deals/:id/timeline', async req => { const s = requireSession(req); const { id } = req.params as { id: string }; const d = await deps.deals.get(id); deps.deals.view(d, s.address, s.role === 'operator'); return deps.store.listDealEvents(id); });
   app.post('/v1/deals/:id/participants/:role/bind', async (req, reply) => { const s = requireSession(req); const { id, role } = req.params as { id: string; role: Role }; return idempotent(req, reply, async () => deps.deals.view(await deps.deals.connectWallet(id, parse(RoleZ, role), s.address, s.address), s.address)); });
   app.post('/v1/deals/:id/verify', async (req, reply) => { const s = requireSession(req); const { id } = req.params as { id: string }; return idempotent(req, reply, async () => deps.deals.view(await deps.deals.verify(id, s.address), s.address)); });
@@ -939,6 +957,8 @@ export async function buildApi(deps: ApiDeps): Promise<FastifyInstance> {
   // estava servindo o HTML velho do convite no dapp-browser da Verum.
   const prepHtmlNoSW = (path: string): string => withProvider(injectPwaNoSW(withApiMeta(path)));
   if (deps.mesaHtmlPath) { const mesa = prepHtml(deps.mesaHtmlPath); for (const p of ['/mesa', '/operacao', '/operacoes', '/abrir-mesa']) app.get(p, async (_req, reply) => sendHtml(reply, mesa)); }
+  // Visualização pública (somente-leitura) de uma operação — link compartilhável /op/:dealId.
+  if (deps.operacaoHtmlPath) { const op = prepHtml(deps.operacaoHtmlPath); for (const p of ['/op', '/op/:dealId']) app.get(p, async (_req, reply) => sendHtml(reply, op)); }
   if (deps.portalHtmlPath) { const portalHtml = prepHtml(deps.portalHtmlPath); for (const p of ['/portal', '/cadastro', '/login']) app.get(p, async (_req, reply) => sendHtml(reply, portalHtml)); }
   if (deps.conviteHtmlPath) { const convite = prepHtmlNoSW(deps.conviteHtmlPath); for (const p of ['/convite', '/convite/:token', '/invite', '/invite/:token', '/otc/convite/:token']) app.get(p, async (_req, reply) => sendHtml(reply, convite)); }
   // Provider da Verum (window.verum) — só ativa quando embutido no iframe do navegador dApp da Verum.

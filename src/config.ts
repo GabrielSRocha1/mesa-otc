@@ -22,6 +22,7 @@ const Schema = z.object({
   MESA_HTML_PATH: z.string().optional(),
   PORTAL_HTML_PATH: z.string().optional(),
   CONVITE_HTML_PATH: z.string().optional(),
+  OPERACAO_HTML_PATH: z.string().optional(),
   PORTAL_DATA_FILE: z.string().default('./.data/portal.json'),
   BLOCKCHAIR_API_KEY: z.string().optional(), // chave Blockchair p/ leitura de saldo Zcash
   // Identidade mínima (§2/§8/§10). O segredo mestre deriva as chaves de cifragem/índice/OTP.

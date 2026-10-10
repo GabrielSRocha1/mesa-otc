@@ -834,6 +834,7 @@ img,svg,canvas,video{max-width:100%}
               <button class="btn btn-primary" id="opStartDeal" type="button" style="height:38px"><svg viewBox="0 0 24 24"><path d="M4 12h13M11 6l6 6-6 6"/></svg>Iniciar operação</button>
               <button class="btn btn-primary" id="opSignTurn" type="button" style="height:38px;display:none"><svg viewBox="0 0 24 24"><path d="M4 20h4l10-10-4-4L4 16v4z"/><path d="M13.5 6.5l4 4"/></svg>Assinar minha vez</button>
               <button class="btn" id="opNewDeal" type="button" style="height:38px;display:none"><svg viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg>Criar nova operação</button>
+              <button class="btn" id="opShareDeal" type="button" style="height:38px;display:none" title="Link somente-leitura desta operação"><svg viewBox="0 0 24 24"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V5a2 2 0 012-2h8"/></svg>Copiar link de visualização</button>
             </div>
             <div class="op-steps" id="opSteps">
               <div class="op-step done"><div class="line"></div><div class="dot"><svg viewBox="0 0 24 24"><path d="M5 13l4 4L19 7"/></svg></div><div class="nm">Vendedor</div><div class="meta">Assinado em 12/05/2025 14:21</div><div class="addr2">bc1qxy2kg…9f3a</div></div>
@@ -1986,6 +1987,8 @@ img,svg,canvas,video{max-width:100%}
     const btn=$('#opStartDeal'); if(btn) btn.style.display = awaiting?'none':'';
     const sbtn=$('#opSignTurn'); if(sbtn){ sbtn.style.display = (awaiting&&d.turnRole)?'':'none'; if(!sbtn.disabled) sbtn.textContent = d.demo?'Assinar minha vez':'Assinar com Verum Wallet'; }
     const nbtn=$('#opNewDeal'); if(nbtn) nbtn.style.display = awaiting?'':'none'; // com deal em andamento, permite abandonar e criar outra
+    // Link de visualização (somente leitura) da operação — compartilhável; serve p/ operações do fluxo legado também.
+    const shbtn=$('#opShareDeal'); if(shbtn){ shbtn.style.display = d.id?'':'none'; shbtn.onclick=()=>{ clip(location.origin+'/op/'+encodeURIComponent(d.id)); toast('Link de visualização copiado (somente leitura)','ok'); }; }
     startTurnCountdown();
     renderContract(d);
     opRenderInfo();
@@ -2149,6 +2152,7 @@ img,svg,canvas,video{max-width:100%}
         openMesaDeal(c.dataset.deal);
       };
       c.addEventListener('click',open); c.addEventListener('keydown',e=>{ if(e.key==='Enter'||e.key===' '){ e.preventDefault(); open(); } });
+      const sh=c.querySelector('[data-share-op]'); if(sh) sh.addEventListener('click',e=>{ e.stopPropagation(); clip(location.origin+'/op/'+encodeURIComponent(sh.dataset.shareOp)); toast('Link de visualização copiado (somente leitura)','ok'); });
     });
   }
   function dealCardsHtml(list,activeId){
@@ -2161,7 +2165,9 @@ img,svg,canvas,video{max-width:100%}
       const turn=(d.state==='AWAITING_SIGNATURES'&&d.turnRole)?(' · vez: '+(OP_STEP_LABEL[d.turnRole]||d.turnRole)):'';
       return '<div class="op-deal-card'+(d.id===activeId?' active':'')+'" data-deal="'+esc(d.id)+'" role="button" tabindex="0">'
         +'<div><div class="dpair">'+(amt!=null?amt+' ':'')+esc(pairTxt)+'</div><div class="did">'+esc(d.id)+'</div><div class="dmeta">'+esc(dt)+' · '+d.validSignatures+'/'+d.requiredSignatures+' assinaturas'+esc(turn)+'</div></div>'
-        +'<div class="dright">'+opStateBadge(d.state)+(d.id===activeId?'<span style="font-size:10.5px;color:var(--blue);font-weight:700">Aberta na esteira</span>':'')+'</div></div>';
+        +'<div class="dright">'+opStateBadge(d.state)+(d.id===activeId?'<span style="font-size:10.5px;color:var(--blue);font-weight:700">Aberta na esteira</span>':'')
+        +'<button class="btn" data-share-op="'+esc(d.id)+'" title="Link somente-leitura desta operação" style="height:28px;font-size:11px;margin-top:6px"><svg viewBox="0 0 24 24" style="width:12px;height:12px;stroke:currentColor;fill:none;stroke-width:2;vertical-align:-2px"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V5a2 2 0 012-2h8"/></svg>Copiar link</button>'
+        +'</div></div>';
     }).join('');
   }
   async function refreshMesaDeals(){ if(!getTok()) return; try{ const r=await pmApi('/v1/portal/mesa/deals'); if(r&&Array.isArray(r.deals)){ opDealsCache=r.deals; renderDealList(r.deals,r.activeId); } }catch(e){} }

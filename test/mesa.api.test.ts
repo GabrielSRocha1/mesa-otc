@@ -324,6 +324,15 @@ describe('validação diagnosticável do convite', () => {
     expect(mine).toBeTruthy();
     expect(mine!.mesaId).toBe(mesa.mesaId);
     expect(mine!.active).toBe(true);
+    // visualização PÚBLICA (somente-leitura) da operação — base do link compartilhável /op/:dealId
+    const pub = await app.api.inject({ method: 'GET', url: `/v1/operations/${dealId}/view` });
+    expect(pub.statusCode, pub.body).toBe(200);
+    const pubBody = pub.json<{ id: string; state: string; participants: { role: string; address: string; signed: boolean }[] }>();
+    expect(pubBody.id).toBe(dealId);
+    expect(pubBody.participants.length).toBeGreaterThanOrEqual(2);
+    expect(pubBody.participants.every(p => p.address.includes('…') || p.address.length <= 12)).toBe(true); // endereço encurtado
+    // id inexistente → 400
+    expect((await app.api.inject({ method: 'GET', url: '/v1/operations/OTC-nope/view' })).statusCode).toBe(400);
     expect((await app.api.inject({ method: 'PATCH', url: `/v1/portal/mesas/${mesa.mesaId}/config`, headers: pmHeaders(pm), payload: { discountBps: 5 } })).statusCode).toBe(409);
 
     // dealId que não pertence à mesa → 400
