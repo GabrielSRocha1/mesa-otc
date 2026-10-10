@@ -687,7 +687,7 @@ img,svg,canvas,video{max-width:100%}
     </div>
 
     <nav class="nav">
-      <a href="#" class="active" data-view="operacao"><svg viewBox="0 0 24 24"><rect x="4" y="4" width="16" height="16" rx="2"/><path d="M8 9h8M8 13h5"/></svg>Operações</a>
+      <a href="#" class="active" data-view="carteiras"><svg viewBox="0 0 24 24"><rect x="4" y="4" width="16" height="16" rx="2"/><path d="M8 9h8M8 13h5"/></svg>Operações</a>
       <a href="#" data-view="seguranca"><svg viewBox="0 0 24 24"><path d="M12 3l7 3v5c0 5-3 8-7 10-4-2-7-5-7-10V6z"/><path d="M9 12l2 2 4-4"/></svg>Segurança</a>
       <a href="#" data-view="config"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3.2"/><path d="M19 12a7 7 0 00-.1-1.3l2-1.5-2-3.4-2.3 1a7 7 0 00-2.2-1.3L14 3h-4l-.4 2.5a7 7 0 00-2.2 1.3l-2.3-1-2 3.4 2 1.5A7 7 0 005 12c0 .4 0 .9.1 1.3l-2 1.5 2 3.4 2.3-1a7 7 0 002.2 1.3L10 21h4l.4-2.5a7 7 0 002.2-1.3l2.3 1 2-3.4-2-1.5c.1-.4.1-.9.1-1.3z"/></svg>Configurações</a>
     </nav>
@@ -739,7 +739,7 @@ img,svg,canvas,video{max-width:100%}
 
     <!-- ===================== VIEW: NOVA OPERAÇÃO ===================== -->
     <!-- ===================== VIEW: OPERAÇÕES (Negociação OTC — dados salvos da mesa) ===================== -->
-    <section class="view active" id="view-operacao">
+    <section class="view" id="view-operacao">
       <div class="op-head">
         <div class="titw"><h1>Operações</h1><p>Crie a mesa, convide as carteiras, configure, aprove e assine — tudo aqui.</p></div>
         <button class="btn btn-primary" id="opCreateMesa" type="button" style="height:40px"><svg viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg>Criar mesa</button>
@@ -769,11 +769,6 @@ img,svg,canvas,video{max-width:100%}
         </table></div>
       </section>
 
-      <!-- Todas as operações (ativa + histórico) de todas as mesas — cada uma com link de visualização -->
-      <section class="card" id="opAllCard" style="display:none;margin-bottom:16px">
-        <div class="card-h"><div class="t"><svg viewBox="0 0 24 24" style="width:17px;height:17px;stroke:var(--blue);fill:none;stroke-width:2;vertical-align:-3px;margin-right:6px"><rect x="4" y="4" width="16" height="16" rx="2"/><path d="M8 9h8M8 13h5"/></svg>Todas as operações</div><span class="badge info" id="opAllCount">0</span></div>
-        <div class="op-deal-list" id="opAllList"></div>
-      </section>
 
       <div class="op-layout">
         <div class="op-main">
@@ -894,10 +889,10 @@ img,svg,canvas,video{max-width:100%}
     </section>
 
     <!-- ===================== VIEW: CARTEIRAS ===================== -->
-    <section class="view" id="view-carteiras">
+    <section class="view active" id="view-carteiras">
       <div class="page-head">
-        <div><h1>Mesa</h1><p>Crie a mesa, convide as carteiras (prova de posse na conexão), configure e aprove. O acompanhamento e as assinaturas aparecem na esteira.</p></div>
-        <div class="ph-actions" style="display:flex;gap:8px"><button class="btn" id="m3Back" type="button"><svg viewBox="0 0 24 24"><path d="M19 12H5M11 6l-6 6 6 6"/></svg>Voltar para Operações</button><button class="btn btn-primary" id="m3New" type="button"><svg viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg>Criar mesa</button></div>
+        <div><h1>Operações</h1><p>Crie a mesa, convide as carteiras (prova de posse na conexão), configure e aprove. O acompanhamento e as assinaturas aparecem na esteira, na própria mesa.</p></div>
+        <div class="ph-actions"><button class="btn btn-primary" id="m3New" type="button"><svg viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg>Criar mesa</button></div>
       </div>
 
       <!-- ===== Cadastro da mesa: wizard em 4 passos curtos ===== -->
@@ -960,6 +955,12 @@ img,svg,canvas,video{max-width:100%}
       <section class="card" id="m3ListCard" style="margin-bottom:16px">
         <div class="card-h"><div class="t"><svg viewBox="0 0 24 24" style="width:17px;height:17px;stroke:var(--blue);fill:none;stroke-width:2;vertical-align:-3px;margin-right:6px"><rect x="3" y="6" width="18" height="13" rx="2"/><path d="M16 12h2M3 10h18"/></svg>Minhas mesas</div><span class="badge info" id="m3Count">0</span></div>
         <div id="m3List"><p style="color:var(--ink-3);font-size:12.5px;margin:0">Nenhuma mesa criada ainda. Toque em "Criar mesa".</p></div>
+      </section>
+
+      <!-- Todas as operações (ativa + histórico) de todas as mesas — cada uma com link de visualização -->
+      <section class="card" id="opAllCard" style="display:none;margin-bottom:16px">
+        <div class="card-h"><div class="t"><svg viewBox="0 0 24 24" style="width:17px;height:17px;stroke:var(--blue);fill:none;stroke-width:2;vertical-align:-3px;margin-right:6px"><rect x="4" y="4" width="16" height="16" rx="2"/><path d="M8 9h8M8 13h5"/></svg>Todas as operações</div><span class="badge info" id="opAllCount">0</span></div>
+        <div class="op-deal-list" id="opAllList"></div>
       </section>
 
       <!-- ===== Mesas v3: detalhe da mesa selecionada ===== -->
@@ -1056,17 +1057,17 @@ img,svg,canvas,video{max-width:100%}
         </div>
       </section>
 
-      <!-- Operações da mesa (movida da página Operação): cada operação é um card; clicar abre na esteira -->
-      <section class="card" style="margin-bottom:16px">
+      <!-- Operações da mesa / fluxo legado — oculto na fusão (acompanhamento é por "Todas as operações" + detalhe da mesa) -->
+      <section class="card" style="margin-bottom:16px;display:none">
         <div class="card-h"><div class="t"><svg viewBox="0 0 24 24" style="width:17px;height:17px;stroke:var(--blue);fill:none;stroke-width:2;vertical-align:-3px;margin-right:6px"><rect x="4" y="4" width="16" height="16" rx="2"/><path d="M8 9h8M8 13h5"/></svg>Operações da mesa</div><span class="badge info" id="opListCount">0</span></div>
         <div class="op-deal-list" id="opDealList"><p style="color:var(--ink-3);font-size:12.5px;margin:0">Nenhuma operação criada ainda. Use "Iniciar operação" abaixo.</p></div>
       </section>
 
-      <div class="page-head" style="margin-top:8px">
+      <div class="page-head" style="margin-top:8px;display:none">
         <div><h2 style="font-size:17px;margin:0">Mesa rápida (legada)</h2><p>Fluxo anterior com 4 carteiras fixas da conta.</p></div>
         <div class="ph-actions"><span class="badge info" id="mesaCount">—</span></div>
       </div>
-      <div class="vgrid wide" id="mesaSlots">
+      <div class="vgrid wide" id="mesaSlots" style="display:none">
         <section class="card"><div class="state" style="padding:8px 0"><div class="spin" style="width:22px;height:22px;border:2px solid rgba(255,255,255,.25);border-top-color:#fff;border-radius:50%;animation:sp .7s linear infinite;margin:0 auto"></div></div></section>
       </div>
     </section>
@@ -1221,17 +1222,17 @@ img,svg,canvas,video{max-width:100%}
     }catch(e){}
   }
   function showView(view){
+    // FUSÃO: a aba "Operações" e a tela de mesa são UMA só (view-carteiras). Chamadas antigas a
+    // 'operacao' caem na tela única — sem alternância de telas.
+    if(view==='operacao') view='carteiras';
     const target=document.getElementById('view-'+view);
     if(!target) return;
     $$('.view').forEach(v=>v.classList.remove('active'));
     target.classList.add('active');
-    // 'carteiras' (criar/gerir mesa) faz parte da experiência de Operações — mantém a aba destacada.
-    const navView = view==='carteiras' ? 'operacao' : view;
-    $$('.nav a').forEach(x=>x.classList.toggle('active', x.dataset.view===navView));
+    $$('.nav a').forEach(x=>x.classList.toggle('active', x.dataset.view===view));
     const main=document.querySelector('.content .page'); if(main) main.scrollTop=0;
     window.scrollTo(0,0);
-    // A aba "Operações" abre direto a negociação com os dados salvos da mesa.
-    if(view==='operacao'){ try{ updateDraft(); refreshMesaDeals(); renderDealList(opDealsCache,opDeal&&opDeal.id); opRenderInfo(); if(typeof m3LoadList==='function') m3LoadList(); opLoadAll(); }catch(e){} }
+    if(view==='carteiras'){ try{ refreshMesaDeals(); opLoadAll(); if(typeof m3LoadList==='function') m3LoadList(); }catch(e){} }
   }
   // ── Sidebar responsiva (mobile): gaveta aberta pelo hambúrguer ──────────────
   function setNav(open){
@@ -3021,7 +3022,7 @@ img,svg,canvas,video{max-width:100%}
   loadNetCatalog();
   // Guard de auth: sem login/cadastro (token) → vai direto pro cadastro do portal.
   if(!getTok()){ goToRegister(); }
-  else { integratePortal(); mesaInit(); securityInit(); m3Init(); showView('operacao'); }
+  else { integratePortal(); mesaInit(); securityInit(); m3Init(); showView('carteiras'); }
 })();
 </script>
 </body>
