@@ -303,4 +303,46 @@ describe('validação diagnosticável do convite', () => {
     expect(wrong.statusCode).toBe(403);
     await app.close();
   });
+
+  it('exclui OPERAÇÃO (destrava a mesa) e exclui MESA — com validações de posse e de dealId', async () => {
+    const { readers } = mockReaders();
+    const { app } = await makeApp({ balanceReaders: readers });
+    const pm = await registerPm(app, uniqueEmail('del'));
+    const mesa = await createMesa(app, pm);
+    const seller = solWallet(); const buyer = solWallet();
+    await inviteAndJoin(app, pm, mesa.mesaId, mesa.chairs.find(c => c.role === 'SELLER')!.chairId, 'Gabriel', seller);
+    await inviteAndJoin(app, pm, mesa.mesaId, mesa.chairs.find(c => c.role === 'BUYER')!.chairId, 'Beatriz', buyer);
+
+    // aprova → cria a operação; mesa fica travada (config = 409) e a lista de operações tem 1
+    const { dealId } = await approveMesa(app, pm, mesa.mesaId);
+    const av1 = (await app.api.inject({ method: 'GET', url: `/v1/portal/mesas/${mesa.mesaId}`, headers: pmHeaders(pm) })).json<{ deal: { id: string } | null; deals: { id: string }[] }>();
+    expect(av1.deal?.id).toBe(dealId);
+    expect(av1.deals.map(d => d.id)).toContain(dealId);
+    expect((await app.api.inject({ method: 'PATCH', url: `/v1/portal/mesas/${mesa.mesaId}/config`, headers: pmHeaders(pm), payload: { discountBps: 5 } })).statusCode).toBe(409);
+
+    // dealId que não pertence à mesa → 400
+    expect((await app.api.inject({ method: 'POST', url: `/v1/portal/mesas/${mesa.mesaId}/deals/OTC-nao-existe/delete`, headers: pmHeaders(pm) })).statusCode).toBe(400);
+    // participante (não admin) não exclui operação
+    const sellerTok = await walletLogin(app, seller);
+    expect((await app.api.inject({ method: 'POST', url: `/v1/portal/mesas/${mesa.mesaId}/deals/${dealId}/delete`, headers: pmHeaders(sellerTok) })).statusCode).toBeGreaterThanOrEqual(400);
+
+    // exclui a OPERAÇÃO (ainda não irreversível) → remove da lista e DESTRAVA a mesa
+    const del = await app.api.inject({ method: 'POST', url: `/v1/portal/mesas/${mesa.mesaId}/deals/${dealId}/delete`, headers: pmHeaders(pm) });
+    expect(del.statusCode, del.body).toBe(200);
+    const av2 = (await app.api.inject({ method: 'GET', url: `/v1/portal/mesas/${mesa.mesaId}`, headers: pmHeaders(pm) })).json<{ deal: unknown; deals: unknown[] }>();
+    expect(av2.deal).toBeNull();
+    expect(av2.deals.length).toBe(0);
+    // destravada: config volta a aceitar edição (200, não 409) e dá pra aprovar de novo
+    expect((await app.api.inject({ method: 'PATCH', url: `/v1/portal/mesas/${mesa.mesaId}/config`, headers: pmHeaders(pm), payload: { discountBps: 50 } })).statusCode).toBe(200);
+    const { dealId: dealId2 } = await approveMesa(app, pm, mesa.mesaId);
+    expect(dealId2).not.toBe(dealId);
+
+    // exclui a MESA → some da lista e GET do admin passa a 403 (não encontrada para o PM)
+    const delMesa = await app.api.inject({ method: 'POST', url: `/v1/portal/mesas/${mesa.mesaId}/delete`, headers: pmHeaders(pm) });
+    expect(delMesa.statusCode, delMesa.body).toBe(200);
+    expect((await app.api.inject({ method: 'GET', url: `/v1/portal/mesas/${mesa.mesaId}`, headers: pmHeaders(pm) })).statusCode).toBe(403);
+    const list = (await app.api.inject({ method: 'GET', url: '/v1/portal/mesas', headers: pmHeaders(pm) })).json<{ mesas: { mesaId: string }[] }>();
+    expect(list.mesas.map(m => m.mesaId)).not.toContain(mesa.mesaId);
+    await app.close();
+  });
 });

@@ -469,24 +469,31 @@ export class MesaService {
     void this.audit('mesa.cancelada', pm.id, { mesaId, reason: mesa.cancelled.reason });
   }
 
-  /** Exclui a mesa (remove da conta). Bloqueada se houver operação irreversível (fundos trancados). */
+  /** Operação em liquidação/liquidada — não pode ser removida da lista (removê-la esconderia um
+   *  acerto em andamento/concluído). Financiamento pendente NÃO bloqueia (operação ainda em aberto). */
+  private isSettlingOrDone(deal: Deal | null): boolean {
+    return !!deal && ['FULLY_SIGNED', 'SETTLEMENT_VALIDATION', 'SETTLING', 'SETTLED'].includes(deal.state);
+  }
+
+  /** Exclui a mesa (remove da conta). Bloqueada se a operação ativa estiver em liquidação/liquidada. */
   async deleteMesa(portalToken: string | undefined, mesaId: string): Promise<void> {
     const pm = this.d.portal.requirePayMaster(portalToken);
     const mesa = this.mesaOf(pm.id, mesaId);
-    if (await this.irreversibleOf(mesa)) throw new DomainError('VERSION_CONFLICT', 'Operação irreversível: fundos trancados no escrow — não é possível excluir a mesa.');
+    const active = mesa.dealId ? await this.d.getDeal(mesa.dealId) : null;
+    if (this.isSettlingOrDone(active)) throw new DomainError('VERSION_CONFLICT', 'Operação em liquidação/liquidada — não é possível excluir a mesa.');
     delete this.d.portal.mesas()[mesaId];
     this.d.portal.persistMesas();
     void this.audit('mesa.excluida', pm.id, { mesaId });
   }
 
-  /** Exclui UMA operação (deal) da mesa. Bloqueada se a operação for irreversível. Se era a ativa,
+  /** Exclui UMA operação (deal) da mesa. Bloqueada se estiver em liquidação/liquidada. Se era a ativa,
    *  destrava a mesa (approvedAt/termsHash) para permitir uma nova operação. */
   async deleteMesaDeal(portalToken: string | undefined, mesaId: string, dealId: string): Promise<{ deal: Record<string, unknown> | null }> {
     const pm = this.d.portal.requirePayMaster(portalToken);
     const mesa = this.mesaOf(pm.id, mesaId);
     if (mesa.dealId !== dealId && !(mesa.dealIds ?? []).includes(dealId)) throw new DomainError('INVALID_INPUT', 'Operação não pertence a esta mesa.');
     const deal = await this.d.getDeal(dealId);
-    if (deal && this.isIrreversible(deal)) throw new DomainError('VERSION_CONFLICT', 'Operação irreversível: fundos trancados no escrow — não é possível excluir.');
+    if (this.isSettlingOrDone(deal)) throw new DomainError('VERSION_CONFLICT', 'Operação em liquidação/liquidada — não é possível excluir.');
     mesa.dealIds = (mesa.dealIds ?? []).filter(id => id !== dealId);
     if (mesa.dealId === dealId) {
       mesa.dealId = mesa.dealIds.length ? (mesa.dealIds[mesa.dealIds.length - 1] as string) : null;
