@@ -2639,7 +2639,12 @@ img,svg,canvas,video{max-width:100%}
     // Banner ao vivo (com sair).
     let banner=$('#opMirrorBanner');
     if(!banner){ const host=$('#view-carteiras'); if(host){ banner=document.createElement('div'); banner.id='opMirrorBanner'; banner.style.cssText='margin:0 0 12px;padding:10px 12px;border:1px solid var(--blue);border-radius:10px;background:rgba(80,130,255,.08);display:flex;align-items:center;gap:10px;font-size:12.5px;color:var(--ink-2)'; host.insertBefore(banner, host.firstChild); } }
-    if(banner) banner.innerHTML='<b style="color:var(--blue)">Espelho da mesa '+esc(m.code||'')+'</b> · dados ao vivo (somente leitura)<button class="btn" id="opMirrorExit" style="height:28px;font-size:11.5px;margin-left:auto">Sair do espelho</button>';
+    // Link PÚBLICO (somente leitura, sem login): operação (/op/<dealId>) se já houver; senão a mesa (/ver/<mesaId>).
+    const pubUrl = (m.deal&&m.deal.id) ? (location.origin+'/op/'+encodeURIComponent(m.deal.id)) : (location.origin+'/ver/'+encodeURIComponent(m.mesaId));
+    if(banner) banner.innerHTML='<b style="color:var(--blue)">Espelho da mesa '+esc(m.code||'')+'</b> · dados ao vivo (somente leitura)'
+      +'<button class="btn btn-primary" id="opMirrorShare" style="height:28px;font-size:11.5px;margin-left:auto"><svg viewBox="0 0 24 24" style="width:13px;height:13px;stroke:currentColor;fill:none;stroke-width:2;vertical-align:-2px"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V5a2 2 0 012-2h8"/></svg> Copiar link de visualização</button>'
+      +'<button class="btn" id="opMirrorExit" style="height:28px;font-size:11.5px">Sair do espelho</button>';
+    const sh=$('#opMirrorShare'); if(sh) sh.addEventListener('click',()=>{ clip(pubUrl); toast('Link de visualização copiado — abra sem login (somente leitura)','ok'); });
     const ex=$('#opMirrorExit'); if(ex) ex.addEventListener('click',()=>{ opExitMirror(); refreshMesa(); refreshMesaDeal(); });
   }
   function m3Tick(){
