@@ -20,6 +20,7 @@ const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 process.env.PORTAL_HTML_PATH ||= path.join(root, 'web/verum-saas.html');
 process.env.MESA_HTML_PATH ||= path.join(root, 'web/verum-dashboard.html');
 process.env.CONVITE_HTML_PATH ||= path.join(root, 'web/verum-convite.html');
+process.env.OPERACAO_HTML_PATH ||= path.join(root, 'web/verum-operacao.html'); // /op/:dealId e /ver/:mesaId (visualização pública)
 // No Vercel só /tmp é gravável; o PortalService grava aqui (efêmero, por-instância).
 process.env.PORTAL_DATA_FILE ||= '/tmp/verum-portal.json';
 
