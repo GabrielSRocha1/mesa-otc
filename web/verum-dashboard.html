@@ -1211,11 +1211,13 @@ img,svg,canvas,video{max-width:100%}
           +'<div class="dright" style="display:flex;flex-direction:column;gap:6px;align-items:flex-end">'+opStateBadge(d.state)
           +'<div style="display:flex;gap:6px;flex-wrap:wrap;justify-content:flex-end">'
           +'<button class="btn" data-oa-link="'+esc(o.mesaId)+'" data-oa-op="'+esc(d.id)+'" title="Link somente-leitura" style="height:30px;font-size:11.5px"><svg viewBox="0 0 24 24" style="width:13px;height:13px;stroke:currentColor;fill:none;stroke-width:2;vertical-align:-2px"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V5a2 2 0 012-2h8"/></svg>Copiar link</button>'
-          +'<button class="btn" data-oa-mesa="'+esc(o.mesaId)+'" style="height:30px;font-size:11.5px">Ver mesa</button>'
+          +'<button class="btn btn-primary" data-oa-view="'+esc(o.mesaId)+'" title="Abrir na página Operação com os dados desta mesa" style="height:30px;font-size:11.5px">Ver operação</button>'
+          +'<button class="btn" data-oa-mesa="'+esc(o.mesaId)+'" title="Gerenciar (convites, aprovar, assinar)" style="height:30px;font-size:11.5px">Gerenciar</button>'
           +'<button class="btn" data-oa-del="'+esc(o.mesaId)+'" data-oa-delop="'+esc(d.id)+'" title="Excluir operação" style="height:30px;font-size:11.5px;border-color:var(--red);color:#fecaca">Excluir</button>'
           +'</div></div></div>';
       }).join('')||'<p style="color:var(--ink-3);font-size:12.5px;margin:0">Nenhuma operação ainda.</p>';
       box.querySelectorAll('[data-oa-link]').forEach(b=>b.addEventListener('click',()=>{ const op=b.dataset.oaOp; const url=location.origin+'/mesa?mesa='+encodeURIComponent(b.dataset.oaLink)+(op?'&op='+encodeURIComponent(op):''); clip(url); toast('Link de visualização copiado (somente leitura)','ok'); }));
+      box.querySelectorAll('[data-oa-view]').forEach(b=>b.addEventListener('click',()=>opViewMesa(b.dataset.oaView)));
       box.querySelectorAll('[data-oa-mesa]').forEach(b=>b.addEventListener('click',()=>{ showView('carteiras'); m3Open(b.dataset.oaMesa); }));
       box.querySelectorAll('[data-oa-del]').forEach(b=>b.addEventListener('click',async()=>{ if(!confirm('Excluir esta operação?')) return; try{ await pmApi('/v1/portal/mesas/'+encodeURIComponent(b.dataset.oaDel)+'/deals/'+encodeURIComponent(b.dataset.oaDelop)+'/delete',{method:'POST',body:{}}); toast('Operação excluída','ok'); opLoadAll(); }catch(e){ toast(e.message||'Falha ao excluir','err'); } }));
     }catch(e){}
@@ -1701,7 +1703,7 @@ img,svg,canvas,video{max-width:100%}
     const cc=$('#mesaCount'); if(cc) cc.textContent=connected+'/4 conectadas';
     bindMesaActions();
   }
-  async function refreshMesa(){ if(!getTok()||mesaBusy||mesaConnecting) return; mesaBusy=true; try{ const view=await pmApi('/v1/portal/mesa'); renderMesa(view); opMesa=view; if(typeof opOnMesa==='function') opOnMesa(); }catch(ex){ /* silencioso durante polling */ }finally{ mesaBusy=false; } }
+  async function refreshMesa(){ if(!getTok()||mesaBusy||mesaConnecting) return; mesaBusy=true; try{ const view=await pmApi('/v1/portal/mesa'); renderMesa(view); if(opMirror){ opMirrorRefresh(); } else { opMesa=view; if(typeof opOnMesa==='function') opOnMesa(); } }catch(ex){ /* silencioso durante polling */ }finally{ mesaBusy=false; } }
   function mesaInit(){
     const w=$('#mesaSlots'); if(!w) return;
     if(!getTok()){ w.innerHTML='<section class="card"><p style="color:var(--ink-3);margin:0">Faça login no portal Pay Master para gerenciar as carteiras da mesa.</p></section>'; return; }
@@ -2110,7 +2112,7 @@ img,svg,canvas,video{max-width:100%}
     finally{ const b=$('#opSignTurn'); if(b){ b.disabled=false; b.textContent=(opDeal&&opDeal.demo)?'Assinar minha vez':'Assinar com Verum Wallet'; } }
   }
   function startTurnCountdown(){ if(opTurnTimer) clearInterval(opTurnTimer); opTurnTimer=setInterval(()=>{ const el=$('#opSteps .op-turn-chip'); if(!el){ clearInterval(opTurnTimer); return; } const cd=el.querySelector('.op-turn-cd'); if(cd) cd.textContent=fmtCountdown(Number(el.dataset.turnExp)); },1000); }
-  async function refreshMesaDeal(){ if(!getTok()) return; refreshMesaDeals(); try{ const r=await pmApi('/v1/portal/mesa/deal'); if(r&&r.deal){ opDeal=r.deal; renderEsteira(r.deal); if(!opDealTimer) startDealPolling(); } }catch(e){} }
+  async function refreshMesaDeal(){ if(!getTok()||opMirror) return; refreshMesaDeals(); try{ const r=await pmApi('/v1/portal/mesa/deal'); if(r&&r.deal){ opDeal=r.deal; renderEsteira(r.deal); if(!opDealTimer) startDealPolling(); } }catch(e){} }
   function startDealPolling(){ if(opDealTimer) clearInterval(opDealTimer); opDealTimer=setInterval(refreshMesaDeal,5000); }
   /* ---------- Rascunhos locais: criar operação já salva na lista, sem backend ---------- */
   const DRAFTS_KEY='verum_op_drafts';
@@ -2535,8 +2537,9 @@ img,svg,canvas,video{max-width:100%}
       const box=$('#m3List'); if(box){
         box.innerHTML = mesas.length? mesas.map(m=>'<div class="r" style="display:flex;gap:10px;align-items:center;justify-content:space-between;padding:10px 0;border-bottom:1px solid var(--line)">'
           +'<div><span class="mono" style="font-size:12.5px">'+esc(m.code)+'</span>'+(m.operationCode?' <span class="mono" style="color:var(--blue);font-size:12px">· '+esc(m.operationCode)+'</span>':'')+(m.networkLabel?' <span style="color:var(--ink-3);font-size:12px">· '+esc(m.networkLabel)+'</span>':'')+(m.label?' <span style="color:var(--ink-3);font-size:12px">· '+esc(m.label)+'</span>':'')+'<div style="font-size:12px;color:var(--ink-3)">'+m.chairs.map(c=>esc((M3_ROLE[c.role]||c.role)+(c.firstName?(' · '+c.firstName):''))+(c.connected?' ✓':'')).join(' · ')+'</div></div>'
-          +'<div style="display:flex;gap:8px;align-items:center">'+m3Badge(m.status)+'<button class="btn" data-m3-open="'+esc(m.mesaId)+'" style="height:34px;font-size:12.5px">Ver mesa</button><button class="btn" data-m3-del="'+esc(m.mesaId)+'" title="Excluir mesa" style="height:34px;font-size:12.5px;border-color:var(--red);color:#fecaca">Excluir</button></div></div>').join('')
+          +'<div style="display:flex;gap:8px;align-items:center">'+m3Badge(m.status)+'<button class="btn btn-primary" data-m3-view="'+esc(m.mesaId)+'" title="Abrir na página Operação com os dados desta mesa" style="height:34px;font-size:12.5px">Ver operação</button><button class="btn" data-m3-open="'+esc(m.mesaId)+'" title="Gerenciar (convites, aprovar, assinar)" style="height:34px;font-size:12.5px">Gerenciar</button><button class="btn" data-m3-del="'+esc(m.mesaId)+'" title="Excluir mesa" style="height:34px;font-size:12.5px;border-color:var(--red);color:#fecaca">Excluir</button></div></div>').join('')
           : '<p style="color:var(--ink-3);font-size:12.5px;margin:0">Nenhuma mesa criada ainda. Toque em "Criar mesa".</p>';
+        box.querySelectorAll('[data-m3-view]').forEach(b=>b.addEventListener('click',()=>opViewMesa(b.dataset.m3View)));
         box.querySelectorAll('[data-m3-open]').forEach(b=>b.addEventListener('click',()=>m3Open(b.dataset.m3Open)));
         box.querySelectorAll('[data-m3-del]').forEach(b=>b.addEventListener('click',()=>m3DeleteMesa(b.dataset.m3Del)));
       }
@@ -2554,14 +2557,16 @@ img,svg,canvas,video{max-width:100%}
     rows.innerHTML=list.map(m=>'<tr><td class="mono">'+esc(m.code)+(m.operationCode?'<br><span style="color:var(--blue);font-size:11px">'+esc(m.operationCode)+'</span>':'')+'</td>'
       +'<td style="font-size:12px">'+m.chairs.map(c=>esc((M3_ROLE[c.role]||c.role)+(c.firstName?(': '+c.firstName):''))).join('<br>')+'</td>'
       +'<td class="mono">'+esc(m.amount||'—')+'</td><td>'+m3Badge(m.status)+'</td>'
-      +'<td style="display:flex;gap:6px;flex-wrap:wrap"><button class="btn" data-m3-goto="'+esc(m.mesaId)+'" style="height:32px;font-size:12px">Ver mesa</button>'
+      +'<td style="display:flex;gap:6px;flex-wrap:wrap"><button class="btn btn-primary" data-m3-view="'+esc(m.mesaId)+'" title="Abrir na página Operação com os dados desta mesa" style="height:32px;font-size:12px">Ver operação</button>'
+      +'<button class="btn" data-m3-goto="'+esc(m.mesaId)+'" title="Gerenciar (convites, aprovar, assinar)" style="height:32px;font-size:12px">Gerenciar</button>'
       +'<button class="btn" data-m3-vlink="'+esc(m.mesaId)+'" data-m3-vlinkop="'+esc(m.dealId||'')+'" title="Link somente-leitura da operação" style="height:32px;font-size:12px"><svg viewBox="0 0 24 24" style="width:13px;height:13px;stroke:currentColor;fill:none;stroke-width:2;vertical-align:-2px"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V5a2 2 0 012-2h8"/></svg>Copiar link</button>'
       +'<button class="btn" data-m3-tdel="'+esc(m.mesaId)+'" title="Excluir mesa" style="height:32px;font-size:12px;border-color:var(--red);color:#fecaca">Excluir</button></td></tr>').join('')||'<tr><td colspan="5" style="color:var(--ink-3)">Nenhuma mesa com esse filtro.</td></tr>';
+    rows.querySelectorAll('[data-m3-view]').forEach(b=>b.addEventListener('click',()=>opViewMesa(b.dataset.m3View)));
     rows.querySelectorAll('[data-m3-goto]').forEach(b=>b.addEventListener('click',()=>{ showView('carteiras'); m3Open(b.dataset.m3Goto); }));
     rows.querySelectorAll('[data-m3-vlink]').forEach(b=>b.addEventListener('click',()=>{ const op=b.dataset.m3Vlinkop; const url=location.origin+'/mesa?mesa='+encodeURIComponent(b.dataset.m3Vlink)+(op?'&op='+encodeURIComponent(op):''); clip(url); toast('Link de visualização copiado (somente leitura)','ok'); }));
     rows.querySelectorAll('[data-m3-tdel]').forEach(b=>b.addEventListener('click',()=>m3DeleteMesa(b.dataset.m3Tdel)));
   }
-  function m3Open(mesaId){ m3Sel=mesaId; $('#m3Detail').style.display=''; m3Refresh(); if(!m3Timer) m3Timer=setInterval(m3Refresh,5000); if(!m3TickT) m3TickT=setInterval(m3Tick,1000); }
+  function m3Open(mesaId){ opExitMirror(); m3Sel=mesaId; $('#m3Detail').style.display=''; m3Refresh(); if(!m3Timer) m3Timer=setInterval(m3Refresh,5000); if(!m3TickT) m3TickT=setInterval(m3Tick,1000); }
   async function m3DeleteMesa(mesaId){
     if(!mesaId) return;
     if(!confirm('Excluir esta mesa? Esta ação remove a mesa e não pode ser desfeita.')) return;
@@ -2571,6 +2576,71 @@ img,svg,canvas,video{max-width:100%}
       if(m3Sel===mesaId){ const d=$('#m3Detail'); if(d) d.style.display='none'; m3Sel=null; }
       m3LoadList();
     }catch(e){ toast(e.message||'Falha ao excluir','err'); }
+  }
+
+  /* ===== ESPELHO MESA → OPERAÇÃO (read-only): lança os dados da mesa v3 no simulador da página
+     Operação, substituindo os valores fixos. Fica AO VIVO pelo polling enquanto opMirror set. ===== */
+  let opMirror=null; // mesaId espelhado (null = simulador normal)
+  function opTokFromAsset(a){
+    if(!a) return null;
+    const sym=String(a.symbol||'').toUpperCase();
+    if(sym==='USDT'||sym==='USDC') return { kind:'stable', token:sym, net:a.network };
+    return { kind:'native', chainKey:a.network };
+  }
+  async function opViewMesa(mesaId){
+    if(!mesaId) return;
+    opMirror=mesaId;
+    showView('operacao'); // → hub 'carteiras'
+    await opMirrorRefresh();
+    const anchor=$('#opParts'); if(anchor) anchor.scrollIntoView({behavior:'smooth',block:'start'});
+  }
+  async function opMirrorRefresh(){
+    if(!opMirror) return;
+    try{ const m=await pmApi('/v1/portal/mesas/'+encodeURIComponent(opMirror)); opApplyMesa(m); }catch(e){}
+  }
+  function opExitMirror(){ opMirror=null; const b=$('#opMirrorBanner'); if(b) b.remove(); }
+  function opApplyMesa(m){
+    if(!m) return;
+    const chairs=m.chairs||[];
+    const chairOf=role=>chairs.find(c=>c.role===role);
+    const seller=chairOf('SELLER'), buyer=chairOf('BUYER');
+    // Participantes do simulador via opMesa.slots (mesmo render da página).
+    opMesa={ slots: chairs.map(c=>({ role:c.role, status:c.wallet?'confirmed':'empty', wallet:c.wallet||null })) };
+    // Taxas da config da mesa.
+    const cfg=m.config||{};
+    opFees.discountPct=(cfg.discountBps||0)/100;
+    opFees.commissionPct=(cfg.commissionBps||0)/100;
+    const payer=cfg.commissionPayer||'SELLER';
+    opFees.payer={ seller: payer==='SELLER'||payer==='SPLIT', buyer: payer==='BUYER'||payer==='SPLIT' };
+    // Ativos dos dois lados (opDel=Comprador, opRecv=Vendedor) p/ o opRecalc pintar ícones/layout.
+    if(buyer&&buyer.expectedAsset){ const t=opTokFromAsset(buyer.expectedAsset); if(t) opPay=t; }
+    if(seller&&seller.expectedAsset){ const t=opTokFromAsset(seller.expectedAsset); if(t) opRecv=t; }
+    const buyerHuman=(cfg.buyerAmountInBase&&buyer)?baseToHuman(cfg.buyerAmountInBase,buyer.expectedAsset.decimals):null;
+    const sellerHuman=(cfg.amountInBase&&seller)?baseToHuman(cfg.amountInBase,seller.expectedAsset.decimals):null;
+    if(buyerHuman!=null&&$('#opDelAmt')) $('#opDelAmt').value=buyerHuman;
+    // Deal espelhado (summary + participantes das cadeiras) p/ a esteira/status.
+    opDeal = m.deal ? { ...m.deal, participants: chairs.map(c=>({ role:c.role, address:c.wallet?c.wallet.address:'' })), demo:false, settlementMode:'local', escrowContract:null } : null;
+    try{ opRenderParticipants(); }catch(e){}
+    try{ opRecalc(); }catch(e){}
+    if(opDeal){ try{ renderEsteira(opDeal); }catch(e){} }
+    // FIDELIDADE: símbolos/nomes/quantidades EXATOS da mesa (mesmo p/ tokens fora do modelo native/stable).
+    const netLabel=k=>{ try{ const c=opChainBy(k); return c.displayName||k; }catch(e){ return k; } };
+    if(buyer&&buyer.expectedAsset){ if($('#opDelSym')) $('#opDelSym').textContent=buyer.expectedAsset.symbol; if($('#opDelName')) $('#opDelName').textContent=netLabel(buyer.expectedAsset.network); }
+    if(seller&&seller.expectedAsset){
+      if($('#opRecvSym')) $('#opRecvSym').textContent=seller.expectedAsset.symbol;
+      if($('#opRecvName')) $('#opRecvName').textContent=netLabel(seller.expectedAsset.network);
+      if(sellerHuman!=null){ const txt=sellerHuman+' '+seller.expectedAsset.symbol; if($('#opRecvAmt')) $('#opRecvAmt').textContent=txt; if($('#opRecvNetVal')) $('#opRecvNetVal').textContent=txt; if($('#opSumRecvVal')) $('#opSumRecvVal').textContent=txt; }
+    }
+    if(buyer&&buyer.expectedAsset&&buyerHuman!=null&&$('#opSumDelVal')) $('#opSumDelVal').textContent=buyerHuman+' '+buyer.expectedAsset.symbol;
+    if($('#opInfoCode')) $('#opInfoCode').textContent=m.operationCode||(m.deal&&m.deal.id)||m.mesaId;
+    if($('#opInfoNet')) $('#opInfoNet').textContent=m.networkLabel||m.network||'—';
+    const modeB=$('#opInfoMode'); if(modeB){ modeB.className='badge ok'; modeB.textContent='Espelho da mesa'; }
+    const simNote=$('#opInfoSimNote'); if(simNote) simNote.style.display='none';
+    // Banner ao vivo (com sair).
+    let banner=$('#opMirrorBanner');
+    if(!banner){ const host=$('#view-carteiras'); if(host){ banner=document.createElement('div'); banner.id='opMirrorBanner'; banner.style.cssText='margin:0 0 12px;padding:10px 12px;border:1px solid var(--blue);border-radius:10px;background:rgba(80,130,255,.08);display:flex;align-items:center;gap:10px;font-size:12.5px;color:var(--ink-2)'; host.insertBefore(banner, host.firstChild); } }
+    if(banner) banner.innerHTML='<b style="color:var(--blue)">Espelho da mesa '+esc(m.code||'')+'</b> · dados ao vivo (somente leitura)<button class="btn" id="opMirrorExit" style="height:28px;font-size:11.5px;margin-left:auto">Sair do espelho</button>';
+    const ex=$('#opMirrorExit'); if(ex) ex.addEventListener('click',()=>{ opExitMirror(); refreshMesa(); refreshMesaDeal(); });
   }
   function m3Tick(){
     if(!m3Cache) return;
