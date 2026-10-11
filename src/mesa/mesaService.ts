@@ -11,7 +11,7 @@ import { DomainError } from '../domain/errors.js';
 import { sha256Hex, canonicalize, NETWORK_KEY_SCHEME, type Network } from '../domain/types.js';
 import { TABLE_TTL_MS, INVITE_TTL_MS, CHALLENGE_TTL_MS, INVITE_CODE_ALPHABET } from '../domain/constants.js';
 import type { MesaInviteRow, Store } from '../db/repository.js';
-import type { PortalService, WalletAddress } from '../portal/portal.js';
+import type { PortalService, WalletAddress, PayMaster } from '../portal/portal.js';
 import type { WalletAuth, Session } from '../wallet/auth.js';
 import type { AuditLog } from '../audit/audit.js';
 import type { Deal } from '../domain/types.js';
@@ -125,13 +125,28 @@ export class MesaService {
   /** Mesa por id (participante já autorizado pela sessão). */
   mesaById(mesaId: string): MesaRecord | null { return this.d.portal.mesas()[mesaId] ?? null; }
 
-  async listMesas(portalToken: string | undefined): Promise<{ mesaId: string; code: string; operationCode: string | null; label?: string; network: string; networkLabel: string; status: MesaStatus; chairs: { role: MesaChairRole; firstName: string | null; connected: boolean }[]; amount: string | null; createdAt: number; expiresAt: number }[]> {
+  /** Endereços (lowercase) da carteira do PM — primária + multichain. Usado p/ achar mesas onde ele participa. */
+  private pmWalletAddresses(pm: PayMaster): Set<string> {
+    const w = pm.wallet; if (!w) return new Set();
+    return new Set([w.address, ...(w.addresses ?? []).map(a => a.address)].filter(Boolean).map(a => a.toLowerCase()));
+  }
+  /** A carteira do PM ocupa alguma cadeira desta mesa? (participante, mesmo sem ser o dono). */
+  private pmIsChair(pm: PayMaster, mesa: MesaRecord): boolean {
+    const mine = this.pmWalletAddresses(pm); if (!mine.size) return false;
+    return mesa.chairs.some(c => c.wallet && [c.wallet.address, ...(c.wallet.addresses ?? []).map(a => a.address)].some(a => mine.has(a.toLowerCase())));
+  }
+
+  async listMesas(portalToken: string | undefined): Promise<{ mesaId: string; code: string; operationCode: string | null; label?: string; network: string; networkLabel: string; status: MesaStatus; dealId: string | null; owner: boolean; myRole: MesaChairRole | null; chairs: { role: MesaChairRole; firstName: string | null; connected: boolean }[]; amount: string | null; createdAt: number; expiresAt: number }[]> {
     const pm = this.d.portal.requirePayMaster(portalToken, false);
-    const mesas = Object.values(this.d.portal.mesas()).filter(m => m.payMasterId === pm.id).sort((a, b) => b.createdAt - a.createdAt);
+    // DONO (criou) + PARTICIPANDO (carteira ocupa uma cadeira em mesa de terceiro) — p/ não "sumir" do painel.
+    const mine = this.pmWalletAddresses(pm);
+    const myRoleIn = (m: MesaRecord): MesaChairRole | null => m.chairs.find(c => c.wallet && [c.wallet.address, ...(c.wallet.addresses ?? []).map(a => a.address)].some(a => mine.has(a.toLowerCase())))?.role ?? null;
+    const mesas = Object.values(this.d.portal.mesas()).filter(m => m.payMasterId === pm.id || this.pmIsChair(pm, m)).sort((a, b) => b.createdAt - a.createdAt);
     const out = [];
     for (const m of mesas) {
       const status = await this.statusOf(m);
-      out.push({ mesaId: m.mesaId, code: m.code, operationCode: m.operationCode ?? null, label: m.label, network: m.network, networkLabel: this.networksLabel(m), status, chairs: m.chairs.map(c => ({ role: c.role, firstName: c.firstName ?? null, connected: !!c.wallet })), amount: m.config?.amountInBase ?? null, createdAt: m.createdAt, expiresAt: m.expiresAt });
+      const owner = m.payMasterId === pm.id;
+      out.push({ mesaId: m.mesaId, code: m.code, operationCode: m.operationCode ?? null, label: m.label, network: m.network, networkLabel: this.networksLabel(m), status, dealId: m.dealId ?? null, owner, myRole: owner ? null : myRoleIn(m), chairs: m.chairs.map(c => ({ role: c.role, firstName: c.firstName ?? null, connected: !!c.wallet })), amount: m.config?.amountInBase ?? null, createdAt: m.createdAt, expiresAt: m.expiresAt });
     }
     return out;
   }
@@ -508,6 +523,50 @@ export class MesaService {
   /* ---------- DTO recortado por papel (aplicado no BACKEND) ---------- */
 
   private shortAddr(a: string): string { return a.length > 12 ? `${a.slice(0, 7)}…${a.slice(-3)}` : a; }
+
+  /** TODAS as operações (deals) das mesas do PM — ativa + histórico, mais recentes primeiro. Cada item
+   *  traz a mesa de origem para montar o link de visualização (/mesa?mesa=&op=). */
+  async listAllOperations(portalToken: string | undefined): Promise<Array<{ mesaId: string; mesaCode: string; networkLabel: string; active: boolean; owner: boolean; deal: Record<string, unknown> }>> {
+    const pm = this.d.portal.requirePayMaster(portalToken, false);
+    // DONO + PARTICIPANDO — operações onde o PM é dono OU a carteira dele ocupa uma cadeira.
+    const mesas = Object.values(this.d.portal.mesas()).filter(m => m.payMasterId === pm.id || this.pmIsChair(pm, m)).sort((a, b) => b.createdAt - a.createdAt);
+    const out: Array<{ mesaId: string; mesaCode: string; networkLabel: string; active: boolean; owner: boolean; deal: Record<string, unknown> }> = [];
+    for (const m of mesas) {
+      const owner = m.payMasterId === pm.id;
+      const ids = [...new Set([...(m.dealIds ?? []), ...(m.dealId ? [m.dealId] : [])])].reverse();
+      for (const id of ids) {
+        const deal = await this.d.getDeal(id).catch(() => null);
+        const summary = this.dealSummary(deal);
+        if (summary) out.push({ mesaId: m.mesaId, mesaCode: m.code, networkLabel: this.networksLabel(m), active: id === m.dealId, owner, deal: summary });
+      }
+    }
+    return out;
+  }
+
+  /** Visão PÚBLICA (somente-leitura, sem sessão) de uma mesa — base do link /ver/<mesaId>. Mostra o que
+   *  foi preenchido: config (valores/taxas), cadeiras (papel, ativo, nome, conectado, endereço curto) e
+   *  o status + a operação resumida (se já existir). Não expõe convites/links/notas (mesmo recorte do participante). */
+  async mesaPublicView(mesaId: string): Promise<Record<string, unknown>> {
+    const mesa = this.d.portal.mesas()[mesaId];
+    if (!mesa) throw new DomainError('INVALID_INPUT', 'Mesa não encontrada.');
+    const now = this.now();
+    const invites = await this.d.store.listMesaInvites(mesa.mesaId);
+    const deal = mesa.dealId ? await this.d.getDeal(mesa.dealId) : null;
+    const status = deriveMesaStatus(mesa, invites, deal, now);
+    return {
+      mesaId: mesa.mesaId, code: mesa.code, operationCode: mesa.operationCode ?? null,
+      network: mesa.network, networkLabel: this.networksLabel(mesa), status,
+      createdAt: mesa.createdAt, expiresAt: mesa.expiresAt, serverTime: now,
+      config: mesa.config ? { amountInBase: mesa.config.amountInBase ?? null, buyerAmountInBase: mesa.config.buyerAmountInBase ?? null, discountBps: mesa.config.discountBps, commissionBps: mesa.config.commissionBps, commissionPayer: mesa.config.commissionPayer ?? null } : null,
+      chairs: mesa.chairs.map(c => ({
+        role: c.role, roleLabel: CHAIR_ROLE_LABEL[c.role],
+        asset: c.expectedAsset.symbol, network: c.expectedAsset.network,
+        firstName: c.firstName ?? null, connected: !!c.wallet,
+        wallet: c.wallet ? this.shortAddr(c.wallet.address) : null,
+      })),
+      deal: this.dealSummary(deal),
+    };
+  }
 
   /** Resumo canônico de uma operação (deal) para a UI — mesma forma na mesa, na lista e no deep link. */
   private dealSummary(deal: Deal | null): Record<string, unknown> | null {
