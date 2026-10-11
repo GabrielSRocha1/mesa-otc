@@ -2544,12 +2544,13 @@ img,svg,canvas,video{max-width:100%}
           // DONO: ações completas. PARTICIPANDO (mesa de terceiro): selo + "Abrir operação" (visão de participante).
           const tag=m.owner?'':'<span class="badge info" title="Você participa desta mesa (não é o criador)">Participando'+(m.myRole?(' · '+(M3_ROLE[m.myRole]||m.myRole)):'')+'</span>';
           const actions=m.owner
-            ? '<button class="btn btn-primary" data-m3-view="'+esc(m.mesaId)+'" title="Abrir na página Operação com os dados desta mesa" style="height:34px;font-size:12.5px">Ver operação</button><button class="btn" data-m3-open="'+esc(m.mesaId)+'" title="Gerenciar (convites, aprovar, assinar)" style="height:34px;font-size:12.5px">Gerenciar</button><button class="btn" data-m3-del="'+esc(m.mesaId)+'" title="Excluir mesa" style="height:34px;font-size:12.5px;border-color:var(--red);color:#fecaca">Excluir</button>'
+            ? '<button class="btn btn-primary" data-m3-view="'+esc(m.mesaId)+'" title="Abrir na página Operação com os dados desta mesa" style="height:34px;font-size:12.5px">Ver operação</button><button class="btn" data-m3-vmesa="'+esc(m.mesaId)+'" title="Copiar link somente-leitura da mesa — envie para alguém só acompanhar" style="height:34px;font-size:12.5px"><svg viewBox="0 0 24 24" style="width:13px;height:13px;stroke:currentColor;fill:none;stroke-width:2;vertical-align:-2px"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V5a2 2 0 012-2h8"/></svg>Copiar link</button><button class="btn" data-m3-open="'+esc(m.mesaId)+'" title="Gerenciar (convites, aprovar, assinar)" style="height:34px;font-size:12.5px">Gerenciar</button><button class="btn" data-m3-del="'+esc(m.mesaId)+'" title="Excluir mesa" style="height:34px;font-size:12.5px;border-color:var(--red);color:#fecaca">Excluir</button>'
             : '<button class="btn btn-primary" data-m3-part="'+esc(m.mesaId)+'" title="Abrir a operação (sua visão de participante)" style="height:34px;font-size:12.5px">Abrir operação</button>';
           return '<div class="r" style="display:flex;gap:10px;align-items:center;justify-content:space-between;padding:10px 0;border-bottom:1px solid var(--line)"><div>'+info+'</div><div style="display:flex;gap:8px;align-items:center">'+m3Badge(m.status)+tag+actions+'</div></div>';
         }).join('')
           : '<p style="color:var(--ink-3);font-size:12.5px;margin:0">Nenhuma mesa criada ainda. Toque em "Criar mesa".</p>';
         box.querySelectorAll('[data-m3-view]').forEach(b=>b.addEventListener('click',()=>opViewMesa(b.dataset.m3View)));
+        box.querySelectorAll('[data-m3-vmesa]').forEach(b=>b.addEventListener('click',()=>{ clip(location.origin+'/ver/'+encodeURIComponent(b.dataset.m3Vmesa)); toast('Link da mesa copiado (somente leitura)','ok'); }));
         box.querySelectorAll('[data-m3-open]').forEach(b=>b.addEventListener('click',()=>m3Open(b.dataset.m3Open)));
         box.querySelectorAll('[data-m3-del]').forEach(b=>b.addEventListener('click',()=>m3DeleteMesa(b.dataset.m3Del)));
         box.querySelectorAll('[data-m3-part]').forEach(b=>b.addEventListener('click',()=>{ location.href='/mesa?mesa='+encodeURIComponent(b.dataset.m3Part); }));
@@ -2573,7 +2574,7 @@ img,svg,canvas,video{max-width:100%}
       const actions=m.owner
         ? '<button class="btn btn-primary" data-m3-view="'+esc(m.mesaId)+'" title="Abrir na página Operação com os dados desta mesa" style="height:32px;font-size:12px">Ver operação</button>'
           +'<button class="btn" data-m3-goto="'+esc(m.mesaId)+'" title="Gerenciar (convites, aprovar, assinar)" style="height:32px;font-size:12px">Gerenciar</button>'
-          +'<button class="btn" data-m3-vlink="'+esc(m.mesaId)+'" data-m3-vlinkop="'+esc(m.dealId||'')+'" title="Link somente-leitura da operação" style="height:32px;font-size:12px"><svg viewBox="0 0 24 24" style="width:13px;height:13px;stroke:currentColor;fill:none;stroke-width:2;vertical-align:-2px"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V5a2 2 0 012-2h8"/></svg>Copiar link</button>'
+          +'<button class="btn" data-m3-vmesa="'+esc(m.mesaId)+'" title="Copiar link somente-leitura da mesa — envie para alguém só acompanhar" style="height:32px;font-size:12px"><svg viewBox="0 0 24 24" style="width:13px;height:13px;stroke:currentColor;fill:none;stroke-width:2;vertical-align:-2px"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V5a2 2 0 012-2h8"/></svg>Copiar link</button>'
           +'<button class="btn" data-m3-tdel="'+esc(m.mesaId)+'" title="Excluir mesa" style="height:32px;font-size:12px;border-color:var(--red);color:#fecaca">Excluir</button>'
         : '<button class="btn btn-primary" data-m3-part="'+esc(m.mesaId)+'" title="Abrir a operação (sua visão de participante)" style="height:32px;font-size:12px">Abrir operação</button>';
       return '<tr>'+nameCell+'<td style="display:flex;gap:6px;flex-wrap:wrap">'+actions+'</td></tr>';
@@ -2581,7 +2582,7 @@ img,svg,canvas,video{max-width:100%}
     rows.querySelectorAll('[data-m3-view]').forEach(b=>b.addEventListener('click',()=>opViewMesa(b.dataset.m3View)));
     rows.querySelectorAll('[data-m3-part]').forEach(b=>b.addEventListener('click',()=>{ location.href='/mesa?mesa='+encodeURIComponent(b.dataset.m3Part); }));
     rows.querySelectorAll('[data-m3-goto]').forEach(b=>b.addEventListener('click',()=>{ showView('carteiras'); m3Open(b.dataset.m3Goto); }));
-    rows.querySelectorAll('[data-m3-vlink]').forEach(b=>b.addEventListener('click',()=>{ const op=b.dataset.m3Vlinkop; const url=location.origin+'/mesa?mesa='+encodeURIComponent(b.dataset.m3Vlink)+(op?'&op='+encodeURIComponent(op):''); clip(url); toast('Link de visualização copiado (somente leitura)','ok'); }));
+    rows.querySelectorAll('[data-m3-vmesa]').forEach(b=>b.addEventListener('click',()=>{ clip(location.origin+'/ver/'+encodeURIComponent(b.dataset.m3Vmesa)); toast('Link da mesa copiado (somente leitura)','ok'); }));
     rows.querySelectorAll('[data-m3-tdel]').forEach(b=>b.addEventListener('click',()=>m3DeleteMesa(b.dataset.m3Tdel)));
   }
   function m3Open(mesaId){ opExitMirror(); m3Sel=mesaId; $('#m3Detail').style.display=''; m3Refresh(); if(!m3Timer) m3Timer=setInterval(m3Refresh,5000); if(!m3TickT) m3TickT=setInterval(m3Tick,1000); }
