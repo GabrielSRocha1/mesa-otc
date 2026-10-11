@@ -687,7 +687,8 @@ img,svg,canvas,video{max-width:100%}
     </div>
 
     <nav class="nav">
-      <a href="#" class="active" data-view="carteiras"><svg viewBox="0 0 24 24"><rect x="4" y="4" width="16" height="16" rx="2"/><path d="M8 9h8M8 13h5"/></svg>Operações</a>
+      <a href="#" class="active" data-view="carteiras"><svg viewBox="0 0 24 24"><rect x="3" y="6" width="18" height="13" rx="2"/><path d="M16 12h2M3 10h18"/></svg>ABRIR MESA</a>
+      <a href="#" data-view="operacao"><svg viewBox="0 0 24 24"><rect x="4" y="4" width="16" height="16" rx="2"/><path d="M8 9h8M8 13h5"/></svg>Operações</a>
       <a href="#" data-view="seguranca"><svg viewBox="0 0 24 24"><path d="M12 3l7 3v5c0 5-3 8-7 10-4-2-7-5-7-10V6z"/><path d="M9 12l2 2 4-4"/></svg>Segurança</a>
       <a href="#" data-view="config"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3.2"/><path d="M19 12a7 7 0 00-.1-1.3l2-1.5-2-3.4-2.3 1a7 7 0 00-2.2-1.3L14 3h-4l-.4 2.5a7 7 0 00-2.2 1.3l-2.3-1-2 3.4 2 1.5A7 7 0 005 12c0 .4 0 .9.1 1.3l-2 1.5 2 3.4 2.3-1a7 7 0 002.2 1.3L10 21h4l.4-2.5a7 7 0 002.2-1.3l2.3 1 2-3.4-2-1.5c.1-.4.1-.9.1-1.3z"/></svg>Configurações</a>
     </nav>
@@ -748,6 +749,14 @@ img,svg,canvas,video{max-width:100%}
         </div>
       </div>
 
+      <!-- Banner de ESPELHO: visível quando a página reflete uma mesa específica (via "Ver operação"). -->
+      <section class="card" id="opMirrorBanner" style="display:none;margin-bottom:16px;border-color:var(--blue)">
+        <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;justify-content:space-between">
+          <div style="font-size:13px;color:var(--ink-2)"><b id="opMirrorTitle">Espelho da mesa</b> <span id="opMirrorSub" style="color:var(--ink-3)"></span></div>
+          <div style="display:flex;gap:8px"><button class="btn" id="opMirrorDetail" type="button" style="height:32px;font-size:12px">Abrir detalhe / convidar</button><button class="btn" id="opMirrorExit" type="button" style="height:32px;font-size:12px">Sair do espelho</button></div>
+        </div>
+      </section>
+
       <!-- Mesas v3: lista com badges, filtro e busca -->
       <section class="card" id="m3OpsCard" style="display:none;margin-bottom:16px">
         <div class="card-h"><div class="t"><svg viewBox="0 0 24 24" style="width:17px;height:17px;stroke:var(--blue);fill:none;stroke-width:2;vertical-align:-3px;margin-right:6px"><rect x="3" y="6" width="18" height="13" rx="2"/><path d="M16 12h2M3 10h18"/></svg>Mesas</div>
@@ -767,7 +776,6 @@ img,svg,canvas,video{max-width:100%}
           <tbody id="m3OpsRows"></tbody>
         </table></div>
       </section>
-
 
       <div class="op-layout">
         <div class="op-main">
@@ -828,7 +836,6 @@ img,svg,canvas,video{max-width:100%}
               <button class="btn btn-primary" id="opStartDeal" type="button" style="height:38px"><svg viewBox="0 0 24 24"><path d="M4 12h13M11 6l6 6-6 6"/></svg>Iniciar operação</button>
               <button class="btn btn-primary" id="opSignTurn" type="button" style="height:38px;display:none"><svg viewBox="0 0 24 24"><path d="M4 20h4l10-10-4-4L4 16v4z"/><path d="M13.5 6.5l4 4"/></svg>Assinar minha vez</button>
               <button class="btn" id="opNewDeal" type="button" style="height:38px;display:none"><svg viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg>Criar nova operação</button>
-              <button class="btn" id="opShareDeal" type="button" style="height:38px;display:none" title="Link somente-leitura desta operação"><svg viewBox="0 0 24 24"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V5a2 2 0 012-2h8"/></svg>Copiar link de visualização</button>
             </div>
             <div class="op-steps" id="opSteps">
               <div class="op-step done"><div class="line"></div><div class="dot"><svg viewBox="0 0 24 24"><path d="M5 13l4 4L19 7"/></svg></div><div class="nm">Vendedor</div><div class="meta">Assinado em 12/05/2025 14:21</div><div class="addr2">bc1qxy2kg…9f3a</div></div>
@@ -890,7 +897,7 @@ img,svg,canvas,video{max-width:100%}
     <!-- ===================== VIEW: CARTEIRAS ===================== -->
     <section class="view active" id="view-carteiras">
       <div class="page-head">
-        <div><h1 id="m3HubTitle">Operações</h1><p id="m3HubSub">Suas mesas e operações. Crie uma mesa, convide as carteiras, configure e aprove — o acompanhamento e o link de compartilhar ficam na própria mesa.</p></div>
+        <div><h1>ABRIR MESA</h1><p>Crie mesas com cadeiras e convites. A wallet de cada participante é identificada na conexão, com prova de posse — você nunca cadastra o endereço de ninguém.</p></div>
         <div class="ph-actions"><button class="btn btn-primary" id="m3New" type="button"><svg viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg>Criar mesa</button></div>
       </div>
 
@@ -968,15 +975,6 @@ img,svg,canvas,video{max-width:100%}
           <div class="fh" id="m3dPlan" style="flex-basis:100%;color:var(--blue)"></div>
         </div>
         <div class="op-parts" id="m3dChairs"></div>
-        <!-- Esteira de assinaturas (layout rico da aba Operações, com dados reais da mesa) -->
-        <section id="m3dEsteiraWrap" style="display:none;margin-top:14px;padding:14px;border:1px solid var(--line);border-radius:12px;background:var(--bg-2)">
-          <div class="op-ms-head">
-            <div class="op-ic"><svg viewBox="0 0 24 24" style="width:22px;height:22px;stroke:currentColor;fill:none;stroke-width:2"><path d="M12 3l7 3v5c0 5-3 8-7 10-4-2-7-5-7-10V6z"/><path d="M9 12l2 2 4-4"/></svg></div>
-            <div><div class="st" style="font-family:var(--f-head);font-weight:700;font-size:15px">Assinaturas Multisig</div><div class="ss" style="font-size:12px;color:var(--ink-3)">Vendedor → Pay Master 1 → Pay Master 2 → Comprador · 5 min por vez</div></div>
-            <div class="op-ms-prog"><span id="m3dSigTxt" style="font-size:12px;color:var(--ink-2)">—</span><div class="op-bar"><span id="m3dSigBar" style="width:0%"></span></div><b id="m3dSigPct" style="font-size:12.5px">0%</b></div>
-          </div>
-          <div class="op-steps" id="m3dEsteira" style="margin-top:12px"></div>
-        </section>
         <div id="m3dOpsWrap" style="display:none;margin-top:14px">
           <div class="card-h" style="margin-bottom:6px"><div class="t" style="font-size:13.5px">Operações desta mesa <span style="color:var(--ink-3);font-weight:400">· cada uma tem link próprio</span></div></div>
           <div id="m3dOps" class="op-deal-list"></div>
@@ -1002,12 +1000,6 @@ img,svg,canvas,video{max-width:100%}
             <div id="m3dIrrev" style="display:none;margin-top:8px;font-size:12px;color:var(--amber);border:1px solid var(--line);border-radius:10px;padding:8px 10px">🔒 Operação irreversível — fundos trancados no escrow. O contrato segue até a extração da preimage (liquidação) ou a expiração do timelock (reembolso automático).</div>
           </div>
         </div>
-      </section>
-
-      <!-- Todas as operações (ativa + histórico) de todas as mesas — cada uma com link de visualização -->
-      <section class="card" id="opAllCard" style="display:none;margin-bottom:16px">
-        <div class="card-h"><div class="t"><svg viewBox="0 0 24 24" style="width:17px;height:17px;stroke:var(--blue);fill:none;stroke-width:2;vertical-align:-3px;margin-right:6px"><rect x="4" y="4" width="16" height="16" rx="2"/><path d="M8 9h8M8 13h5"/></svg>Todas as operações</div><span class="badge info" id="opAllCount">0</span></div>
-        <div class="op-deal-list" id="opAllList"></div>
       </section>
 
       <!-- Passo 3 — Valores e taxas (grava na mesa via /config: humano→unidades base, %→bps) -->
@@ -1062,8 +1054,8 @@ img,svg,canvas,video{max-width:100%}
         <div class="op-deal-list" id="opDealList"><p style="color:var(--ink-3);font-size:12.5px;margin:0">Nenhuma operação criada ainda. Use "Iniciar operação" abaixo.</p></div>
       </section>
 
-      <div class="page-head" id="mesaSlotsHead" style="margin-top:8px">
-        <div><h2 style="font-size:17px;margin:0">Carteiras conectadas (Vendedor, Comprador, PM 1 e 2)</h2><p>As 4 carteiras da conta — conecte cada uma pela Verum Wallet (prova de posse na conexão).</p></div>
+      <div class="page-head" style="margin-top:8px">
+        <div><h2 style="font-size:17px;margin:0">Mesa rápida (legada)</h2><p>Fluxo anterior com 4 carteiras fixas da conta.</p></div>
         <div class="ph-actions"><span class="badge info" id="mesaCount">—</span></div>
       </div>
       <div class="vgrid wide" id="mesaSlots">
@@ -1091,7 +1083,7 @@ img,svg,canvas,video{max-width:100%}
         <section class="card">
           <div class="card-h"><div class="t">Sessão & acesso</div></div>
           <div class="form-row"><div><div class="fl">Autenticação de dois fatores</div><div class="fh">Exigir 2FA para assinar operações</div></div><button class="sw" id="secTwoFactor" data-toggle data-security="twoFactor"></button></div>
-          <div class="form-row"><div><div class="fl">Bloqueio por inatividade</div><div class="fh">Encerrar sessão após 30 min (desligado por padrão)</div></div><button class="sw" id="secIdleLock" data-toggle data-security="idleLock"></button></div>
+          <div class="form-row"><div><div class="fl">Bloqueio por inatividade</div><div class="fh">Encerrar sessão após 10 min</div></div><button class="sw on" id="secIdleLock" data-toggle data-security="idleLock"></button></div>
           <div class="form-row"><div><div class="fl">Alerta de nova carteira</div><div class="fh">Notificar ao conectar carteira nova</div></div><button class="sw" id="secNewWalletAlert" data-toggle data-security="newWalletAlert"></button></div>
         </section>
       </div>
@@ -1192,53 +1184,18 @@ img,svg,canvas,video{max-width:100%}
   $$('[data-toast]').forEach(el=>el.addEventListener('click',()=>toast(el.dataset.toast,'info')));
 
   // nav — troca de view por aba
-  // Lista de TODAS as operações (todas as mesas, ativa + histórico) na aba Operações, com link por operação.
-  async function opLoadAll(){
-    if(!getTok()) return;
-    try{
-      const r=await pmApi('/v1/portal/operations'); const ops=(r&&r.operations)||[];
-      const card=$('#opAllCard'), box=$('#opAllList'); if(!box) return;
-      if($('#opAllCount')) $('#opAllCount').textContent=String(ops.length);
-      if(card) card.style.display=ops.length?'':'none';
-      box.innerHTML=ops.map(o=>{
-        const d=o.deal||{};
-        const pair=(d.assetIn||'—')+' → '+(d.assetOut||'—');
-        const dt=d.createdAt?new Date(d.createdAt).toLocaleString('pt-BR',{day:'2-digit',month:'2-digit',hour:'2-digit',minute:'2-digit'}):'';
-        const turn=(d.state==='AWAITING_SIGNATURES'&&d.turnRole)?(' · vez: '+(M3_ROLE[d.turnRole]||d.turnRole)):'';
-        const active=o.active?'<span style="font-size:10.5px;color:var(--blue);font-weight:700;margin-left:6px">ativa</span>':'';
-        const tag=o.owner?'':'<span class="badge info" style="margin-left:6px" title="Você participa (não é o criador)">participando</span>';
-        // DONO: copiar link + ver + gerenciar + excluir. PARTICIPANDO: só "Abrir operação" (visão de participante).
-        const actions=o.owner
-          ? '<button class="btn" data-oa-link="'+esc(o.mesaId)+'" data-oa-op="'+esc(d.id)+'" title="Link somente-leitura" style="height:30px;font-size:11.5px"><svg viewBox="0 0 24 24" style="width:13px;height:13px;stroke:currentColor;fill:none;stroke-width:2;vertical-align:-2px"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V5a2 2 0 012-2h8"/></svg>Copiar link</button>'
-            +'<button class="btn btn-primary" data-oa-view="'+esc(o.mesaId)+'" title="Abrir na página Operação com os dados desta mesa" style="height:30px;font-size:11.5px">Ver operação</button>'
-            +'<button class="btn" data-oa-mesa="'+esc(o.mesaId)+'" title="Gerenciar (convites, aprovar, assinar)" style="height:30px;font-size:11.5px">Gerenciar</button>'
-            +'<button class="btn" data-oa-del="'+esc(o.mesaId)+'" data-oa-delop="'+esc(d.id)+'" title="Excluir operação" style="height:30px;font-size:11.5px;border-color:var(--red);color:#fecaca">Excluir</button>'
-          : '<button class="btn btn-primary" data-oa-part="'+esc(o.mesaId)+'" title="Abrir a operação (sua visão de participante)" style="height:30px;font-size:11.5px">Abrir operação</button>';
-        return '<div class="op-deal-card" style="cursor:default">'
-          +'<div><div class="dpair">'+esc(pair)+active+tag+'</div><div class="did">Mesa '+esc(o.mesaCode)+' · '+esc(d.id)+'</div><div class="dmeta">'+esc(o.networkLabel||'')+' · '+esc(dt)+' · '+(d.validSignatures||0)+'/'+(d.requiredSignatures||0)+' assinaturas'+esc(turn)+'</div></div>'
-          +'<div class="dright" style="display:flex;flex-direction:column;gap:6px;align-items:flex-end">'+opStateBadge(d.state)
-          +'<div style="display:flex;gap:6px;flex-wrap:wrap;justify-content:flex-end">'+actions+'</div></div></div>';
-      }).join('')||'<p style="color:var(--ink-3);font-size:12.5px;margin:0">Nenhuma operação ainda.</p>';
-      box.querySelectorAll('[data-oa-link]').forEach(b=>b.addEventListener('click',()=>{ const op=b.dataset.oaOp; const url=location.origin+'/mesa?mesa='+encodeURIComponent(b.dataset.oaLink)+(op?'&op='+encodeURIComponent(op):''); clip(url); toast('Link de visualização copiado (somente leitura)','ok'); }));
-      box.querySelectorAll('[data-oa-view]').forEach(b=>b.addEventListener('click',()=>opViewMesa(b.dataset.oaView)));
-      box.querySelectorAll('[data-oa-mesa]').forEach(b=>b.addEventListener('click',()=>{ showView('carteiras'); m3Open(b.dataset.oaMesa); }));
-      box.querySelectorAll('[data-oa-part]').forEach(b=>b.addEventListener('click',()=>{ location.href='/mesa?mesa='+encodeURIComponent(b.dataset.oaPart); }));
-      box.querySelectorAll('[data-oa-del]').forEach(b=>b.addEventListener('click',async()=>{ if(!confirm('Excluir esta operação?')) return; try{ await pmApi('/v1/portal/mesas/'+encodeURIComponent(b.dataset.oaDel)+'/deals/'+encodeURIComponent(b.dataset.oaDelop)+'/delete',{method:'POST',body:{}}); toast('Operação excluída','ok'); opLoadAll(); }catch(e){ toast(e.message||'Falha ao excluir','err'); } }));
-    }catch(e){}
-  }
   function showView(view){
-    // FUSÃO: "Operações" e a tela de mesas são a MESMA view (view-carteiras). Chamadas a 'operacao'
-    // (deep-links e handlers antigos) caem no hub único.
-    if(view==='operacao') view='carteiras';
     const target=document.getElementById('view-'+view);
     if(!target) return;
+    // Navegar manualmente encerra o modo espelho (opMirrorMesa reativa logo após chamar showView).
+    if(opMirror){ opMirror=null; if(opMirrorTimer){ clearInterval(opMirrorTimer); opMirrorTimer=null; } const bn=$('#opMirrorBanner'); if(bn) bn.style.display='none'; }
     $$('.view').forEach(v=>v.classList.remove('active'));
     target.classList.add('active');
     $$('.nav a').forEach(x=>x.classList.toggle('active', x.dataset.view===view));
     const main=document.querySelector('.content .page'); if(main) main.scrollTop=0;
     window.scrollTo(0,0);
-    // Hub de Operações: carrega lista de mesas + todas as operações.
-    if(view==='carteiras'){ try{ if(typeof m3LoadList==='function') m3LoadList(); if(typeof opLoadAll==='function') opLoadAll(); }catch(e){} }
+    // A aba "Operações" abre direto a negociação com os dados salvos da mesa.
+    if(view==='operacao'){ try{ updateDraft(); refreshMesaDeals(); renderDealList(opDealsCache,opDeal&&opDeal.id); opRenderInfo(); if(typeof m3LoadList==='function') m3LoadList(); }catch(e){} }
   }
   // ── Sidebar responsiva (mobile): gaveta aberta pelo hambúrguer ──────────────
   function setNav(open){
@@ -1707,7 +1664,7 @@ img,svg,canvas,video{max-width:100%}
     const cc=$('#mesaCount'); if(cc) cc.textContent=connected+'/4 conectadas';
     bindMesaActions();
   }
-  async function refreshMesa(){ if(!getTok()||mesaBusy||mesaConnecting) return; mesaBusy=true; try{ const view=await pmApi('/v1/portal/mesa'); renderMesa(view); if(opMirror){ opMirrorRefresh(); } else { opMesa=view; if(typeof opOnMesa==='function') opOnMesa(); } }catch(ex){ /* silencioso durante polling */ }finally{ mesaBusy=false; } }
+  async function refreshMesa(){ if(!getTok()||mesaBusy||mesaConnecting) return; mesaBusy=true; try{ const view=await pmApi('/v1/portal/mesa'); renderMesa(view); opMesa=view; if(typeof opOnMesa==='function') opOnMesa(); }catch(ex){ /* silencioso durante polling */ }finally{ mesaBusy=false; } }
   function mesaInit(){
     const w=$('#mesaSlots'); if(!w) return;
     if(!getTok()){ w.innerHTML='<section class="card"><p style="color:var(--ink-3);margin:0">Faça login no portal Pay Master para gerenciar as carteiras da mesa.</p></section>'; return; }
@@ -1868,6 +1825,7 @@ img,svg,canvas,video{max-width:100%}
     opRecalc();
   }
   function opRecalc(){
+    if(opMirror) return; // espelho da mesa dirige os painéis; não recalcula o rascunho demo
     // Campos de token (ícone + símbolo) dos dois lados.
     if($('#opDelField')) $('#opDelField').innerHTML=tokFieldInner(opPay);
     if($('#opRecvField')) $('#opRecvField').innerHTML=tokFieldInner(opRecv);
@@ -1942,6 +1900,7 @@ img,svg,canvas,video{max-width:100%}
   // Informações da Negociação: simulação completa da criação da operação (código gerado,
   // datas, taxas, carteiras). Vira dados reais quando a deal é criada na mesa.
   function opRenderInfo(){
+    if(opMirror) return; // no modo espelho, as informações vêm de opMirrorRender
     const d=opDeal, sim=!d;
     const dr=sim?loadDrafts().find(x=>x.id===opDraftId):null;
     const fdt=t=>t?new Date(t).toLocaleString('pt-BR',{day:'2-digit',month:'2-digit',year:'2-digit',hour:'2-digit',minute:'2-digit'}):'—';
@@ -1974,6 +1933,7 @@ img,svg,canvas,video{max-width:100%}
   }
   /* ---------- Esteira ligada a uma DEAL real (DealEngine) ---------- */
   let opDeal=null, opDealTimer=null, opTurnTimer=null;
+  let opMirror=null, opMirrorTimer=null; // espelho: página Operação reflete uma mesa v3 específica
   const OP_STEP_LABEL={SELLER:'Vendedor',PAYMASTER_1:'Pay Master 1',PAYMASTER_2:'Pay Master 2',BUYER:'Comprador'};
   const OP_SIGN_ORDER=['SELLER','PAYMASTER_1','PAYMASTER_2','BUYER'];
   function fmtCountdown(exp){ const ms=Math.max(0,exp-srvNow()); if(ms>=3600000){ const h=Math.floor(ms/3600000), m=Math.floor(ms%3600000/60000); return h+'h'+('0'+m).slice(-2)+'m restantes'; } const m=Math.floor(ms/60000), s=Math.floor(ms%60000/1000); return m+'m'+('0'+s).slice(-2)+'s restantes'; }
@@ -2005,8 +1965,6 @@ img,svg,canvas,video{max-width:100%}
     const btn=$('#opStartDeal'); if(btn) btn.style.display = awaiting?'none':'';
     const sbtn=$('#opSignTurn'); if(sbtn){ sbtn.style.display = (awaiting&&d.turnRole)?'':'none'; if(!sbtn.disabled) sbtn.textContent = d.demo?'Assinar minha vez':'Assinar com Verum Wallet'; }
     const nbtn=$('#opNewDeal'); if(nbtn) nbtn.style.display = awaiting?'':'none'; // com deal em andamento, permite abandonar e criar outra
-    // Link de visualização (somente leitura) da operação — compartilhável; serve p/ operações do fluxo legado também.
-    const shbtn=$('#opShareDeal'); if(shbtn){ shbtn.style.display = d.id?'':'none'; shbtn.onclick=()=>{ clip(location.origin+'/op/'+encodeURIComponent(d.id)); toast('Link de visualização copiado (somente leitura)','ok'); }; }
     startTurnCountdown();
     renderContract(d);
     opRenderInfo();
@@ -2116,8 +2074,87 @@ img,svg,canvas,video{max-width:100%}
     finally{ const b=$('#opSignTurn'); if(b){ b.disabled=false; b.textContent=(opDeal&&opDeal.demo)?'Assinar minha vez':'Assinar com Verum Wallet'; } }
   }
   function startTurnCountdown(){ if(opTurnTimer) clearInterval(opTurnTimer); opTurnTimer=setInterval(()=>{ const el=$('#opSteps .op-turn-chip'); if(!el){ clearInterval(opTurnTimer); return; } const cd=el.querySelector('.op-turn-cd'); if(cd) cd.textContent=fmtCountdown(Number(el.dataset.turnExp)); },1000); }
-  async function refreshMesaDeal(){ if(!getTok()||opMirror) return; refreshMesaDeals(); try{ const r=await pmApi('/v1/portal/mesa/deal'); if(r&&r.deal){ opDeal=r.deal; renderEsteira(r.deal); if(!opDealTimer) startDealPolling(); } }catch(e){} }
+  async function refreshMesaDeal(){ if(opMirror) return; if(!getTok()) return; refreshMesaDeals(); try{ const r=await pmApi('/v1/portal/mesa/deal'); if(r&&r.deal){ opDeal=r.deal; renderEsteira(r.deal); if(!opDealTimer) startDealPolling(); } }catch(e){} }
   function startDealPolling(){ if(opDealTimer) clearInterval(opDealTimer); opDealTimer=setInterval(refreshMesaDeal,5000); }
+
+  /* ================= ESPELHO: reflete uma MESA v3 na página Operação ================= */
+  // "Ver operação" abre esta página mostrando os dados REAIS da mesa (cadeiras, ativos, taxas,
+  // esteira) no lugar dos dados fixos/rascunho. Não altera nada no backend — só exibe.
+  async function opMirrorMesa(mesaId){
+    if(!mesaId) return;
+    m3Sel=mesaId; // mantém o alvo das ações de admin (detalhe/convite/aprovar/assinar)
+    showView('operacao');        // limpa qualquer espelho anterior
+    try{
+      const m=await pmApi('/v1/portal/mesas/'+encodeURIComponent(mesaId));
+      opMirror={ mesaId, m };
+      opMirrorRender();
+      if(opMirrorTimer) clearInterval(opMirrorTimer);
+      opMirrorTimer=setInterval(async()=>{ if(!opMirror){ clearInterval(opMirrorTimer); opMirrorTimer=null; return; } try{ const mm=await pmApi('/v1/portal/mesas/'+encodeURIComponent(opMirror.mesaId)); opMirror.m=mm; opMirrorRender(); }catch(e){} },5000);
+    }catch(e){ opMirror=null; toast(e.message||'Falha ao abrir a operação','err'); }
+  }
+  function opMirrorExit(){ opMirror=null; if(opMirrorTimer){ clearInterval(opMirrorTimer); opMirrorTimer=null; } const bn=$('#opMirrorBanner'); if(bn) bn.style.display='none'; updateDraft(); try{ opRecalc(); }catch(e){} opRenderInfo(); toast('Espelho encerrado — voltando ao rascunho','info'); }
+  function opMirrorRender(){
+    if(!opMirror) return; const m=opMirror.m; if(!m) return;
+    const chairOf=r=>(m.chairs||[]).find(c=>c.role===r);
+    const sym=c=>c&&c.expectedAsset?c.expectedAsset.symbol:'—';
+    const net=c=>c&&c.expectedAsset?c.expectedAsset.network:'';
+    const dec=c=>c&&c.expectedAsset?c.expectedAsset.decimals:0;
+    const seller=chairOf('SELLER'), buyer=chairOf('BUYER');
+    const cfg=m.config||{};
+    // Banner
+    const bn=$('#opMirrorBanner'); if(bn) bn.style.display='';
+    if($('#opMirrorTitle')) $('#opMirrorTitle').textContent='Espelho da mesa '+(m.code||'');
+    if($('#opMirrorSub')) $('#opMirrorSub').innerHTML=(m.operationCode?('· operação '+esc(m.operationCode)+' '):'')+(m.status?m3Badge(m.status):'');
+    // Box "Vendedor" (opRecv*) ← cadeira SELLER
+    opSetCoin($('#opRecvIcon'),sym(seller),OP_COLORS[net(seller)]||'#3b4a68',opChainIcon(net(seller)));
+    if($('#opRecvSym')) $('#opRecvSym').textContent=sym(seller);
+    if($('#opRecvName')) $('#opRecvName').textContent=(M3_ROLE.SELLER)+' · '+(net(seller)||'');
+    if($('#opRecvAmt')) $('#opRecvAmt').textContent=(cfg.amountInBase?baseToHuman(cfg.amountInBase,dec(seller)):'0')+' '+sym(seller);
+    // Box "Comprador" (opDel*) ← cadeira BUYER
+    opSetCoin($('#opDelIcon'),sym(buyer),OP_COLORS[net(buyer)]||'#3b4a68',opChainIcon(net(buyer)));
+    if($('#opDelSym')) $('#opDelSym').textContent=sym(buyer);
+    if($('#opDelName')) $('#opDelName').textContent=(M3_ROLE.BUYER)+' · '+(net(buyer)||'');
+    const delAmt=$('#opDelAmt'); if(delAmt){ delAmt.value=cfg.buyerAmountInBase?baseToHuman(cfg.buyerAmountInBase,dec(buyer)):(cfg.amountInBase?baseToHuman(cfg.amountInBase,dec(seller)):''); delAmt.readOnly=true; }
+    const avail=$('#opDelAvail'); if(avail) avail.style.display='none';
+    // Taxas → espelha no opFees e nos resumos
+    if(cfg.discountBps!=null) opFees.discountPct=cfg.discountBps/100;
+    if(cfg.commissionBps!=null) opFees.commissionPct=cfg.commissionBps/100;
+    if(cfg.commissionPayer){ opFees.payer={ seller:cfg.commissionPayer!=='BUYER', buyer:cfg.commissionPayer!=='SELLER' }; }
+    // Participantes (cadeiras)
+    const box=$('#opParts');
+    if(box){ box.innerHTML=OP_ROLES.map(r=>{
+      const c=chairOf(r.role); if(!c) return '';
+      const conn=!!c.wallet; const w=c.wallet;
+      if(!conn) return '<div class="op-part"><div class="ph"><div class="op-coin" style="background:#243357">?</div><div><div class="nm">'+r.label+'</div><div class="addr">Aguardando conexão</div></div></div><div class="foot"><div><div class="bal" style="color:var(--ink-3)">'+esc(sym(c))+'</div></div><span class="op-conn" style="color:var(--ink-3)"><i style="background:var(--ink-3);box-shadow:none"></i>Off</span></div></div>';
+      const nk=w.network||net(c); const color=OP_COLORS[nk]||'#3b4a68';
+      return '<div class="op-part"><div class="ph">'+opCoinBadge(sym(c),color,opChainIcon(nk))+'<div><div class="nm">'+r.label+(c.firstName?' <span class="op-tag">'+esc(c.firstName)+'</span>':'')+'</div><div class="addr">'+esc(shortAddr(w.address))+'</div></div></div><div class="foot"><div><div class="bal">'+esc(sym(c))+'</div></div><span class="op-conn"><i></i>Conectado</span></div></div>';
+    }).join(''); }
+    // Painel "Informações da Negociação"
+    const d=m.deal;
+    const mode=$('#opInfoMode'); if(mode){ mode.className='badge '+(d?'ok':'wait'); mode.textContent=d?'Mesa real':'Mesa (sem operação ativa)'; }
+    const fdt=t=>t?new Date(t).toLocaleString('pt-BR',{day:'2-digit',month:'2-digit',year:'2-digit',hour:'2-digit',minute:'2-digit'}):'—';
+    if($('#opInfoCode')) $('#opInfoCode').textContent=(d&&d.id)||m.operationCode||m.code||'—';
+    const stEl=$('#opInfoState'); if(stEl) stEl.innerHTML=d?opStateBadge(d.state):m3Badge(m.status);
+    if($('#opInfoCreated')) $('#opInfoCreated').textContent=fdt(d&&d.createdAt);
+    if($('#opInfoExp')) $('#opInfoExp').textContent=(d&&d.turnExpiresAt)?('turno atual: '+fmtCountdown(d.turnExpiresAt)):(m.expiresAt?('mesa: '+fmtCountdown(m.expiresAt)):'—');
+    if($('#opInfoComm')) $('#opInfoComm').textContent=opNum(opFees.commissionPct,2)+'%'+(cfg.commissionPayer?(' · '+(cfg.commissionPayer==='SPLIT'?'dividida':cfg.commissionPayer==='BUYER'?'Comprador':'Vendedor')):'');
+    if($('#opInfoDesc')) $('#opInfoDesc').textContent=opNum(opFees.discountPct,2)+'%';
+    if($('#opInfoSlip')) $('#opInfoSlip').textContent='—';
+    const connN=(m.chairs||[]).filter(c=>c.wallet).length, totN=(m.chairs||[]).length;
+    if($('#opInfoWallets')) $('#opInfoWallets').textContent=connN+'/'+totN+' conectadas';
+    if($('#opInfoNet')) $('#opInfoNet').textContent=m.networkLabel||m.network||'—';
+    if($('#opInfoContract')) $('#opInfoContract').textContent='—';
+    const note=$('#opInfoSimNote'); if(note) note.style.display='none';
+    // Esteira de assinaturas (a partir da operação da mesa, se houver)
+    const steps=$('#opSteps');
+    if(d){
+      const parts=(m.chairs||[]).filter(c=>c.wallet).map(c=>({ role:c.role, address:c.wallet.address }));
+      renderEsteira({ id:d.id, state:d.state, participants:parts, signed:d.signed||[], turnRole:d.turnRole, turnExpiresAt:d.turnExpiresAt, requiredSignatures:d.requiredSignatures, validSignatures:d.validSignatures, escrowContract:null });
+    } else if(steps){ steps.innerHTML='<div style="color:var(--ink-3);font-size:12.5px;padding:8px 0">Nenhuma operação criada nesta mesa ainda. Abra o detalhe para aprovar.</div>'; }
+    // Botões da esteira: no espelho a página é de leitura — ações ficam no detalhe da mesa.
+    ['#opStartDeal','#opSignTurn','#opNewDeal'].forEach(s=>{ const b=$(s); if(b) b.style.display='none'; });
+    const statusEl=$('#opDealStatus'); if(statusEl) statusEl.textContent=d?('Operação '+d.id+' · '+d.state):'Mesa '+(m.code||'')+' — sem operação ativa.';
+  }
   /* ---------- Rascunhos locais: criar operação já salva na lista, sem backend ---------- */
   const DRAFTS_KEY='verum_op_drafts';
   const MAX_DRAFTS=2; // a lista "Operações da mesa" mantém só os 2 rascunhos mais recentes
@@ -2170,7 +2207,6 @@ img,svg,canvas,video{max-width:100%}
         openMesaDeal(c.dataset.deal);
       };
       c.addEventListener('click',open); c.addEventListener('keydown',e=>{ if(e.key==='Enter'||e.key===' '){ e.preventDefault(); open(); } });
-      const sh=c.querySelector('[data-share-op]'); if(sh) sh.addEventListener('click',e=>{ e.stopPropagation(); clip(location.origin+'/op/'+encodeURIComponent(sh.dataset.shareOp)); toast('Link de visualização copiado (somente leitura)','ok'); });
     });
   }
   function dealCardsHtml(list,activeId){
@@ -2183,9 +2219,7 @@ img,svg,canvas,video{max-width:100%}
       const turn=(d.state==='AWAITING_SIGNATURES'&&d.turnRole)?(' · vez: '+(OP_STEP_LABEL[d.turnRole]||d.turnRole)):'';
       return '<div class="op-deal-card'+(d.id===activeId?' active':'')+'" data-deal="'+esc(d.id)+'" role="button" tabindex="0">'
         +'<div><div class="dpair">'+(amt!=null?amt+' ':'')+esc(pairTxt)+'</div><div class="did">'+esc(d.id)+'</div><div class="dmeta">'+esc(dt)+' · '+d.validSignatures+'/'+d.requiredSignatures+' assinaturas'+esc(turn)+'</div></div>'
-        +'<div class="dright">'+opStateBadge(d.state)+(d.id===activeId?'<span style="font-size:10.5px;color:var(--blue);font-weight:700">Aberta na esteira</span>':'')
-        +'<button class="btn" data-share-op="'+esc(d.id)+'" title="Link somente-leitura desta operação" style="height:28px;font-size:11px;margin-top:6px"><svg viewBox="0 0 24 24" style="width:12px;height:12px;stroke:currentColor;fill:none;stroke-width:2;vertical-align:-2px"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V5a2 2 0 012-2h8"/></svg>Copiar link</button>'
-        +'</div></div>';
+        +'<div class="dright">'+opStateBadge(d.state)+(d.id===activeId?'<span style="font-size:10.5px;color:var(--blue);font-weight:700">Aberta na esteira</span>':'')+'</div></div>';
     }).join('');
   }
   async function refreshMesaDeals(){ if(!getTok()) return; try{ const r=await pmApi('/v1/portal/mesa/deals'); if(r&&Array.isArray(r.deals)){ opDealsCache=r.deals; renderDealList(r.deals,r.activeId); } }catch(e){} }
@@ -2220,6 +2254,7 @@ img,svg,canvas,video{max-width:100%}
   }
   // Renderiza os 4 cards de participantes a partir da mesa real.
   function opRenderParticipants(){
+    if(opMirror) return; // participantes vêm das cadeiras da mesa espelhada
     const box=$('#opParts'); if(!box||!opMesa) return;
     const chainName=k=>{ const c=opChains.find(x=>x.chainKey===k); return c?c.nativeSymbol:(k||'').toUpperCase(); };
     box.innerHTML=OP_ROLES.map(r=>{
@@ -2302,7 +2337,7 @@ img,svg,canvas,video{max-width:100%}
 
   /* ---------- Segurança da mesa (2FA TOTP, inatividade, alerta de carteira) — espelha o backend ---------- */
   // Estado real vindo do backend; os toggles refletem e alteram o servidor.
-  let secState={ twoFactor:{enabled:false}, idleLock:{enabled:false,timeoutMs:1800000}, newWalletAlert:{enabled:false} };
+  let secState={ twoFactor:{enabled:false}, idleLock:{enabled:true,timeoutMs:600000}, newWalletAlert:{enabled:false} };
   const is2FAOn=()=>!!(secState.twoFactor&&secState.twoFactor.enabled);
   function secLabel(k){ return k==='idleLock'?'Bloqueio por inatividade':(k==='newWalletAlert'?'Alerta de nova carteira':'2FA'); }
   function reflectSecurity(){
@@ -2444,24 +2479,6 @@ img,svg,canvas,video{max-width:100%}
   /* ---------- Wizard: 1) mesa e cadeiras · 2) ativos · 3) valores e taxas · 4) revisão → criar ---------- */
   const M3_STEPS=['#m3Create','#m3s2','#opFeesCard','#m3s4'];
   function m3Step(n){ M3_STEPS.forEach((sel,i)=>{ const el=$(sel); if(el) el.style.display=(n===i+1)?'':'none'; }); }
-  // Blocos do "hub" (lista/detalhe/todas-operações/carteira PM) escondidos durante a criação, pra a
-  // tela de criação ficar DEDICADA (só o wizard + cabeçalho). m3ExitCreate restaura o hub.
-  function m3HubBlocks(){ return ['#m3ListCard','#m3Detail','#opAllCard','#mesaSlots','#mesaSlotsHead']; }
-  function m3EnterCreate(){
-    m3HubBlocks().forEach(sel=>{ const el=$(sel); if(el) el.style.display='none'; });
-    const t=$('#m3HubTitle'); if(t) t.textContent='Nova mesa';
-    const s=$('#m3HubSub'); if(s) s.textContent='Preencha os passos abaixo. Ao criar, você vai direto para a operação com o link de compartilhar.';
-    const nb=$('#m3New'); if(nb) nb.style.display='none';
-    m3OpenCreate();
-  }
-  function m3ExitCreate(){
-    m3Step(0);
-    ['#m3ListCard','#opAllCard','#mesaSlots','#mesaSlotsHead'].forEach(sel=>{ const el=$(sel); if(el) el.style.display=''; });
-    const t=$('#m3HubTitle'); if(t) t.textContent='Operações';
-    const s=$('#m3HubSub'); if(s) s.textContent='Suas mesas e operações. Crie uma mesa, convide as carteiras, configure e aprove — o acompanhamento e o link de compartilhar ficam na própria mesa.';
-    const nb=$('#m3New'); if(nb) nb.style.display='';
-    // #m3Detail volta a aparecer só quando houver mesa aberta (m3Open controla).
-  }
   function m3OpenCreate(){
     const c=$('#m3Create'); if(!c) return; m3Step(1);
     m3RenderChairRows();
@@ -2529,8 +2546,8 @@ img,svg,canvas,video{max-width:100%}
       const mesa=await pmApi('/v1/portal/mesas',{method:'POST',body:{ label:$('#m3cLabel').value.trim()||undefined, network:d.net, chairs:d.chairs }});
       // Config salva na sequência — a mesa já nasce pronta para convidar e aprovar.
       await pmApi('/v1/portal/mesas/'+mesa.mesaId+'/config',{method:'PATCH',body:{ amountInBase:d.amountInBase, buyerAmountInBase:d.buyerAmountInBase, discountBps:d.discountBps, commissionBps:d.commissionBps, commissionPayer:d.commissionPayer }});
-      toast('Mesa '+mesa.code+' criada · operação '+(mesa.operationCode||''),'ok');
-      m3ExitCreate(); showView('operacao'); await m3LoadList(); m3Open(mesa.mesaId);
+      toast('Mesa '+mesa.code+' criada · operação '+(mesa.operationCode||''),'ok'); m3Step(0);
+      await m3LoadList(); m3Open(mesa.mesaId);
     }catch(e){ toast(e.message||'Falha ao criar mesa','err'); }
     finally{ btn.disabled=false; }
   }
@@ -2539,20 +2556,12 @@ img,svg,canvas,video{max-width:100%}
       const r=await pmApi('/v1/portal/mesas'); const mesas=r.mesas||[];
       const cEl=$('#m3Count'); if(cEl) cEl.textContent=String(mesas.length);
       const box=$('#m3List'); if(box){
-        box.innerHTML = mesas.length? mesas.map(m=>{
-          const info='<span class="mono" style="font-size:12.5px">'+esc(m.code)+'</span>'+(m.operationCode?' <span class="mono" style="color:var(--blue);font-size:12px">· '+esc(m.operationCode)+'</span>':'')+(m.networkLabel?' <span style="color:var(--ink-3);font-size:12px">· '+esc(m.networkLabel)+'</span>':'')+(m.label?' <span style="color:var(--ink-3);font-size:12px">· '+esc(m.label)+'</span>':'')+'<div style="font-size:12px;color:var(--ink-3)">'+m.chairs.map(c=>esc((M3_ROLE[c.role]||c.role)+(c.firstName?(' · '+c.firstName):''))+(c.connected?' ✓':'')).join(' · ')+'</div>';
-          // DONO: ações completas. PARTICIPANDO (mesa de terceiro): selo + "Abrir operação" (visão de participante).
-          const tag=m.owner?'':'<span class="badge info" title="Você participa desta mesa (não é o criador)">Participando'+(m.myRole?(' · '+(M3_ROLE[m.myRole]||m.myRole)):'')+'</span>';
-          const actions=m.owner
-            ? '<button class="btn btn-primary" data-m3-view="'+esc(m.mesaId)+'" title="Abrir na página Operação com os dados desta mesa" style="height:34px;font-size:12.5px">Ver operação</button><button class="btn" data-m3-open="'+esc(m.mesaId)+'" title="Gerenciar (convites, aprovar, assinar)" style="height:34px;font-size:12.5px">Gerenciar</button><button class="btn" data-m3-del="'+esc(m.mesaId)+'" title="Excluir mesa" style="height:34px;font-size:12.5px;border-color:var(--red);color:#fecaca">Excluir</button>'
-            : '<button class="btn btn-primary" data-m3-part="'+esc(m.mesaId)+'" title="Abrir a operação (sua visão de participante)" style="height:34px;font-size:12.5px">Abrir operação</button>';
-          return '<div class="r" style="display:flex;gap:10px;align-items:center;justify-content:space-between;padding:10px 0;border-bottom:1px solid var(--line)"><div>'+info+'</div><div style="display:flex;gap:8px;align-items:center">'+m3Badge(m.status)+tag+actions+'</div></div>';
-        }).join('')
+        box.innerHTML = mesas.length? mesas.map(m=>'<div class="r" style="display:flex;gap:10px;align-items:center;justify-content:space-between;padding:10px 0;border-bottom:1px solid var(--line)">'
+          +'<div><span class="mono" style="font-size:12.5px">'+esc(m.code)+'</span>'+(m.operationCode?' <span class="mono" style="color:var(--blue);font-size:12px">· '+esc(m.operationCode)+'</span>':'')+(m.networkLabel?' <span style="color:var(--ink-3);font-size:12px">· '+esc(m.networkLabel)+'</span>':'')+(m.label?' <span style="color:var(--ink-3);font-size:12px">· '+esc(m.label)+'</span>':'')+'<div style="font-size:12px;color:var(--ink-3)">'+m.chairs.map(c=>esc((M3_ROLE[c.role]||c.role)+(c.firstName?(' · '+c.firstName):''))+(c.connected?' ✓':'')).join(' · ')+'</div></div>'
+          +'<div style="display:flex;gap:8px;align-items:center">'+m3Badge(m.status)+'<button class="btn" data-m3-open="'+esc(m.mesaId)+'" style="height:34px;font-size:12.5px">Ver operação</button><button class="btn" data-m3-del="'+esc(m.mesaId)+'" title="Excluir mesa" style="height:34px;font-size:12.5px;border-color:var(--red);color:#fecaca">Excluir</button></div></div>').join('')
           : '<p style="color:var(--ink-3);font-size:12.5px;margin:0">Nenhuma mesa criada ainda. Toque em "Criar mesa".</p>';
-        box.querySelectorAll('[data-m3-view]').forEach(b=>b.addEventListener('click',()=>opViewMesa(b.dataset.m3View)));
-        box.querySelectorAll('[data-m3-open]').forEach(b=>b.addEventListener('click',()=>m3Open(b.dataset.m3Open)));
+        box.querySelectorAll('[data-m3-open]').forEach(b=>b.addEventListener('click',()=>opMirrorMesa(b.dataset.m3Open)));
         box.querySelectorAll('[data-m3-del]').forEach(b=>b.addEventListener('click',()=>m3DeleteMesa(b.dataset.m3Del)));
-        box.querySelectorAll('[data-m3-part]').forEach(b=>b.addEventListener('click',()=>{ location.href='/mesa?mesa='+encodeURIComponent(b.dataset.m3Part); }));
       }
       m3RenderOps(mesas);
       return mesas;
@@ -2565,26 +2574,14 @@ img,svg,canvas,video{max-width:100%}
     const list=(mesas||[]).filter(m=>(!q||m.code.toUpperCase().includes(q))&&(!f||m.status===f));
     card.style.display=(mesas&&mesas.length)?'':'none';
     const rows=$('#m3OpsRows'); if(!rows) return;
-    rows.innerHTML=list.map(m=>{
-      const nameCell='<td class="mono">'+esc(m.code)+(m.operationCode?'<br><span style="color:var(--blue);font-size:11px">'+esc(m.operationCode)+'</span>':'')+(m.owner?'':'<br><span class="badge info" style="font-size:10px" title="Você participa (não é o criador)">participando</span>')+'</td>'
-        +'<td style="font-size:12px">'+m.chairs.map(c=>esc((M3_ROLE[c.role]||c.role)+(c.firstName?(': '+c.firstName):''))).join('<br>')+'</td>'
-        +'<td class="mono">'+esc(m.amount||'—')+'</td><td>'+m3Badge(m.status)+'</td>';
-      // DONO: ver/gerenciar/copiar/excluir. PARTICIPANDO: só "Abrir operação" (visão de participante).
-      const actions=m.owner
-        ? '<button class="btn btn-primary" data-m3-view="'+esc(m.mesaId)+'" title="Abrir na página Operação com os dados desta mesa" style="height:32px;font-size:12px">Ver operação</button>'
-          +'<button class="btn" data-m3-goto="'+esc(m.mesaId)+'" title="Gerenciar (convites, aprovar, assinar)" style="height:32px;font-size:12px">Gerenciar</button>'
-          +'<button class="btn" data-m3-vlink="'+esc(m.mesaId)+'" data-m3-vlinkop="'+esc(m.dealId||'')+'" title="Link somente-leitura da operação" style="height:32px;font-size:12px"><svg viewBox="0 0 24 24" style="width:13px;height:13px;stroke:currentColor;fill:none;stroke-width:2;vertical-align:-2px"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V5a2 2 0 012-2h8"/></svg>Copiar link</button>'
-          +'<button class="btn" data-m3-tdel="'+esc(m.mesaId)+'" title="Excluir mesa" style="height:32px;font-size:12px;border-color:var(--red);color:#fecaca">Excluir</button>'
-        : '<button class="btn btn-primary" data-m3-part="'+esc(m.mesaId)+'" title="Abrir a operação (sua visão de participante)" style="height:32px;font-size:12px">Abrir operação</button>';
-      return '<tr>'+nameCell+'<td style="display:flex;gap:6px;flex-wrap:wrap">'+actions+'</td></tr>';
-    }).join('')||'<tr><td colspan="5" style="color:var(--ink-3)">Nenhuma mesa com esse filtro.</td></tr>';
-    rows.querySelectorAll('[data-m3-view]').forEach(b=>b.addEventListener('click',()=>opViewMesa(b.dataset.m3View)));
-    rows.querySelectorAll('[data-m3-part]').forEach(b=>b.addEventListener('click',()=>{ location.href='/mesa?mesa='+encodeURIComponent(b.dataset.m3Part); }));
-    rows.querySelectorAll('[data-m3-goto]').forEach(b=>b.addEventListener('click',()=>{ showView('carteiras'); m3Open(b.dataset.m3Goto); }));
-    rows.querySelectorAll('[data-m3-vlink]').forEach(b=>b.addEventListener('click',()=>{ const op=b.dataset.m3Vlinkop; const url=location.origin+'/mesa?mesa='+encodeURIComponent(b.dataset.m3Vlink)+(op?'&op='+encodeURIComponent(op):''); clip(url); toast('Link de visualização copiado (somente leitura)','ok'); }));
+    rows.innerHTML=list.map(m=>'<tr><td class="mono">'+esc(m.code)+(m.operationCode?'<br><span style="color:var(--blue);font-size:11px">'+esc(m.operationCode)+'</span>':'')+'</td>'
+      +'<td style="font-size:12px">'+m.chairs.map(c=>esc((M3_ROLE[c.role]||c.role)+(c.firstName?(': '+c.firstName):''))).join('<br>')+'</td>'
+      +'<td class="mono">'+esc(m.amount||'—')+'</td><td>'+m3Badge(m.status)+'</td>'
+      +'<td style="display:flex;gap:6px"><button class="btn" data-m3-goto="'+esc(m.mesaId)+'" style="height:32px;font-size:12px">Ver operação</button><button class="btn" data-m3-tdel="'+esc(m.mesaId)+'" title="Excluir mesa" style="height:32px;font-size:12px;border-color:var(--red);color:#fecaca">Excluir</button></td></tr>').join('')||'<tr><td colspan="5" style="color:var(--ink-3)">Nenhuma mesa com esse filtro.</td></tr>';
+    rows.querySelectorAll('[data-m3-goto]').forEach(b=>b.addEventListener('click',()=>opMirrorMesa(b.dataset.m3Goto)));
     rows.querySelectorAll('[data-m3-tdel]').forEach(b=>b.addEventListener('click',()=>m3DeleteMesa(b.dataset.m3Tdel)));
   }
-  function m3Open(mesaId){ opExitMirror(); m3Sel=mesaId; $('#m3Detail').style.display=''; m3Refresh(); if(!m3Timer) m3Timer=setInterval(m3Refresh,5000); if(!m3TickT) m3TickT=setInterval(m3Tick,1000); }
+  function m3Open(mesaId){ m3Sel=mesaId; $('#m3Detail').style.display=''; m3Refresh(); if(!m3Timer) m3Timer=setInterval(m3Refresh,5000); if(!m3TickT) m3TickT=setInterval(m3Tick,1000); }
   async function m3DeleteMesa(mesaId){
     if(!mesaId) return;
     if(!confirm('Excluir esta mesa? Esta ação remove a mesa e não pode ser desfeita.')) return;
@@ -2594,76 +2591,6 @@ img,svg,canvas,video{max-width:100%}
       if(m3Sel===mesaId){ const d=$('#m3Detail'); if(d) d.style.display='none'; m3Sel=null; }
       m3LoadList();
     }catch(e){ toast(e.message||'Falha ao excluir','err'); }
-  }
-
-  /* ===== ESPELHO MESA → OPERAÇÃO (read-only): lança os dados da mesa v3 no simulador da página
-     Operação, substituindo os valores fixos. Fica AO VIVO pelo polling enquanto opMirror set. ===== */
-  let opMirror=null; // mesaId espelhado (null = simulador normal)
-  function opTokFromAsset(a){
-    if(!a) return null;
-    const sym=String(a.symbol||'').toUpperCase();
-    if(sym==='USDT'||sym==='USDC') return { kind:'stable', token:sym, net:a.network };
-    return { kind:'native', chainKey:a.network };
-  }
-  async function opViewMesa(mesaId){
-    if(!mesaId) return;
-    opMirror=mesaId;
-    showView('operacao'); // → hub 'carteiras'
-    await opMirrorRefresh();
-    const anchor=$('#opParts'); if(anchor) anchor.scrollIntoView({behavior:'smooth',block:'start'});
-  }
-  async function opMirrorRefresh(){
-    if(!opMirror) return;
-    try{ const m=await pmApi('/v1/portal/mesas/'+encodeURIComponent(opMirror)); opApplyMesa(m); }catch(e){}
-  }
-  function opExitMirror(){ opMirror=null; const b=$('#opMirrorBanner'); if(b) b.remove(); }
-  function opApplyMesa(m){
-    if(!m) return;
-    const chairs=m.chairs||[];
-    const chairOf=role=>chairs.find(c=>c.role===role);
-    const seller=chairOf('SELLER'), buyer=chairOf('BUYER');
-    // Participantes do simulador via opMesa.slots (mesmo render da página).
-    opMesa={ slots: chairs.map(c=>({ role:c.role, status:c.wallet?'confirmed':'empty', wallet:c.wallet||null })) };
-    // Taxas da config da mesa.
-    const cfg=m.config||{};
-    opFees.discountPct=(cfg.discountBps||0)/100;
-    opFees.commissionPct=(cfg.commissionBps||0)/100;
-    const payer=cfg.commissionPayer||'SELLER';
-    opFees.payer={ seller: payer==='SELLER'||payer==='SPLIT', buyer: payer==='BUYER'||payer==='SPLIT' };
-    // Ativos dos dois lados (opDel=Comprador, opRecv=Vendedor) p/ o opRecalc pintar ícones/layout.
-    if(buyer&&buyer.expectedAsset){ const t=opTokFromAsset(buyer.expectedAsset); if(t) opPay=t; }
-    if(seller&&seller.expectedAsset){ const t=opTokFromAsset(seller.expectedAsset); if(t) opRecv=t; }
-    const buyerHuman=(cfg.buyerAmountInBase&&buyer)?baseToHuman(cfg.buyerAmountInBase,buyer.expectedAsset.decimals):null;
-    const sellerHuman=(cfg.amountInBase&&seller)?baseToHuman(cfg.amountInBase,seller.expectedAsset.decimals):null;
-    if(buyerHuman!=null&&$('#opDelAmt')) $('#opDelAmt').value=buyerHuman;
-    // Deal espelhado (summary + participantes das cadeiras) p/ a esteira/status.
-    opDeal = m.deal ? { ...m.deal, participants: chairs.map(c=>({ role:c.role, address:c.wallet?c.wallet.address:'' })), demo:false, settlementMode:'local', escrowContract:null } : null;
-    try{ opRenderParticipants(); }catch(e){}
-    try{ opRecalc(); }catch(e){}
-    if(opDeal){ try{ renderEsteira(opDeal); }catch(e){} }
-    // FIDELIDADE: símbolos/nomes/quantidades EXATOS da mesa (mesmo p/ tokens fora do modelo native/stable).
-    const netLabel=k=>{ try{ const c=opChainBy(k); return c.displayName||k; }catch(e){ return k; } };
-    if(buyer&&buyer.expectedAsset){ if($('#opDelSym')) $('#opDelSym').textContent=buyer.expectedAsset.symbol; if($('#opDelName')) $('#opDelName').textContent=netLabel(buyer.expectedAsset.network); }
-    if(seller&&seller.expectedAsset){
-      if($('#opRecvSym')) $('#opRecvSym').textContent=seller.expectedAsset.symbol;
-      if($('#opRecvName')) $('#opRecvName').textContent=netLabel(seller.expectedAsset.network);
-      if(sellerHuman!=null){ const txt=sellerHuman+' '+seller.expectedAsset.symbol; if($('#opRecvAmt')) $('#opRecvAmt').textContent=txt; if($('#opRecvNetVal')) $('#opRecvNetVal').textContent=txt; if($('#opSumRecvVal')) $('#opSumRecvVal').textContent=txt; }
-    }
-    if(buyer&&buyer.expectedAsset&&buyerHuman!=null&&$('#opSumDelVal')) $('#opSumDelVal').textContent=buyerHuman+' '+buyer.expectedAsset.symbol;
-    if($('#opInfoCode')) $('#opInfoCode').textContent=m.operationCode||(m.deal&&m.deal.id)||m.mesaId;
-    if($('#opInfoNet')) $('#opInfoNet').textContent=m.networkLabel||m.network||'—';
-    const modeB=$('#opInfoMode'); if(modeB){ modeB.className='badge ok'; modeB.textContent='Espelho da mesa'; }
-    const simNote=$('#opInfoSimNote'); if(simNote) simNote.style.display='none';
-    // Banner ao vivo (com sair).
-    let banner=$('#opMirrorBanner');
-    if(!banner){ const host=$('#view-carteiras'); if(host){ banner=document.createElement('div'); banner.id='opMirrorBanner'; banner.style.cssText='margin:0 0 12px;padding:10px 12px;border:1px solid var(--blue);border-radius:10px;background:rgba(80,130,255,.08);display:flex;align-items:center;gap:10px;font-size:12.5px;color:var(--ink-2)'; host.insertBefore(banner, host.firstChild); } }
-    // Link PÚBLICO (somente leitura, sem login): operação (/op/<dealId>) se já houver; senão a mesa (/ver/<mesaId>).
-    const pubUrl = (m.deal&&m.deal.id) ? (location.origin+'/op/'+encodeURIComponent(m.deal.id)) : (location.origin+'/ver/'+encodeURIComponent(m.mesaId));
-    if(banner) banner.innerHTML='<b style="color:var(--blue)">Espelho da mesa '+esc(m.code||'')+'</b> · dados ao vivo (somente leitura)'
-      +'<button class="btn btn-primary" id="opMirrorShare" style="height:28px;font-size:11.5px;margin-left:auto"><svg viewBox="0 0 24 24" style="width:13px;height:13px;stroke:currentColor;fill:none;stroke-width:2;vertical-align:-2px"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V5a2 2 0 012-2h8"/></svg> Copiar link de visualização</button>'
-      +'<button class="btn" id="opMirrorExit" style="height:28px;font-size:11.5px">Sair do espelho</button>';
-    const sh=$('#opMirrorShare'); if(sh) sh.addEventListener('click',()=>{ clip(pubUrl); toast('Link de visualização copiado — abra sem login (somente leitura)','ok'); });
-    const ex=$('#opMirrorExit'); if(ex) ex.addEventListener('click',()=>{ opExitMirror(); refreshMesa(); refreshMesaDeal(); });
   }
   function m3Tick(){
     if(!m3Cache) return;
@@ -2688,32 +2615,6 @@ img,svg,canvas,video{max-width:100%}
     box.querySelectorAll('[data-m3-oplink]').forEach(b=>b.addEventListener('click',e=>{ e.stopPropagation(); const url=location.origin+'/mesa?mesa='+encodeURIComponent(m3Sel)+'&op='+encodeURIComponent(b.dataset.m3Oplink); clip(url); toast('Link de visualização copiado — abre direto nesta operação (somente leitura)','ok'); }));
     box.querySelectorAll('[data-m3-opdel]').forEach(b=>b.addEventListener('click',async e=>{ e.stopPropagation(); if(!confirm('Excluir esta operação? Ela sai da lista da mesa.')) return; try{ await pmApi('/v1/portal/mesas/'+encodeURIComponent(m3Sel)+'/deals/'+encodeURIComponent(b.dataset.m3Opdel)+'/delete',{method:'POST',body:{}}); toast('Operação excluída','ok'); m3Refresh(); }catch(err){ toast(err.message||'Falha ao excluir','err'); } }));
   }
-  // Esteira de assinaturas do detalhe da mesa (layout rico da aba Operações) com dados REAIS.
-  function m3RenderEsteira(m){
-    const wrap=$('#m3dEsteiraWrap'), steps=$('#m3dEsteira'); if(!steps) return;
-    const d=m&&m.deal;
-    if(!d){ if(wrap) wrap.style.display='none'; steps.innerHTML=''; return; }
-    if(wrap) wrap.style.display='';
-    const order=OP_SIGN_ORDER.filter(r=>(m.chairs||[]).some(c=>c.role===r));
-    const signed=new Set(d.signed||[]);
-    const addrOf=r=>{ const c=(m.chairs||[]).find(x=>x.role===r); const a=c&&c.wallet&&(c.wallet.address||c.wallet); return a?shortAddr(a):''; };
-    let sCls='lock', sMeta='Aguardando as assinaturas';
-    if(['FULLY_SIGNED','SETTLEMENT_VALIDATION'].includes(d.state)){ sCls='turn'; sMeta='Validando liquidação…'; }
-    else if(d.state==='SETTLING'){ sCls='turn'; sMeta='Executando no contrato…'; }
-    else if(d.state==='SETTLED'){ sCls='done'; sMeta='Liquidada no contrato'; }
-    else if(['BLOCKED','REFUNDING','REFUNDED','EXPIRED','CANCELLED'].includes(d.state)){ sMeta='Não liquidada ('+d.state+')'; }
-    const settleStep='<div class="op-step '+sCls+'"><div class="line"></div><div class="dot">'+OP_DOT[sCls]+'</div><div class="nm">Liquidação via contrato</div><div class="meta">'+esc(sMeta)+'</div><div class="addr2"></div></div>';
-    steps.innerHTML=order.map((r,i)=>{
-      const isSigned=signed.has(r), isTurn=d.turnRole===r; const cls=isSigned?'done':isTurn?'turn':'lock';
-      const meta=isSigned?'Assinado':isTurn?'Sua vez de assinar':('Aguardando '+(OP_STEP_LABEL[order[i-1]]||'anterior'));
-      const chip=(isTurn&&d.turnExpiresAt)?'<div class="op-turn-chip" data-turn-exp="'+d.turnExpiresAt+'"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 8v4l2 2"/></svg><span class="op-turn-cd">'+fmtCountdown(d.turnExpiresAt)+'</span></div>':'';
-      return '<div class="op-step '+cls+'"><div class="line"></div><div class="dot">'+OP_DOT[cls]+'</div><div class="nm">'+esc(OP_STEP_LABEL[r]||r)+'</div><div class="meta">'+esc(meta)+'</div>'+chip+'<div class="addr2">'+esc(addrOf(r))+'</div></div>';
-    }).join('')+settleStep;
-    const req=d.requiredSignatures||order.length, val=d.validSignatures||0, pct=req?Math.round(val/req*100):0;
-    if($('#m3dSigTxt')) $('#m3dSigTxt').textContent=val+' de '+req+' assinaturas';
-    if($('#m3dSigBar')) $('#m3dSigBar').style.width=pct+'%';
-    if($('#m3dSigPct')) $('#m3dSigPct').textContent=pct+'%';
-  }
   async function m3Refresh(){
     if(!m3Sel) return;
     try{
@@ -2723,47 +2624,21 @@ img,svg,canvas,video{max-width:100%}
       $('#m3dCode').textContent=m.code;
       $('#m3dStatus').outerHTML='<span id="m3dStatus">'+m3Badge(m.status)+'</span>';
       const chairs=$('#m3dChairs');
-      // Saldos do precheck (por papel) p/ exibir no card, como na aba Operações.
-      const balByRole={}; ((m3Bal&&m3Bal.chairs)||[]).forEach(b=>{ balByRole[b.role]=b; });
       chairs.innerHTML=(m.chairs||[]).map(c=>{
         const conn=!!c.wallet;
-        const sym=(c.expectedAsset&&c.expectedAsset.symbol)||'?';
-        const net=(c.expectedAsset&&c.expectedAsset.network)||'';
-        const coin=opCoinBadge(sym,'#243357',opChainIcon(net));
-        // Linha de identidade: nome + endereço (ou estado do convite).
-        const idLine=conn
-          ? esc(c.firstName||'—')+' · <span class="mono">'+esc(shortAddr(c.wallet.address))+'</span>'
-          : (c.invite?'Convite enviado — aguardando conexão':'Aguardando convite');
-        // Status (bolinha verde/cinza) — conectado vs. pendente.
-        const connTag=conn
-          ? '<span class="op-conn"><i></i>Conectado</span>'
-          : '<span class="op-conn" style="color:var(--ink-3)"><i style="background:var(--ink-3);box-shadow:none"></i>Pendente</span>';
-        // Saldo real (quando houver precheck) — exigido/disponível + gás.
-        const b=balByRole[c.role]; const num=n=>(n==null?'—':Number(n).toLocaleString('pt-BR',{maximumFractionDigits:6}));
-        let balBlock='<div class="bal" style="color:var(--ink-3);font-size:13px">'+esc(sym)+'</div>';
-        if(b&&b.assetRequired!=null){
-          const okA=b.assetOk?'var(--green)':'var(--red)';
-          balBlock='<div class="bal" style="color:'+okA+';font-size:15px">'+num(b.assetAmount)+' '+esc(sym)+'</div><div class="usd">exigido: '+num(b.assetRequired)+(b.gasOk!=null?(' · gás '+(b.gasOk?'✓':'✗')):'')+'</div>';
-        }
-        // Badge de assinatura (quando há operação).
-        const dd=m.deal; let sigBadge='';
-        if(conn&&dd){ if((dd.signed||[]).includes(c.role)) sigBadge='<span class="badge ok" style="margin-top:8px;display:inline-block">✓ Assinou</span>'; else if(dd.state==='AWAITING_SIGNATURES'&&dd.turnRole===c.role) sigBadge='<span class="badge wait" style="margin-top:8px;display:inline-block">→ Vez de assinar</span>'; else sigBadge='<span class="badge info" style="margin-top:8px;display:inline-block">Aguardando assinatura</span>'; }
-        const inviteBtn=(!conn&&c.role!=='PAYMASTER_1')?'<button class="btn" data-m3-inv="'+esc(c.chairId)+'" style="height:32px;font-size:12px;margin-top:8px;width:100%">Convidar participante</button>':'';
-        const revoke=(conn&&!m.approvedAt&&c.role!=='PAYMASTER_1')?'<button class="btn" data-m3-rvk="'+esc(c.chairId)+'" style="height:30px;font-size:11.5px;margin-top:6px;width:100%;border-color:var(--red);color:#fecaca">Revogar conexão</button>':'';
-        return '<div class="op-part">'
-          +'<div class="ph">'+coin+'<div><div class="nm">'+esc(M3_ROLE[c.role]||c.role)+' <span class="op-tag">'+esc(sym)+'</span></div><div class="addr">'+idLine+'</div></div></div>'
-          +'<div class="foot"><div>'+balBlock+'</div>'+connTag+'</div>'
-          +(sigBadge?('<div>'+sigBadge+'</div>'):'')+inviteBtn+revoke+'</div>';
+        const inviteBtn=(!conn&&c.role!=='PAYMASTER_1')?'<button class="btn" data-m3-inv="'+esc(c.chairId)+'" style="height:34px;font-size:12.5px;margin-top:8px">Convidar participante</button>':'';
+        const revoke=(conn&&!m.approvedAt&&c.role!=='PAYMASTER_1')?'<button class="btn" data-m3-rvk="'+esc(c.chairId)+'" style="height:30px;font-size:11.5px;margin-top:6px;border-color:var(--red);color:#fecaca">Revogar conexão</button>':'';
+        return '<div class="op-part"><div class="nm">'+esc(M3_ROLE[c.role]||c.role)+(c.label?' <span style="color:var(--ink-3);font-weight:400;font-size:11.5px">· '+esc(c.label)+'</span>':'')+'</div>'
+          +'<div style="font-size:12.5px;color:var(--ink-2)">'+(conn?('✓ '+esc(c.firstName||'')+' · <span class="mono">'+esc(shortAddr(c.wallet.address))+'</span>'):(c.invite?'Convite enviado — aguardando conexão':'Aguardando convite'))+'</div>'
+          +'<div style="font-size:12px;color:var(--ink-3)">Ativo: '+esc(c.expectedAsset.symbol)+'</div>'+inviteBtn+revoke+'</div>';
       }).join('');
       chairs.querySelectorAll('[data-m3-inv]').forEach(b=>b.addEventListener('click',()=>m3Invite(b.dataset.m3Inv)));
       chairs.querySelectorAll('[data-m3-rvk]').forEach(b=>b.addEventListener('click',async()=>{ if(!confirm('Revogar a conexão desta cadeira? O participante precisará de um novo convite.')) return; try{ await pmApi('/v1/portal/mesas/'+m3Sel+'/chairs/'+b.dataset.m3Rvk+'/revoke',{method:'POST',body:{}}); m3Refresh(); }catch(e){ toast(e.message,'err'); } }));
       // Link de ACOMPANHAMENTO (somente leitura) da operação — o admin envia aos participantes
       // para voltarem à operação quando quiserem (sessão lembrada ou reconexão da carteira).
-      // Link PÚBLICO da mesa (/ver/<mesaId>): read-only, sem login — qualquer um abre e acompanha.
-      const opLink=location.origin+'/ver/'+encodeURIComponent(m3Sel);
-      const opBtn=$('#m3dOpLink'); if(opBtn){ opBtn.onclick=()=>{ clip(opLink); toast('Link de visualização copiado — envie para outras pessoas verem (somente leitura)','ok'); }; }
-      // Esteira de assinaturas (layout rico) + lista de operações, com dados reais.
-      m3RenderEsteira(m);
+      const opLink=location.origin+'/mesa?mesa='+encodeURIComponent(m3Sel);
+      const opBtn=$('#m3dOpLink'); if(opBtn){ opBtn.onclick=()=>{ clip(opLink); toast('Link de visualização copiado — envie aos participantes (somente leitura)','ok'); }; }
+      // Lista de operações (ativa + histórico), cada uma com link próprio /mesa?mesa=&op=<dealId>.
       renderM3Ops(m.deals||[]);
       $('#m3dOpCode').textContent=m.operationCode?('Operação '+m.operationCode):'';
       $('#m3dPlan').textContent=m.settlement?('Liquidação: '+m.settlement.summary):'';
@@ -2901,8 +2776,8 @@ img,svg,canvas,video{max-width:100%}
     finally{ btn.disabled=false; }
   }
   function m3Init(){
-    const nb=$('#m3New'); if(nb) nb.addEventListener('click',m3EnterCreate);
-    const cc=$('#m3cCancel'); if(cc) cc.addEventListener('click',m3ExitCreate);
+    const nb=$('#m3New'); if(nb) nb.addEventListener('click',m3OpenCreate);
+    const cc=$('#m3cCancel'); if(cc) cc.addEventListener('click',()=>m3Step(0));
     // Navegação do wizard: 1 Mesa → 2 Ativos → 3 Valores/taxas → 4 Revisão.
     const on=(id,fn)=>{ const el=$(id); if(el) el.addEventListener('click',fn); };
     on('#m3cNext',async()=>{ await m3LoadTokens($('#m3cSellNet')?.value||'solana'); m3Step(2); });
@@ -2924,6 +2799,8 @@ img,svg,canvas,video{max-width:100%}
     const sg=$('#m3dSign'); if(sg) sg.addEventListener('click',m3Sign);
     const cm=$('#m3dCancelMesa'); if(cm) cm.addEventListener('click',async()=>{ const reason=prompt('Motivo do cancelamento:'); if(reason===null) return; try{ await pmApi('/v1/portal/mesas/'+m3Sel+'/cancel',{method:'POST',body:{reason}}); toast('Mesa cancelada','ok'); m3Refresh(); m3LoadList(); }catch(e){ toast(e.message,'err'); } });
     const dm=$('#m3dDeleteMesa'); if(dm) dm.addEventListener('click',()=>m3DeleteMesa(m3Sel));
+    const omd=$('#opMirrorDetail'); if(omd) omd.addEventListener('click',()=>{ const id=opMirror&&opMirror.mesaId; showView('carteiras'); if(id) m3Open(id); });
+    const ome=$('#opMirrorExit'); if(ome) ome.addEventListener('click',opMirrorExit);
     const os=$('#m3OpsSearch'); if(os) os.addEventListener('input',()=>m3LoadList());
     const of=$('#m3OpsFilter'); if(of) of.addEventListener('change',()=>m3LoadList());
     m3LoadList(); setInterval(m3LoadList,15000);
@@ -3152,7 +3029,7 @@ img,svg,canvas,video{max-width:100%}
   loadNetCatalog();
   // Guard de auth: sem login/cadastro (token) → vai direto pro cadastro do portal.
   if(!getTok()){ goToRegister(); }
-  else { integratePortal(); mesaInit(); securityInit(); m3Init(); showView('carteiras'); }
+  else { integratePortal(); mesaInit(); securityInit(); m3Init(); }
 })();
 </script>
 </body>

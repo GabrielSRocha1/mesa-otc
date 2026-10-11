@@ -33,7 +33,7 @@ export interface DeskSecurity {
 }
 export type SecurityAlertType = 'new_wallet' | '2fa_enabled' | '2fa_disabled' | 'idle_logout';
 export interface SecurityAlert { id: string; type: SecurityAlertType; at: number; message: string; read: boolean }
-export interface PayMaster { id: string; name: string; email: string; org: string; salt: string; passHash: string; createdAt: number; wallet: WalletLink | null; mesaDealId?: string | null; mesaDealIds?: string[]; security?: DeskSecurity; securityMigratedV2?: boolean; knownWallets?: string[]; alerts?: SecurityAlert[]; demo?: boolean }
+export interface PayMaster { id: string; name: string; email: string; org: string; salt: string; passHash: string; createdAt: number; wallet: WalletLink | null; mesaDealId?: string | null; mesaDealIds?: string[]; security?: DeskSecurity; knownWallets?: string[]; alerts?: SecurityAlert[]; demo?: boolean }
 export interface PortalSession { token: string; payMasterId: string; createdAt: number; expiresAt: number; lastSeenAt: number }
 export interface MesaCode { code: string; uid: string; payMasterId: string; createdAt: number; expiresAt: number }
 
@@ -246,9 +246,7 @@ export class PortalService {
 
   /* ---------- Controles de segurança da mesa (2FA, bloqueio por inatividade, alerta de carteira) ---------- */
   private defaultSecurity(): DeskSecurity {
-    // Bloqueio por inatividade DESLIGADO por padrão: o padrão antigo (10 min) deslogava o Pay Master
-    // ao reabrir a guia (o polling não conta como atividade). Quem quiser, liga no painel (30 min).
-    return { twoFactor: { enabled: false }, idleLock: { enabled: false, timeoutMs: 30 * 60_000 }, newWalletAlert: { enabled: false } };
+    return { twoFactor: { enabled: false }, idleLock: { enabled: true, timeoutMs: 10 * 60_000 }, newWalletAlert: { enabled: false } };
   }
   /** Garante a estrutura de segurança no registro (migração preguiçosa de PMs antigos). */
   private ensureSecurity(pm: PayMaster): DeskSecurity {
@@ -257,12 +255,6 @@ export class PortalService {
     pm.security.twoFactor ??= d.twoFactor;
     pm.security.idleLock ??= d.idleLock;
     pm.security.newWalletAlert ??= d.newWalletAlert;
-    // Migração única: desliga o bloqueio por inatividade de quem herdou o padrão antigo (ligado/10 min),
-    // que nunca foi escolha explícita e causava o logout ao reabrir a guia. Toggles futuros são respeitados.
-    if (!pm.securityMigratedV2) {
-      pm.securityMigratedV2 = true;
-      if (pm.security.idleLock.enabled === true && pm.security.idleLock.timeoutMs === 10 * 60_000) pm.security.idleLock = { enabled: false, timeoutMs: d.idleLock.timeoutMs };
-    }
     if (typeof pm.security.idleLock.timeoutMs !== 'number' || pm.security.idleLock.timeoutMs < 60_000) pm.security.idleLock.timeoutMs = d.idleLock.timeoutMs;
     return pm.security;
   }
