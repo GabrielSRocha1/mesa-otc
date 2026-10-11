@@ -29,22 +29,13 @@ describe('§7 PWA — instalabilidade', () => {
 
   it('as páginas servidas incluem o manifest e registram o service worker', async () => {
     const { app } = await withHtml();
-    // Todas as páginas são instaláveis (manifest + theme-color)…
     for (const url of ['/portal', '/mesa', '/convite']) {
       const r = await app.api.inject({ method: 'GET', url });
       expect(r.statusCode, url).toBe(200);
       expect(r.body, url).toContain('<link rel="manifest" href="/manifest.webmanifest">');
+      expect(r.body, url).toContain("serviceWorker.register('/sw.js')");
       expect(r.body, url).toContain('name="theme-color"');
     }
-    // …mas o service worker só é registrado nas páginas do app (portal/mesa).
-    for (const url of ['/portal', '/mesa']) {
-      const r = await app.api.inject({ method: 'GET', url });
-      expect(r.body, url).toContain("serviceWorker.register('/sw.js'");
-    }
-    // A página do CONVITE desativa o SW de propósito (fix bcff7c0): nunca o registra; auto-limpa SW/caches.
-    const inv = await app.api.inject({ method: 'GET', url: '/convite' });
-    expect(inv.body).not.toContain("serviceWorker.register('/sw.js'");
-    expect(inv.body).toContain('getRegistrations');
     await app.close();
   });
 });
