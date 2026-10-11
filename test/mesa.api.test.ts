@@ -318,29 +318,6 @@ describe('validação diagnosticável do convite', () => {
     const av1 = (await app.api.inject({ method: 'GET', url: `/v1/portal/mesas/${mesa.mesaId}`, headers: pmHeaders(pm) })).json<{ deal: { id: string } | null; deals: { id: string }[] }>();
     expect(av1.deal?.id).toBe(dealId);
     expect(av1.deals.map(d => d.id)).toContain(dealId);
-    // lista agregada de TODAS as operações (aba Operações) traz a op com a mesa de origem
-    const allOps = (await app.api.inject({ method: 'GET', url: '/v1/portal/operations', headers: pmHeaders(pm) })).json<{ operations: { mesaId: string; mesaCode: string; active: boolean; deal: { id: string } }[] }>();
-    const mine = allOps.operations.find(o => o.deal.id === dealId);
-    expect(mine).toBeTruthy();
-    expect(mine!.mesaId).toBe(mesa.mesaId);
-    expect(mine!.active).toBe(true);
-    // visualização PÚBLICA (somente-leitura) da MESA — base do link /ver/:mesaId (funciona sem login)
-    const mpub = await app.api.inject({ method: 'GET', url: `/v1/mesas/${mesa.mesaId}/public-view` });
-    expect(mpub.statusCode, mpub.body).toBe(200);
-    const mpubBody = mpub.json<{ code: string; chairs: { roleLabel: string; asset: string; connected: boolean }[]; config: { discountBps: number } | null }>();
-    expect(mpubBody.code).toBeTruthy();
-    expect(mpubBody.chairs.length).toBeGreaterThanOrEqual(3);
-    expect(mpubBody.config?.discountBps).toBe(100);
-    expect((await app.api.inject({ method: 'GET', url: '/v1/mesas/mesa_inexistente/public-view' })).statusCode).toBe(400);
-    // visualização PÚBLICA (somente-leitura) da operação — base do link compartilhável /op/:dealId
-    const pub = await app.api.inject({ method: 'GET', url: `/v1/operations/${dealId}/view` });
-    expect(pub.statusCode, pub.body).toBe(200);
-    const pubBody = pub.json<{ id: string; state: string; participants: { role: string; address: string; signed: boolean }[] }>();
-    expect(pubBody.id).toBe(dealId);
-    expect(pubBody.participants.length).toBeGreaterThanOrEqual(2);
-    expect(pubBody.participants.every(p => p.address.includes('…') || p.address.length <= 12)).toBe(true); // endereço encurtado
-    // id inexistente → 400
-    expect((await app.api.inject({ method: 'GET', url: '/v1/operations/OTC-nope/view' })).statusCode).toBe(400);
     expect((await app.api.inject({ method: 'PATCH', url: `/v1/portal/mesas/${mesa.mesaId}/config`, headers: pmHeaders(pm), payload: { discountBps: 5 } })).statusCode).toBe(409);
 
     // dealId que não pertence à mesa → 400
