@@ -1206,19 +1206,23 @@ img,svg,canvas,video{max-width:100%}
         const dt=d.createdAt?new Date(d.createdAt).toLocaleString('pt-BR',{day:'2-digit',month:'2-digit',hour:'2-digit',minute:'2-digit'}):'';
         const turn=(d.state==='AWAITING_SIGNATURES'&&d.turnRole)?(' · vez: '+(M3_ROLE[d.turnRole]||d.turnRole)):'';
         const active=o.active?'<span style="font-size:10.5px;color:var(--blue);font-weight:700;margin-left:6px">ativa</span>':'';
+        const tag=o.owner?'':'<span class="badge info" style="margin-left:6px" title="Você participa (não é o criador)">participando</span>';
+        // DONO: copiar link + ver + gerenciar + excluir. PARTICIPANDO: só "Abrir operação" (visão de participante).
+        const actions=o.owner
+          ? '<button class="btn" data-oa-link="'+esc(o.mesaId)+'" data-oa-op="'+esc(d.id)+'" title="Link somente-leitura" style="height:30px;font-size:11.5px"><svg viewBox="0 0 24 24" style="width:13px;height:13px;stroke:currentColor;fill:none;stroke-width:2;vertical-align:-2px"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V5a2 2 0 012-2h8"/></svg>Copiar link</button>'
+            +'<button class="btn btn-primary" data-oa-view="'+esc(o.mesaId)+'" title="Abrir na página Operação com os dados desta mesa" style="height:30px;font-size:11.5px">Ver operação</button>'
+            +'<button class="btn" data-oa-mesa="'+esc(o.mesaId)+'" title="Gerenciar (convites, aprovar, assinar)" style="height:30px;font-size:11.5px">Gerenciar</button>'
+            +'<button class="btn" data-oa-del="'+esc(o.mesaId)+'" data-oa-delop="'+esc(d.id)+'" title="Excluir operação" style="height:30px;font-size:11.5px;border-color:var(--red);color:#fecaca">Excluir</button>'
+          : '<button class="btn btn-primary" data-oa-part="'+esc(o.mesaId)+'" title="Abrir a operação (sua visão de participante)" style="height:30px;font-size:11.5px">Abrir operação</button>';
         return '<div class="op-deal-card" style="cursor:default">'
-          +'<div><div class="dpair">'+esc(pair)+active+'</div><div class="did">Mesa '+esc(o.mesaCode)+' · '+esc(d.id)+'</div><div class="dmeta">'+esc(o.networkLabel||'')+' · '+esc(dt)+' · '+(d.validSignatures||0)+'/'+(d.requiredSignatures||0)+' assinaturas'+esc(turn)+'</div></div>'
+          +'<div><div class="dpair">'+esc(pair)+active+tag+'</div><div class="did">Mesa '+esc(o.mesaCode)+' · '+esc(d.id)+'</div><div class="dmeta">'+esc(o.networkLabel||'')+' · '+esc(dt)+' · '+(d.validSignatures||0)+'/'+(d.requiredSignatures||0)+' assinaturas'+esc(turn)+'</div></div>'
           +'<div class="dright" style="display:flex;flex-direction:column;gap:6px;align-items:flex-end">'+opStateBadge(d.state)
-          +'<div style="display:flex;gap:6px;flex-wrap:wrap;justify-content:flex-end">'
-          +'<button class="btn" data-oa-link="'+esc(o.mesaId)+'" data-oa-op="'+esc(d.id)+'" title="Link somente-leitura" style="height:30px;font-size:11.5px"><svg viewBox="0 0 24 24" style="width:13px;height:13px;stroke:currentColor;fill:none;stroke-width:2;vertical-align:-2px"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V5a2 2 0 012-2h8"/></svg>Copiar link</button>'
-          +'<button class="btn btn-primary" data-oa-view="'+esc(o.mesaId)+'" title="Abrir na página Operação com os dados desta mesa" style="height:30px;font-size:11.5px">Ver operação</button>'
-          +'<button class="btn" data-oa-mesa="'+esc(o.mesaId)+'" title="Gerenciar (convites, aprovar, assinar)" style="height:30px;font-size:11.5px">Gerenciar</button>'
-          +'<button class="btn" data-oa-del="'+esc(o.mesaId)+'" data-oa-delop="'+esc(d.id)+'" title="Excluir operação" style="height:30px;font-size:11.5px;border-color:var(--red);color:#fecaca">Excluir</button>'
-          +'</div></div></div>';
+          +'<div style="display:flex;gap:6px;flex-wrap:wrap;justify-content:flex-end">'+actions+'</div></div></div>';
       }).join('')||'<p style="color:var(--ink-3);font-size:12.5px;margin:0">Nenhuma operação ainda.</p>';
       box.querySelectorAll('[data-oa-link]').forEach(b=>b.addEventListener('click',()=>{ const op=b.dataset.oaOp; const url=location.origin+'/mesa?mesa='+encodeURIComponent(b.dataset.oaLink)+(op?'&op='+encodeURIComponent(op):''); clip(url); toast('Link de visualização copiado (somente leitura)','ok'); }));
       box.querySelectorAll('[data-oa-view]').forEach(b=>b.addEventListener('click',()=>opViewMesa(b.dataset.oaView)));
       box.querySelectorAll('[data-oa-mesa]').forEach(b=>b.addEventListener('click',()=>{ showView('carteiras'); m3Open(b.dataset.oaMesa); }));
+      box.querySelectorAll('[data-oa-part]').forEach(b=>b.addEventListener('click',()=>{ location.href='/mesa?mesa='+encodeURIComponent(b.dataset.oaPart); }));
       box.querySelectorAll('[data-oa-del]').forEach(b=>b.addEventListener('click',async()=>{ if(!confirm('Excluir esta operação?')) return; try{ await pmApi('/v1/portal/mesas/'+encodeURIComponent(b.dataset.oaDel)+'/deals/'+encodeURIComponent(b.dataset.oaDelop)+'/delete',{method:'POST',body:{}}); toast('Operação excluída','ok'); opLoadAll(); }catch(e){ toast(e.message||'Falha ao excluir','err'); } }));
     }catch(e){}
   }
@@ -2535,13 +2539,20 @@ img,svg,canvas,video{max-width:100%}
       const r=await pmApi('/v1/portal/mesas'); const mesas=r.mesas||[];
       const cEl=$('#m3Count'); if(cEl) cEl.textContent=String(mesas.length);
       const box=$('#m3List'); if(box){
-        box.innerHTML = mesas.length? mesas.map(m=>'<div class="r" style="display:flex;gap:10px;align-items:center;justify-content:space-between;padding:10px 0;border-bottom:1px solid var(--line)">'
-          +'<div><span class="mono" style="font-size:12.5px">'+esc(m.code)+'</span>'+(m.operationCode?' <span class="mono" style="color:var(--blue);font-size:12px">· '+esc(m.operationCode)+'</span>':'')+(m.networkLabel?' <span style="color:var(--ink-3);font-size:12px">· '+esc(m.networkLabel)+'</span>':'')+(m.label?' <span style="color:var(--ink-3);font-size:12px">· '+esc(m.label)+'</span>':'')+'<div style="font-size:12px;color:var(--ink-3)">'+m.chairs.map(c=>esc((M3_ROLE[c.role]||c.role)+(c.firstName?(' · '+c.firstName):''))+(c.connected?' ✓':'')).join(' · ')+'</div></div>'
-          +'<div style="display:flex;gap:8px;align-items:center">'+m3Badge(m.status)+'<button class="btn btn-primary" data-m3-view="'+esc(m.mesaId)+'" title="Abrir na página Operação com os dados desta mesa" style="height:34px;font-size:12.5px">Ver operação</button><button class="btn" data-m3-open="'+esc(m.mesaId)+'" title="Gerenciar (convites, aprovar, assinar)" style="height:34px;font-size:12.5px">Gerenciar</button><button class="btn" data-m3-del="'+esc(m.mesaId)+'" title="Excluir mesa" style="height:34px;font-size:12.5px;border-color:var(--red);color:#fecaca">Excluir</button></div></div>').join('')
+        box.innerHTML = mesas.length? mesas.map(m=>{
+          const info='<span class="mono" style="font-size:12.5px">'+esc(m.code)+'</span>'+(m.operationCode?' <span class="mono" style="color:var(--blue);font-size:12px">· '+esc(m.operationCode)+'</span>':'')+(m.networkLabel?' <span style="color:var(--ink-3);font-size:12px">· '+esc(m.networkLabel)+'</span>':'')+(m.label?' <span style="color:var(--ink-3);font-size:12px">· '+esc(m.label)+'</span>':'')+'<div style="font-size:12px;color:var(--ink-3)">'+m.chairs.map(c=>esc((M3_ROLE[c.role]||c.role)+(c.firstName?(' · '+c.firstName):''))+(c.connected?' ✓':'')).join(' · ')+'</div>';
+          // DONO: ações completas. PARTICIPANDO (mesa de terceiro): selo + "Abrir operação" (visão de participante).
+          const tag=m.owner?'':'<span class="badge info" title="Você participa desta mesa (não é o criador)">Participando'+(m.myRole?(' · '+(M3_ROLE[m.myRole]||m.myRole)):'')+'</span>';
+          const actions=m.owner
+            ? '<button class="btn btn-primary" data-m3-view="'+esc(m.mesaId)+'" title="Abrir na página Operação com os dados desta mesa" style="height:34px;font-size:12.5px">Ver operação</button><button class="btn" data-m3-open="'+esc(m.mesaId)+'" title="Gerenciar (convites, aprovar, assinar)" style="height:34px;font-size:12.5px">Gerenciar</button><button class="btn" data-m3-del="'+esc(m.mesaId)+'" title="Excluir mesa" style="height:34px;font-size:12.5px;border-color:var(--red);color:#fecaca">Excluir</button>'
+            : '<button class="btn btn-primary" data-m3-part="'+esc(m.mesaId)+'" title="Abrir a operação (sua visão de participante)" style="height:34px;font-size:12.5px">Abrir operação</button>';
+          return '<div class="r" style="display:flex;gap:10px;align-items:center;justify-content:space-between;padding:10px 0;border-bottom:1px solid var(--line)"><div>'+info+'</div><div style="display:flex;gap:8px;align-items:center">'+m3Badge(m.status)+tag+actions+'</div></div>';
+        }).join('')
           : '<p style="color:var(--ink-3);font-size:12.5px;margin:0">Nenhuma mesa criada ainda. Toque em "Criar mesa".</p>';
         box.querySelectorAll('[data-m3-view]').forEach(b=>b.addEventListener('click',()=>opViewMesa(b.dataset.m3View)));
         box.querySelectorAll('[data-m3-open]').forEach(b=>b.addEventListener('click',()=>m3Open(b.dataset.m3Open)));
         box.querySelectorAll('[data-m3-del]').forEach(b=>b.addEventListener('click',()=>m3DeleteMesa(b.dataset.m3Del)));
+        box.querySelectorAll('[data-m3-part]').forEach(b=>b.addEventListener('click',()=>{ location.href='/mesa?mesa='+encodeURIComponent(b.dataset.m3Part); }));
       }
       m3RenderOps(mesas);
       return mesas;
@@ -2554,14 +2565,21 @@ img,svg,canvas,video{max-width:100%}
     const list=(mesas||[]).filter(m=>(!q||m.code.toUpperCase().includes(q))&&(!f||m.status===f));
     card.style.display=(mesas&&mesas.length)?'':'none';
     const rows=$('#m3OpsRows'); if(!rows) return;
-    rows.innerHTML=list.map(m=>'<tr><td class="mono">'+esc(m.code)+(m.operationCode?'<br><span style="color:var(--blue);font-size:11px">'+esc(m.operationCode)+'</span>':'')+'</td>'
-      +'<td style="font-size:12px">'+m.chairs.map(c=>esc((M3_ROLE[c.role]||c.role)+(c.firstName?(': '+c.firstName):''))).join('<br>')+'</td>'
-      +'<td class="mono">'+esc(m.amount||'—')+'</td><td>'+m3Badge(m.status)+'</td>'
-      +'<td style="display:flex;gap:6px;flex-wrap:wrap"><button class="btn btn-primary" data-m3-view="'+esc(m.mesaId)+'" title="Abrir na página Operação com os dados desta mesa" style="height:32px;font-size:12px">Ver operação</button>'
-      +'<button class="btn" data-m3-goto="'+esc(m.mesaId)+'" title="Gerenciar (convites, aprovar, assinar)" style="height:32px;font-size:12px">Gerenciar</button>'
-      +'<button class="btn" data-m3-vlink="'+esc(m.mesaId)+'" data-m3-vlinkop="'+esc(m.dealId||'')+'" title="Link somente-leitura da operação" style="height:32px;font-size:12px"><svg viewBox="0 0 24 24" style="width:13px;height:13px;stroke:currentColor;fill:none;stroke-width:2;vertical-align:-2px"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V5a2 2 0 012-2h8"/></svg>Copiar link</button>'
-      +'<button class="btn" data-m3-tdel="'+esc(m.mesaId)+'" title="Excluir mesa" style="height:32px;font-size:12px;border-color:var(--red);color:#fecaca">Excluir</button></td></tr>').join('')||'<tr><td colspan="5" style="color:var(--ink-3)">Nenhuma mesa com esse filtro.</td></tr>';
+    rows.innerHTML=list.map(m=>{
+      const nameCell='<td class="mono">'+esc(m.code)+(m.operationCode?'<br><span style="color:var(--blue);font-size:11px">'+esc(m.operationCode)+'</span>':'')+(m.owner?'':'<br><span class="badge info" style="font-size:10px" title="Você participa (não é o criador)">participando</span>')+'</td>'
+        +'<td style="font-size:12px">'+m.chairs.map(c=>esc((M3_ROLE[c.role]||c.role)+(c.firstName?(': '+c.firstName):''))).join('<br>')+'</td>'
+        +'<td class="mono">'+esc(m.amount||'—')+'</td><td>'+m3Badge(m.status)+'</td>';
+      // DONO: ver/gerenciar/copiar/excluir. PARTICIPANDO: só "Abrir operação" (visão de participante).
+      const actions=m.owner
+        ? '<button class="btn btn-primary" data-m3-view="'+esc(m.mesaId)+'" title="Abrir na página Operação com os dados desta mesa" style="height:32px;font-size:12px">Ver operação</button>'
+          +'<button class="btn" data-m3-goto="'+esc(m.mesaId)+'" title="Gerenciar (convites, aprovar, assinar)" style="height:32px;font-size:12px">Gerenciar</button>'
+          +'<button class="btn" data-m3-vlink="'+esc(m.mesaId)+'" data-m3-vlinkop="'+esc(m.dealId||'')+'" title="Link somente-leitura da operação" style="height:32px;font-size:12px"><svg viewBox="0 0 24 24" style="width:13px;height:13px;stroke:currentColor;fill:none;stroke-width:2;vertical-align:-2px"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V5a2 2 0 012-2h8"/></svg>Copiar link</button>'
+          +'<button class="btn" data-m3-tdel="'+esc(m.mesaId)+'" title="Excluir mesa" style="height:32px;font-size:12px;border-color:var(--red);color:#fecaca">Excluir</button>'
+        : '<button class="btn btn-primary" data-m3-part="'+esc(m.mesaId)+'" title="Abrir a operação (sua visão de participante)" style="height:32px;font-size:12px">Abrir operação</button>';
+      return '<tr>'+nameCell+'<td style="display:flex;gap:6px;flex-wrap:wrap">'+actions+'</td></tr>';
+    }).join('')||'<tr><td colspan="5" style="color:var(--ink-3)">Nenhuma mesa com esse filtro.</td></tr>';
     rows.querySelectorAll('[data-m3-view]').forEach(b=>b.addEventListener('click',()=>opViewMesa(b.dataset.m3View)));
+    rows.querySelectorAll('[data-m3-part]').forEach(b=>b.addEventListener('click',()=>{ location.href='/mesa?mesa='+encodeURIComponent(b.dataset.m3Part); }));
     rows.querySelectorAll('[data-m3-goto]').forEach(b=>b.addEventListener('click',()=>{ showView('carteiras'); m3Open(b.dataset.m3Goto); }));
     rows.querySelectorAll('[data-m3-vlink]').forEach(b=>b.addEventListener('click',()=>{ const op=b.dataset.m3Vlinkop; const url=location.origin+'/mesa?mesa='+encodeURIComponent(b.dataset.m3Vlink)+(op?'&op='+encodeURIComponent(op):''); clip(url); toast('Link de visualização copiado (somente leitura)','ok'); }));
     rows.querySelectorAll('[data-m3-tdel]').forEach(b=>b.addEventListener('click',()=>m3DeleteMesa(b.dataset.m3Tdel)));
