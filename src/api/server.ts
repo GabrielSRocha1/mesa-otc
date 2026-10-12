@@ -764,7 +764,7 @@ export async function buildApi(deps: ApiDeps): Promise<FastifyInstance> {
     const b = parse(MesaDealBodyZ, req.body ?? {});
     deps.portal.require2FA(token, b.twoFactorCode);
     if (mesa.cancelled) throw new DomainError('VERSION_CONFLICT', 'Mesa cancelada.');
-    if (deps.mesa.nowMs() >= mesa.expiresAt) throw new DomainError('VERSION_CONFLICT', 'Mesa expirada — crie uma nova mesa.');
+    if (mesa.expiresAt != null && deps.mesa.nowMs() >= mesa.expiresAt) throw new DomainError('VERSION_CONFLICT', 'Mesa expirada — crie uma nova mesa.');
     if (mesa.approvedAt) throw new DomainError('VERSION_CONFLICT', 'Operação já aprovada.');
     // Anti-scam: token que se passa por USDT/USDC/WBTC… com contrato divergente do registro oficial
     // (ou marcado como malicioso pela Verum Wallet) BLOQUEIA a operação com 403 — antes de qualquer saldo.

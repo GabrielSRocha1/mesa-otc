@@ -901,7 +901,7 @@ img,svg,canvas,video{max-width:100%}
       <!-- ===== Cadastro da mesa: wizard em 4 passos curtos ===== -->
       <!-- Passo 1 — Mesa e cadeiras -->
       <section class="card" id="m3Create" style="display:none;margin-bottom:16px">
-        <div class="card-h"><div class="t">Nova mesa · Passo 1 de 4 — Mesa e cadeiras</div><span class="badge info">Validade: 60 minutos</span></div>
+        <div class="card-h"><div class="t">Nova mesa · Passo 1 de 4 — Mesa e cadeiras</div><span class="badge info">Sem expiração</span></div>
         <div class="form-row"><div class="fl">Rótulo (opcional)</div><input class="inp" id="m3cLabel" maxlength="120" placeholder="Ex.: Mesa BTC — cliente institucional"></div>
         <!-- "Rede principal" saiu (v4): a rede é escolhida POR LADO no passo 2; bridge/HTLC cuidam do resto. -->
         <div class="form-row"><div><div class="fl">Cadeiras</div><div class="fh">Bilateral (2), com Pay Master (3) ou dois Pay Masters (4) — escrow dinâmico</div></div>
@@ -2887,7 +2887,7 @@ img,svg,canvas,video{max-width:100%}
   }
   function m3Tick(){
     if(!m3Cache) return;
-    const ttl=$('#m3dTtl'); if(ttl) ttl.textContent='Mesa expira em '+fmtCountdown(m3Cache.expiresAt).replace(' restantes','');
+    const ttl=$('#m3dTtl'); if(ttl){ if(m3Cache.expiresAt){ ttl.style.display=''; ttl.textContent='Mesa expira em '+fmtCountdown(m3Cache.expiresAt).replace(' restantes',''); } else { ttl.style.display='none'; } }
     const tt=$('#m3dTurn'); if(tt){ const d=m3Cache.deal; if(d&&d.turnExpiresAt&&d.state==='AWAITING_SIGNATURES'){ tt.style.display=''; tt.textContent='Assinatura: '+fmtCountdown(d.turnExpiresAt).replace(' restantes',''); } else tt.style.display='none'; }
   }
   // Lista de operações da mesa v3 (ativa + histórico) com link por operação (/mesa?mesa=&op=<dealId>).

@@ -16,7 +16,7 @@ export function deriveMesaStatus(mesa: MesaRecord, invites: MesaInviteRow[], dea
       case 'BLOCKED': case 'REFUNDING': case 'REFUNDED': return 'FAILED';
       case 'EXPIRED':
         // Com ≥1 assinatura válida a expiração veio da janela de assinatura (5 min/turno).
-        return deal.validSignatures > 0 ? 'SIGNATURE_TIMEOUT' : (now >= mesa.expiresAt ? 'EXPIRED' : 'SIGNATURE_TIMEOUT');
+        return deal.validSignatures > 0 ? 'SIGNATURE_TIMEOUT' : (mesa.expiresAt != null && now >= mesa.expiresAt ? 'EXPIRED' : 'SIGNATURE_TIMEOUT');
       case 'AWAITING_SIGNATURES':
         // Janela do turno estourada: o engine expira a deal no próximo toque/scan; o status
         // derivado reflete o timeout imediatamente (novas assinaturas já são rejeitadas lá).
@@ -26,7 +26,7 @@ export function deriveMesaStatus(mesa: MesaRecord, invites: MesaInviteRow[], dea
       default: return 'APPROVED'; // deal criada na aprovação, ainda antes da coleta de assinaturas
     }
   }
-  if (now >= mesa.expiresAt) return 'EXPIRED';
+  if (mesa.expiresAt != null && now >= mesa.expiresAt) return 'EXPIRED';
   const connected = (c: MesaRecord['chairs'][number]): boolean => !!c.wallet;
   const allConnected = mesa.chairs.every(connected);
   if (allConnected) {

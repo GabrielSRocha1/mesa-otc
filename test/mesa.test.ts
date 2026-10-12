@@ -6,7 +6,7 @@ import { AuditLog } from '../src/audit/audit.js';
 import { WalletAuth } from '../src/wallet/auth.js';
 import { AdapterRegistry } from '../src/adapters/types.js';
 import { MesaService, newInviteCode, type CreateMesaInput } from '../src/mesa/mesaService.js';
-import { INVITE_CODE_ALPHABET } from '../src/domain/constants.js';
+import { INVITE_CODE_ALPHABET, INVITE_TTL_MS } from '../src/domain/constants.js';
 import { validateChairBalances, type BalanceReaders } from '../src/mesa/balances.js';
 import { testSigning } from '../src/engines/signature.js';
 import { Clock } from './helpers.js';
@@ -138,12 +138,11 @@ describe('MesaService — criação e convites', () => {
     await expect(ctx.svc.joinChallenge(inv.inviteId, { code: 'AAAA-AAAA', firstName: 'Ana', network: 'solana', address: testSigning.solana().address })).rejects.toMatchObject({ code: 'FORBIDDEN' });
   });
 
-  it('TTL do convite nunca ultrapassa o TTL da mesa', async () => {
+  it('mesa não expira (expiresAt=null) e o convite tem o seu próprio TTL (INVITE_TTL)', async () => {
     const mesa = ctx.svc.createMesa(ctx.token, MESA_INPUT);
-    ctx.clock.advance(50 * 60_000); // restam 10 min de mesa (sessão: novo login — idle lock real derruba a anterior)
-    const { token: fresh } = ctx.portal.login({ email: 'pm@verum.test', password: 'senha-forte-1' });
-    const inv = await ctx.svc.createChairInvite(fresh, mesa.mesaId, mesa.chairs[0]!.chairId);
-    expect(inv.expiresAt).toBe(mesa.expiresAt);
+    expect(mesa.expiresAt).toBeNull();
+    const inv = await ctx.svc.createChairInvite(ctx.token, mesa.mesaId, mesa.chairs[0]!.chairId);
+    expect(inv.expiresAt).toBe(ctx.clock.now() + INVITE_TTL_MS);
   });
 });
 
@@ -233,7 +232,7 @@ describe('MesaService — status, configuração e DTO por papel', () => {
   let ctx: Ctx;
   beforeEach(async () => { ctx = await makeCtx(); });
 
-  it('deriva DRAFT → WAITING_INVITES → WAITING_CONNECTIONS → ACTIVE → READY_FOR_APPROVAL; 60 min → EXPIRED', async () => {
+  it('deriva DRAFT → WAITING_INVITES → WAITING_CONNECTIONS → ACTIVE → READY_FOR_APPROVAL; mesa NÃO expira', async () => {
     const mesa = ctx.svc.createMesa(ctx.token, MESA_INPUT);
     expect(await ctx.svc.statusOf(mesa)).toBe('DRAFT');
     const invS = await ctx.svc.createChairInvite(ctx.token, mesa.mesaId, mesa.chairs[0]!.chairId);
@@ -245,8 +244,8 @@ describe('MesaService — status, configuração e DTO por papel', () => {
     expect(await ctx.svc.statusOf(mesa)).toBe('ACTIVE');
     ctx.svc.updateConfig(ctx.token, mesa.mesaId, { amountInBase: '1000000000', discountBps: 300, commissionBps: 200 });
     expect(await ctx.svc.statusOf(mesa)).toBe('READY_FOR_APPROVAL');
-    ctx.clock.advance(61 * 60_000);
-    expect(await ctx.svc.statusOf(mesa)).toBe('EXPIRED');
+    ctx.clock.advance(61 * 60_000); // passou muito tempo — a mesa NÃO expira mais
+    expect(await ctx.svc.statusOf(mesa)).toBe('READY_FOR_APPROVAL');
   });
 
   it('configuração: token inválido → FORBIDDEN; após aprovação → VERSION_CONFLICT (409)', async () => {

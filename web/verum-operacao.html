@@ -326,7 +326,7 @@
       +'<div class="r"><span class="k">Status</span><span class="v">'+badge(mesa.status)+'</span></div>'
       +'<div class="r"><span class="k">Rede</span><span class="v">'+esc(mesa.networkLabel||mesa.network||'—')+'</span></div>'
       +'<div class="r"><span class="k">Criada em</span><span class="v">'+esc(fmtDate(mesa.createdAt))+'</span></div>'
-      +'<div class="r"><span class="k">Expira em</span><span class="v">'+esc(fmtDate(mesa.expiresAt))+'</span></div>'
+      +(mesa.expiresAt?'<div class="r"><span class="k">Expira em</span><span class="v">'+esc(fmtDate(mesa.expiresAt))+'</span></div>':'')
       +'<div class="r"><span class="k">Ordem de assinatura</span><span class="v" style="font-size:11px">Vendedor → PM 1 → PM 2 → Comprador</span></div>'
       +'</div></section></aside>';
 

@@ -9,7 +9,7 @@ import { randomBytes, randomUUID, timingSafeEqual } from 'node:crypto';
 import { verifyMessage } from 'viem';
 import { DomainError } from '../domain/errors.js';
 import { sha256Hex, canonicalize, NETWORK_KEY_SCHEME, type Network } from '../domain/types.js';
-import { TABLE_TTL_MS, INVITE_TTL_MS, CHALLENGE_TTL_MS, INVITE_CODE_ALPHABET } from '../domain/constants.js';
+import { INVITE_TTL_MS, CHALLENGE_TTL_MS, INVITE_CODE_ALPHABET } from '../domain/constants.js';
 import type { MesaInviteRow, Store } from '../db/repository.js';
 import type { PortalService, WalletAddress, PayMaster } from '../portal/portal.js';
 import type { WalletAuth, Session } from '../wallet/auth.js';
@@ -100,7 +100,7 @@ export class MesaService {
       if (c.role === 'PAYMASTER_1' && pm.wallet) { chair.wallet = pm.wallet; chair.firstName = pm.name.split(/\s+/)[0]; chair.connectedAt = t; }
       return chair;
     });
-    const mesa: MesaRecord = { mesaId: 'mesa_' + randomUUID(), payMasterId: pm.id, code: this.d.portal.newMesaCode(), operationCode: `OP-${newInviteCode()}`, label: input.label?.trim() || undefined, network, chairs, approvals: {}, dealId: null, dealIds: [], createdAt: t, expiresAt: t + TABLE_TTL_MS };
+    const mesa: MesaRecord = { mesaId: 'mesa_' + randomUUID(), payMasterId: pm.id, code: this.d.portal.newMesaCode(), operationCode: `OP-${newInviteCode()}`, label: input.label?.trim() || undefined, network, chairs, approvals: {}, dealId: null, dealIds: [], createdAt: t, expiresAt: null };
     this.d.portal.mesas()[mesa.mesaId] = mesa;
     this.d.portal.persistMesas();
     void this.audit('mesa.criada', pm.id, { mesaId: mesa.mesaId, code: mesa.code, network: mesa.network, chairs: chairs.map(c => ({ chairId: c.chairId, role: c.role })) });
@@ -136,7 +136,7 @@ export class MesaService {
     return mesa.chairs.some(c => c.wallet && [c.wallet.address, ...(c.wallet.addresses ?? []).map(a => a.address)].some(a => mine.has(a.toLowerCase())));
   }
 
-  async listMesas(portalToken: string | undefined): Promise<{ mesaId: string; code: string; operationCode: string | null; label?: string; network: string; networkLabel: string; status: MesaStatus; dealId: string | null; owner: boolean; myRole: MesaChairRole | null; chairs: { role: MesaChairRole; firstName: string | null; connected: boolean }[]; amount: string | null; createdAt: number; expiresAt: number }[]> {
+  async listMesas(portalToken: string | undefined): Promise<{ mesaId: string; code: string; operationCode: string | null; label?: string; network: string; networkLabel: string; status: MesaStatus; dealId: string | null; owner: boolean; myRole: MesaChairRole | null; chairs: { role: MesaChairRole; firstName: string | null; connected: boolean }[]; amount: string | null; createdAt: number; expiresAt: number | null }[]> {
     const pm = this.d.portal.requirePayMaster(portalToken, false);
     // DONO (criou) + PARTICIPANDO (carteira ocupa uma cadeira em mesa de terceiro) — p/ não "sumir" do painel.
     const mine = this.pmWalletAddresses(pm);
@@ -174,7 +174,7 @@ export class MesaService {
     const t = this.now();
     const inviteId = randomBytes(18).toString('base64url');
     const code = newInviteCode();
-    const expiresAt = Math.min(t + INVITE_TTL_MS, mesa.expiresAt); // convite nunca vive mais que a mesa
+    const expiresAt = mesa.expiresAt != null ? Math.min(t + INVITE_TTL_MS, mesa.expiresAt) : t + INVITE_TTL_MS; // mesa sem expiração → convite vive o INVITE_TTL cheio
     const row: MesaInviteRow = { inviteId, mesaId, chairId, codeHash: codeHashOf(inviteId, code), codePrefix: normalizeCode(code).slice(0, 4), status: 'PENDING', usedByAddress: null, usedByName: null, usedAt: null, createdAt: t, expiresAt };
     await this.d.store.insertMesaInvite(row);
     void this.audit('mesa.convite.gerado', pm.id, { mesaId, chairId, inviteId, role: chair.role });
@@ -239,14 +239,14 @@ export class MesaService {
 
   private assertMesaOpen(mesa: MesaRecord): void {
     if (mesa.cancelled) throw new DomainError('INVALID_INPUT', 'Esta mesa foi cancelada.');
-    if (this.now() >= mesa.expiresAt) throw new DomainError('INVALID_INPUT', 'Esta mesa expirou.');
+    if (mesa.expiresAt != null && this.now() >= mesa.expiresAt) throw new DomainError('INVALID_INPUT', 'Esta mesa expirou.');
   }
 
   /** Resolve o convite para a página pública. `code` ausente → metadados mínimos (fallback de digitação). */
   async resolveInvite(inviteId: string, code?: string): Promise<{ mesaCode: string; role: MesaChairRole; roleLabel: string; asset: string; network: string; networkLabel: string; status: 'PENDING' | 'USED' | 'REVOKED' | 'EXPIRED'; expiresAt: number; serverTime: number; codeValid: boolean }> {
     const { invite, mesa, chair } = await this.inviteOrThrow(inviteId);
     const now = this.now();
-    const status = invite.status === 'PENDING' && (invite.expiresAt <= now || now >= mesa.expiresAt || mesa.cancelled) ? 'EXPIRED' : invite.status;
+    const status = invite.status === 'PENDING' && (invite.expiresAt <= now || (mesa.expiresAt != null && now >= mesa.expiresAt) || mesa.cancelled) ? 'EXPIRED' : invite.status;
     const codeValid = !!code && hashesEqual(codeHashOf(inviteId, code), invite.codeHash);
     if (invite.status === 'PENDING' && status === 'PENDING') void this.audit('mesa.convite.validado', 'public', { mesaId: mesa.mesaId, inviteId, codePresent: !!code, codeValid });
     return { mesaCode: mesa.code, role: chair.role, roleLabel: CHAIR_ROLE_LABEL[chair.role], asset: chair.expectedAsset.symbol, network: mesa.network, networkLabel: getChain(mesa.network)?.displayName ?? mesa.network, status, expiresAt: invite.expiresAt, serverTime: now, codeValid };

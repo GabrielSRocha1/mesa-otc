@@ -53,7 +53,7 @@ export interface MesaRecord {
   dealId: string | null;
   dealIds: string[];
   createdAt: number;
-  expiresAt: number;                  // createdAt + TABLE_TTL
+  expiresAt: number | null;           // null = mesa SEM expiração (padrão); number = legado (createdAt + TABLE_TTL)
   cancelled?: { at: number; reason: string };
 }
 
