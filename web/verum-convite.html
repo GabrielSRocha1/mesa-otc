@@ -512,15 +512,13 @@ h1{font-size:22px;margin-bottom:8px}
       // pelo dapp-browser. Vale para ambos os destinos (público ou dashboard).
       try{ sessionStorage.setItem('verum_mesa_pt_'+join.mesaId, join.token); }catch(e){}
       try{ localStorage.setItem('verum_mesa_pt_'+join.mesaId, join.token); }catch(e){}
-      // Mesa com operação ABERTA → o participante que acabou de conectar vai DIRETO para a página
-      // SOMENTE-LEITURA (/ver/<mesa>): acompanha a Negociação OTC em tempo real (assinatura acontece
-      // na própria Verum Wallet). Sem operação aberta ainda → visão do participante no dashboard.
-      let openMesa=false;
-      try{ const mv=await api('/v1/mesas/'+encodeURIComponent(join.mesaId),{token:join.token}); if(mv&&mv.deal&&mv.deal.id) openMesa=true; }catch(e){}
-      const dest=openMesa
-        ? ('/ver/'+encodeURIComponent(join.mesaId))
-        : ('/mesa?mesa='+encodeURIComponent(join.mesaId)+'#pt='+encodeURIComponent(join.token));
-      renderState('ok', openMesa?'Conectado! Abrindo a mesa (somente leitura)…':'Conectado! Abrindo a operação…','');
+      // O participante que acabou de conectar vai SEMPRE para a página SOMENTE-LEITURA
+      // (/ver/<mesa>) — escopada na mesa em que ele entrou, sem a moldura do painel
+      // (sem sidebar/topbar). Acompanha a Negociação OTC em tempo real; a assinatura
+      // acontece na própria Verum Wallet. (Antes, mesa sem operação aberta caía no
+      // dashboard /mesa, que traz toda a moldura do painel.)
+      const dest='/ver/'+encodeURIComponent(join.mesaId);
+      renderState('ok','Conectado! Abrindo a mesa (somente leitura)…','');
       window.location.replace(dest);
     }catch(ex){
       v3Busy(false);
