@@ -59,6 +59,53 @@ describe('MesaService — criação e convites', () => {
     expect((await ctx.svc.listMesas(ctx.token))).toHaveLength(2);
   });
 
+  it('reopenForEdit: reabre mesa aprovada NÃO irreversível — destrava a config e descarta a operação ativa', async () => {
+    // Deal fake aguardando assinaturas, sem funding FINAL → NÃO irreversível (reopen deve passar).
+    const fakeDeal = { id: 'OTC-reopen', state: 'AWAITING_SIGNATURES', participants: [
+      { role: 'SELLER', fundingRequired: true, funding: 'PENDING' },
+      { role: 'BUYER', fundingRequired: true, funding: 'PENDING' },
+    ] } as unknown as Parameters<MesaService['isIrreversible']>[0];
+    const clock = new Clock();
+    const store = new MemoryStore();
+    const audit = new AuditLog(store, clock.now);
+    const portal = new PortalService({ now: clock.now });
+    const auth = new WalletAuth(store, new AdapterRegistry(), { env: 'dev', sessionSecret: 'x'.repeat(48), sessionTtlMs: 600_000, challengeTtlMs: 300_000, operators: new Set(), appDomain: 'otc.test' }, clock.now);
+    const svc = new MesaService({ portal, store, audit, auth, getDeal: async () => fakeDeal, baseUrl: 'https://otc.test', now: clock.now });
+    const reg = portal.register({ name: 'Pay Master Um', email: 'pm-reopen@verum.test', password: 'senha-forte-1' });
+    portal.connectWallet(reg.token, { address: 'PM1walletSolanaAddress11111111111111', network: 'solana' });
+    const mesa = svc.createMesa(reg.token, MESA_INPUT);
+    svc.updateConfig(reg.token, mesa.mesaId, { amountInBase: '1000000000', discountBps: 300, commissionBps: 200 });
+    // Aprova e vincula a operação → config congelada.
+    svc.markApproved(mesa, reg.payMaster.id);
+    svc.attachDeal(mesa, 'OTC-reopen');
+    expect(() => svc.updateConfig(reg.token, mesa.mesaId, { discountBps: 500 })).toThrow(/aprovada/i);
+    // Reabre (deal não irreversível) → destrava.
+    await svc.reopenForEdit(reg.token, mesa.mesaId);
+    const rec = portal.mesas()[mesa.mesaId]!;
+    expect(rec.approvedAt).toBeFalsy();
+    expect(rec.dealId).toBeNull();
+    // Config volta a ser editável e persiste.
+    const next = svc.updateConfig(reg.token, mesa.mesaId, { discountBps: 700 });
+    expect(next.discountBps).toBe(700);
+  });
+
+  it('reopenForEdit: bloqueia reabrir quando a operação é IRREVERSÍVEL (totalmente assinada / fundos travados)', async () => {
+    const fakeDeal = { id: 'OTC-irr', state: 'FULLY_SIGNED', participants: [] } as unknown as Parameters<MesaService['isIrreversible']>[0];
+    const clock = new Clock();
+    const store = new MemoryStore();
+    const audit = new AuditLog(store, clock.now);
+    const portal = new PortalService({ now: clock.now });
+    const auth = new WalletAuth(store, new AdapterRegistry(), { env: 'dev', sessionSecret: 'x'.repeat(48), sessionTtlMs: 600_000, challengeTtlMs: 300_000, operators: new Set(), appDomain: 'otc.test' }, clock.now);
+    const svc = new MesaService({ portal, store, audit, auth, getDeal: async () => fakeDeal, baseUrl: 'https://otc.test', now: clock.now });
+    const reg = portal.register({ name: 'PM', email: 'pm-irr@verum.test', password: 'senha-forte-1' });
+    portal.connectWallet(reg.token, { address: 'PM1walletSolanaAddress11111111111111', network: 'solana' });
+    const mesa = svc.createMesa(reg.token, MESA_INPUT);
+    svc.updateConfig(reg.token, mesa.mesaId, { amountInBase: '1000000000', discountBps: 300, commissionBps: 200 });
+    svc.markApproved(mesa, reg.payMaster.id);
+    svc.attachDeal(mesa, 'OTC-irr');
+    await expect(svc.reopenForEdit(reg.token, mesa.mesaId)).rejects.toMatchObject({ code: 'VERSION_CONFLICT' });
+  });
+
   it('convite tem código XXXX-XXXX sem caracteres ambíguos e mensagem pronta com avisos obrigatórios', async () => {
     const mesa = ctx.svc.createMesa(ctx.token, MESA_INPUT);
     const inv = await ctx.svc.createChairInvite(ctx.token, mesa.mesaId, mesa.chairs[0]!.chairId);
