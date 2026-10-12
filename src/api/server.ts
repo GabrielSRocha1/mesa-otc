@@ -708,6 +708,13 @@ export async function buildApi(deps: ApiDeps): Promise<FastifyInstance> {
     const { mesa } = adminMesa(req, mesaId, false);
     return deps.mesa.mesaViewFor(mesa, { kind: 'admin' });
   });
+  // Troca o ativo (token) de uma cadeira — antes de aprovar. Reusa o modal de moedas do wizard no front.
+  app.patch('/v1/portal/mesas/:mesaId/chairs/:chairId/asset', async req => {
+    const { mesaId, chairId } = req.params as { mesaId: string; chairId: string };
+    const b = parse(ChairAssetZ, req.body);
+    const mesa = deps.mesa.updateChairAsset(portalToken(req), mesaId, chairId, b);
+    return deps.mesa.mesaViewFor(mesa, { kind: 'admin' });
+  });
   app.post('/v1/portal/mesas/:mesaId/chairs/:chairId/invite', async (req, reply) => {
     const { mesaId, chairId } = req.params as { mesaId: string; chairId: string };
     // Link do convite com o host REAL desta requisição (deploy Vercel, domínio próprio ou local)

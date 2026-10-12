@@ -445,6 +445,30 @@ export class MesaService {
     return next;
   }
 
+  /** Troca o ATIVO esperado de uma cadeira (antes de aprovar). A rede da mesa segue o lado vendedor;
+   *  se os decimais mudam, a quantidade daquele lado é limpa (estava em unidades-base do ativo antigo). */
+  updateChairAsset(portalToken: string | undefined, mesaId: string, chairId: string, asset: ChairAsset): MesaRecord {
+    const pm = this.d.portal.requirePayMaster(portalToken);
+    const mesa = this.mesaOf(pm.id, mesaId);
+    this.assertMesaOpen(mesa);
+    if (mesa.approvedAt) throw new DomainError('VERSION_CONFLICT', 'Operação já aprovada — ativo congelado. Reabra para editar.');
+    const chair = mesa.chairs.find(c => c.chairId === chairId);
+    if (!chair) throw new DomainError('INVALID_INPUT', 'Cadeira não encontrada.');
+    if (!asset || typeof asset.symbol !== 'string' || typeof asset.decimals !== 'number' || !asset.network) throw new DomainError('INVALID_INPUT', 'Ativo inválido.');
+    const prevDecimals = chair.expectedAsset.decimals;
+    chair.expectedAsset = { network: asset.network, contractOrMint: asset.contractOrMint ?? null, decimals: asset.decimals, symbol: asset.symbol };
+    // Rede da mesa (rótulo/fallback) deriva do lado VENDEDOR.
+    if (chair.role === 'SELLER') mesa.network = asset.network;
+    // Decimais mudaram → a quantidade daquele lado não faz mais sentido (base do ativo anterior).
+    if (mesa.config && asset.decimals !== prevDecimals) {
+      if (chair.role === 'SELLER') delete mesa.config.amountInBase;
+      if (chair.role === 'BUYER') delete mesa.config.buyerAmountInBase;
+    }
+    this.d.portal.persistMesas();
+    void this.audit('mesa.cadeira.ativo', pm.id, { mesaId, chairId, role: chair.role, asset: chair.expectedAsset });
+    return mesa;
+  }
+
   /**
    * Reabre uma mesa APROVADA (mas ainda NÃO irreversível) para edição da configuração: descarta a
    * operação ativa — o que INVALIDA as assinaturas já feitas — e remove approvedAt/termsHash, deixando

@@ -237,6 +237,29 @@ describe('API mesa v3 — fluxo completo', () => {
     await app.close();
   }, 120_000);
 
+  it('troca o ativo (token) de uma cadeira antes de aprovar; bloqueia depois de aprovada', async () => {
+    const { readers } = mockReaders();
+    const { app } = await makeApp({ balanceReaders: readers });
+    const pm = await registerPm(app, uniqueEmail('asset'));
+    const mesa = await createMesa(app, pm);
+    const sChair = mesa.chairs.find(c => c.role === 'SELLER')!;
+    // SOL → USDT (solana) antes de aprovar.
+    const r = await app.api.inject({ method: 'PATCH', url: `/v1/portal/mesas/${mesa.mesaId}/chairs/${sChair.chairId}/asset`, headers: pmHeaders(pm), payload: { network: 'solana', contractOrMint: 'Es9vMFrzaCERmJfrF4H2FYD4KCoNkY11McCe8BenwNYB', decimals: 6, symbol: 'USDT' } });
+    expect(r.statusCode, r.body).toBe(200);
+    const sc = r.json<{ chairs: { role: string; expectedAsset: { symbol: string; decimals: number } }[] }>().chairs.find(c => c.role === 'SELLER')!;
+    expect(sc.expectedAsset.symbol).toBe('USDT');
+    expect(sc.expectedAsset.decimals).toBe(6);
+    // Outra mesa: aprovada (ativos originais) → troca de ativo passa a ser bloqueada (409).
+    const mesa2 = await createMesa(app, pm);
+    const s2 = mesa2.chairs.find(c => c.role === 'SELLER')!; const b2 = mesa2.chairs.find(c => c.role === 'BUYER')!;
+    await inviteAndJoin(app, pm, mesa2.mesaId, s2.chairId, 'Gabriel', solWallet());
+    await inviteAndJoin(app, pm, mesa2.mesaId, b2.chairId, 'Beatriz', solWallet());
+    await approveMesa(app, pm, mesa2.mesaId);
+    const blocked = await app.api.inject({ method: 'PATCH', url: `/v1/portal/mesas/${mesa2.mesaId}/chairs/${s2.chairId}/asset`, headers: pmHeaders(pm), payload: { network: 'solana', contractOrMint: 'Es9vMFrzaCERmJfrF4H2FYD4KCoNkY11McCe8BenwNYB', decimals: 6, symbol: 'USDT' } });
+    expect(blocked.statusCode).toBe(409);
+    await app.close();
+  }, 120_000);
+
   it('cadastro alinhado aos contratos: operationCode, /v1/tokens, buyerAmountInBase e saldo do Comprador no approve', async () => {
     // Gás sempre rico; saldo de token (lado Comprador) alternável para isolar o motivo nominal.
     const tokenAmount = { value: 10 };

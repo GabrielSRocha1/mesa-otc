@@ -2769,6 +2769,39 @@ img,svg,canvas,video{max-width:100%}
   }
   /* ===== Edição da config NA TELA "Ver operação" (espelho) — salva na mesa via /config ===== */
   let opCfgDirty=false; let opEditDec={ seller:9, buyer:6 };
+  let opEditChairIds={ SELLER:null, BUYER:null }, opEditCurAsset={ SELLER:null, BUYER:null };
+  // Campo clicável do token (ícone + símbolo + rede). Reusa o catálogo/ícones do wizard.
+  function opTokenFieldInner(a){
+    if(!a) return '<span style="color:var(--ink-3)">—</span>'+OP_CHEV;
+    const net=a.network, sym=a.symbol; let netLbl=net; try{ netLbl=opChainBy(net).displayName||net; }catch(e){}
+    return netBadge({icon:m3AssetIcon(net,sym),glyph:(sym||'?').slice(0,3),color:(OP_COLORS[net]||'#3b4a68')},22)+'<span class="tt">'+esc(sym)+' · '+esc(netLbl)+'</span>'+OP_CHEV;
+  }
+  // Modal de troca de token (todas as moedas de todas as redes) → PATCH no ativo da cadeira.
+  async function opEditPickToken(role){
+    if(!opMirror) return;
+    const chairId=opEditChairIds[role]; if(!chairId){ toast('Cadeira não encontrada','err'); return; }
+    await m3LoadCatalog();
+    const cur=opEditCurAsset[role];
+    const same=a=> !!cur&&a.symbol===cur.symbol&&a.network===cur.network&&((a.contractOrMint||'')===(cur.contractOrMint||''));
+    const list=m3Catalog||[];
+    const title=role==='SELLER'?'Moeda do Vendedor':'Moeda do Comprador';
+    const row=(a,i)=>'<div class="netrow'+(same(a)?' sel':'')+'" data-ai="'+i+'">'+netBadge({icon:a.icon,glyph:(a.symbol||'?').slice(0,3),color:a.color},32)+'<div><div class="nm">'+esc(a.symbol)+(a.representationOf?(' <span style="color:var(--ink-3);font-weight:400">· '+esc(a.representationOf)+'</span>'):'')+'</div><div class="sub">'+esc(a.networkLabel||a.network)+'</div></div></div>';
+    $('#modalRoot').innerHTML='<div class="modal-back" id="otBack"><div class="modal"><h3>'+esc(title)+'</h3>'
+      +'<p style="color:var(--ink-3);font-size:13px;margin:4px 0 8px">Todas as moedas de todas as redes numa lista só.</p>'
+      +'<input class="inp" id="otSearch" placeholder="Filtrar por moeda ou rede… (opcional)" style="width:100%;margin-bottom:10px">'
+      +'<div class="netlist" id="otList">'+list.map(row).join('')+'</div>'
+      +'<div class="modal-actions" style="margin-top:14px"><button class="btn" id="otCancel">Fechar</button></div></div></div>';
+    $('#otBack').addEventListener('click',e=>{ if(e.target.id==='otBack') closeModal(); });
+    $('#otCancel').addEventListener('click',closeModal);
+    const bind=()=>$$('#otList [data-ai]').forEach(el=>el.addEventListener('click',async()=>{
+      const a=list[Number(el.dataset.ai)]; closeModal();
+      try{ await pmApi('/v1/portal/mesas/'+opMirror+'/chairs/'+chairId+'/asset',{method:'PATCH',body:{network:a.network,contractOrMint:a.contractOrMint,decimals:a.decimals,symbol:a.symbol}}); opCfgDirty=false; toast('Token do '+(role==='SELLER'?'Vendedor':'Comprador')+' atualizado: '+a.symbol,'ok'); opMirrorRefresh(); }
+      catch(e){ toast(e.message||'Falha ao trocar o token','err'); }
+    }));
+    bind();
+    const sb=$('#otSearch'); if(sb) sb.addEventListener('input',()=>{ const q=sb.value.trim().toLowerCase(); $('#otList').innerHTML=list.map((a,i)=>({a,i})).filter(o=>!q||((o.a.symbol+' '+(o.a.networkLabel||o.a.network)+' '+(o.a.representationOf||'')).toLowerCase().indexOf(q)>=0)).map(o=>row(o.a,o.i)).join(''); bind(); });
+    setTimeout(()=>{ const s=$('#otSearch'); if(s) s.focus(); },30);
+  }
   function opEditStatusUI(savedNow){
     const st=$('#opEditStatus'); if(st){ st.innerHTML = opCfgDirty
       ? '<span style="color:var(--amber)">● Alterações não salvas — clique em "Salvar alterações na mesa".</span>'
@@ -2784,6 +2817,10 @@ img,svg,canvas,video{max-width:100%}
     if(!card){
       card=document.createElement('section'); card.className='card'; card.id='opEditCard'; card.style.cssText='margin:0 0 16px';
       card.innerHTML='<div class="card-h"><div class="t"><svg viewBox="0 0 24 24" style="width:17px;height:17px;stroke:var(--blue);fill:none;stroke-width:2;vertical-align:-3px;margin-right:6px"><path d="M12 20h9"/><path d="M16.5 3.5a2.1 2.1 0 013 3L7 19l-4 1 1-4z"/></svg>Editar configuração da mesa</div><span class="badge info">Você é o dono</span></div>'
+        +'<div class="grid" style="grid-template-columns:1fr 1fr;gap:12px;margin-bottom:12px">'
+        +'<div><div class="fl">Moeda do Vendedor</div><div class="netfield" id="opEditSellToken" style="margin-top:4px" title="Trocar o token do Vendedor">—</div></div>'
+        +'<div><div class="fl">Moeda do Comprador</div><div class="netfield" id="opEditBuyToken" style="margin-top:4px" title="Trocar o token do Comprador">—</div></div>'
+        +'</div>'
         +'<div class="grid" style="grid-template-columns:1fr 1fr;gap:12px">'
         +'<div><div class="fl" id="opEditAmountLbl">Quantidade do Vendedor</div><input class="inp" id="opEditAmount" inputmode="decimal" placeholder="Ex.: 250"></div>'
         +'<div><div class="fl" id="opEditBuyAmountLbl">Quantidade do Comprador</div><input class="inp" id="opEditBuyAmount" inputmode="decimal" placeholder="Ex.: 37500"></div>'
@@ -2799,7 +2836,15 @@ img,svg,canvas,video{max-width:100%}
       ['#opEditAmount','#opEditBuyAmount','#opEditDiscount','#opEditCommission','#opEditPayer'].forEach(id=>{ const el=$(id); if(el){ const mk=()=>{ opCfgDirty=true; opEditStatusUI(); }; el.addEventListener('input',mk); el.addEventListener('change',mk); } });
       $('#opEditSave').addEventListener('click',()=>opEditSaveCfg(opMirror));
       $('#opEditReopen').addEventListener('click',()=>opEditReopen(opMirror));
+      $('#opEditSellToken').addEventListener('click',()=>opEditPickToken('SELLER'));
+      $('#opEditBuyToken').addEventListener('click',()=>opEditPickToken('BUYER'));
     }
+    // Campos de token (clicáveis) + estado travado quando aprovada.
+    opEditChairIds={ SELLER: seller?seller.chairId:null, BUYER: buyer?buyer.chairId:null };
+    opEditCurAsset={ SELLER: seller?seller.expectedAsset:null, BUYER: buyer?buyer.expectedAsset:null };
+    $('#opEditSellToken').innerHTML=opTokenFieldInner(seller&&seller.expectedAsset);
+    $('#opEditBuyToken').innerHTML=opTokenFieldInner(buyer&&buyer.expectedAsset);
+    ['#opEditSellToken','#opEditBuyToken'].forEach(sel=>{ const el=$(sel); if(el){ el.style.opacity=frozen?'.5':''; el.style.pointerEvents=frozen?'none':''; } });
     if(seller) $('#opEditAmountLbl').textContent='Quantidade do Vendedor ('+seller.expectedAsset.symbol+')';
     if(buyer) $('#opEditBuyAmountLbl').textContent='Quantidade do Comprador ('+buyer.expectedAsset.symbol+')';
     // Popula os campos só quando NÃO está editando (anti-revert: o polling não atropela a edição).
