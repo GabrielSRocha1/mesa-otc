@@ -2375,6 +2375,9 @@ img,svg,canvas,video{max-width:100%}
   const m3Badge=s=>{ const b=M3_STATUS[s]||['info',s]; return '<span class="badge '+b[0]+'">'+esc(b[1])+'</span>'; };
   const M3_ROLE={SELLER:'Vendedor',BUYER:'Comprador',PAYMASTER_1:'Pay Master 1',PAYMASTER_2:'Pay Master 2'};
   let m3Sel=null, m3Cache=null, m3Timer=null, m3TickT=null, m3Bal=null;
+  // Config sendo EDITADA pelo admin: enquanto "dirty", o polling NÃO sobrescreve os campos (evita que
+  // a alteração "volte sozinha"). Zera ao abrir outra mesa e após salvar (aí o servidor já reflete o novo).
+  let m3CfgDirty=false;
   /* ---------- Conversões do cadastro: valor humano → unidades base, % → bps ---------- */
   function pctToBps(v){ const n=parseFloat(String(v==null?'':v).replace(',','.')); return isFinite(n)&&n>=0?Math.round(n*100):null; }
   function bpsToPct(bps){ return (Number(bps||0)/100); }
@@ -2665,7 +2668,7 @@ img,svg,canvas,video{max-width:100%}
     rows.querySelectorAll('[data-m3-vmesa]').forEach(b=>b.addEventListener('click',()=>{ clip(location.origin+'/ver/'+encodeURIComponent(b.dataset.m3Vmesa)); toast('Link da mesa copiado (somente leitura)','ok'); }));
     rows.querySelectorAll('[data-m3-tdel]').forEach(b=>b.addEventListener('click',()=>m3DeleteMesa(b.dataset.m3Tdel)));
   }
-  function m3Open(mesaId){ opExitMirror(); m3Sel=mesaId; $('#m3Detail').style.display=''; m3Refresh(); if(!m3Timer) m3Timer=setInterval(m3Refresh,5000); if(!m3TickT) m3TickT=setInterval(m3Tick,1000); }
+  function m3Open(mesaId){ opExitMirror(); m3CfgDirty=false; m3Sel=mesaId; $('#m3Detail').style.display=''; m3Refresh(); if(!m3Timer) m3Timer=setInterval(m3Refresh,5000); if(!m3TickT) m3TickT=setInterval(m3Tick,1000); }
   async function m3DeleteMesa(mesaId){
     if(!mesaId) return;
     if(!confirm('Excluir esta mesa? Esta ação remove a mesa e não pode ser desfeita.')) return;
@@ -2852,7 +2855,7 @@ img,svg,canvas,video{max-width:100%}
       const sellCh=(m.chairs||[]).find(c=>c.role==='SELLER'), buyCh=(m.chairs||[]).find(c=>c.role==='BUYER');
       if(sellCh) $('#m3dAmountHint').textContent='Em '+sellCh.expectedAsset.symbol;
       if(buyCh) $('#m3dBuyAmountHint').textContent='Em '+buyCh.expectedAsset.symbol;
-      if(m.config){
+      if(m.config && !m3CfgDirty){
         const setIf=(id,v)=>{ const el=$(id); if(el&&document.activeElement!==el) el.value=v; };
         setIf('#m3dAmount',m.config.amountInBase&&sellCh?baseToHuman(m.config.amountInBase,sellCh.expectedAsset.decimals):'');
         setIf('#m3dBuyAmount',m.config.buyerAmountInBase&&buyCh?baseToHuman(m.config.buyerAmountInBase,buyCh.expectedAsset.decimals):'');
@@ -2927,7 +2930,7 @@ img,svg,canvas,video{max-width:100%}
     if(d==null||d>2000){ toast('Deságio inválido (máx. 20%)','err'); return; }
     if(c==null||c>5000){ toast('Comissão inválida (máx. 50%)','err'); return; }
     body.discountBps=d; body.commissionBps=c; body.commissionPayer=$('#m3dPayer').value||'SELLER';
-    try{ await pmApi('/v1/portal/mesas/'+m3Sel+'/config',{method:'PATCH',body}); toast('Configuração salva','ok'); m3Refresh(); }
+    try{ await pmApi('/v1/portal/mesas/'+m3Sel+'/config',{method:'PATCH',body}); m3CfgDirty=false; toast('Configuração salva','ok'); m3Refresh(); }
     catch(e){ toast(e.message,'err'); }
   }
   async function m3Approve(){
@@ -3005,6 +3008,8 @@ img,svg,canvas,video{max-width:100%}
     ['sellNet','buyNet'].forEach(k=>{ const el=document.querySelector('[data-m3adv="'+k+'"]'); if(el) el.innerHTML=advNets; });
     ['sellNet','sellSym','sellContract','sellDec','buyNet','buySym','buyContract','buyDec'].forEach(k=>{ const el=document.querySelector('[data-m3adv="'+k+'"]'); if(el){ el.addEventListener('input',m3PlanHint); el.addEventListener('change',m3PlanHint); } });
     const sc=$('#m3dSaveCfg'); if(sc) sc.addEventListener('click',m3SaveCfg);
+    // Editar QUALQUER campo da config marca "dirty": o polling para de sobrescrever até salvar (ou trocar de mesa).
+    ['#m3dAmount','#m3dBuyAmount','#m3dDiscount','#m3dCommission','#m3dPayer'].forEach(id=>{ const el=$(id); if(el){ const mark=()=>{ m3CfgDirty=true; }; el.addEventListener('input',mark); el.addEventListener('change',mark); } });
     const ap=$('#m3dApprove'); if(ap) ap.addEventListener('click',m3Approve);
     const sg=$('#m3dSign'); if(sg) sg.addEventListener('click',m3Sign);
     const cm=$('#m3dCancelMesa'); if(cm) cm.addEventListener('click',async()=>{ const reason=prompt('Motivo do cancelamento:'); if(reason===null) return; try{ await pmApi('/v1/portal/mesas/'+m3Sel+'/cancel',{method:'POST',body:{reason}}); toast('Mesa cancelada','ok'); m3Refresh(); m3LoadList(); }catch(e){ toast(e.message,'err'); } });
