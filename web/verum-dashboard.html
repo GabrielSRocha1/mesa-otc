@@ -984,6 +984,8 @@ img,svg,canvas,video{max-width:100%}
         <div class="grid" style="grid-template-columns:1fr 1fr;margin-top:14px">
           <div>
             <div class="card-h" style="margin-bottom:6px"><div class="t" style="font-size:13.5px">Configuração da operação</div></div>
+            <div class="form-row"><div><div class="fl">Moeda do Vendedor</div><div class="fh">Toque para trocar o token</div></div><div class="netfield" id="m3dSellToken" style="max-width:220px" title="Trocar o token do Vendedor">—</div></div>
+            <div class="form-row"><div><div class="fl">Moeda do Comprador</div><div class="fh">Toque para trocar o token</div></div><div class="netfield" id="m3dBuyToken" style="max-width:220px" title="Trocar o token do Comprador">—</div></div>
             <div class="form-row"><div><div class="fl">Quantidade do Vendedor</div><div class="fh" id="m3dAmountHint">Em unidades do token</div></div><div style="text-align:right"><input class="inp" id="m3dAmount" inputmode="decimal" placeholder="Ex.: 250" style="text-align:right"><div class="fh mono" id="m3dAmountBase" style="margin-top:3px"></div></div></div>
             <div class="form-row"><div><div class="fl">Quantidade do Comprador</div><div class="fh" id="m3dBuyAmountHint">Em unidades do token</div></div><div style="text-align:right"><input class="inp" id="m3dBuyAmount" inputmode="decimal" placeholder="Ex.: 250000" style="text-align:right"><div class="fh mono" id="m3dBuyAmountBase" style="margin-top:3px"></div></div></div>
             <div class="form-row"><div class="fl">Deságio (%)</div><input class="inp" id="m3dDiscount" type="number" min="0" max="20" step="0.1" value="0" style="text-align:right"></div>
@@ -2383,6 +2385,7 @@ img,svg,canvas,video{max-width:100%}
   // Config sendo EDITADA pelo admin: enquanto "dirty", o polling NÃO sobrescreve os campos (evita que
   // a alteração "volte sozinha"). Zera ao abrir outra mesa e após salvar (aí o servidor já reflete o novo).
   let m3CfgDirty=false;
+  let m3dChairToken={ SELLER:null, BUYER:null }; // cadeiras (chairId+ativo) p/ troca de token no Gerenciar
   // Reflete no botão/indicador se há alterações pendentes de salvar.
   function m3CfgDirtyUI(savedNow){
     const st=$('#m3dCfgStatus'), btn=$('#m3dSaveCfg');
@@ -2776,13 +2779,12 @@ img,svg,canvas,video{max-width:100%}
     const net=a.network, sym=a.symbol; let netLbl=net; try{ netLbl=opChainBy(net).displayName||net; }catch(e){}
     return netBadge({icon:m3AssetIcon(net,sym),glyph:(sym||'?').slice(0,3),color:(OP_COLORS[net]||'#3b4a68')},22)+'<span class="tt">'+esc(sym)+' · '+esc(netLbl)+'</span>'+OP_CHEV;
   }
-  // Modal de troca de token (todas as moedas de todas as redes) → PATCH no ativo da cadeira.
-  async function opEditPickToken(role){
-    if(!opMirror) return;
-    const chairId=opEditChairIds[role]; if(!chairId){ toast('Cadeira não encontrada','err'); return; }
+  // Modal GENÉRICO de troca de token (todas as moedas de todas as redes) → PATCH no ativo da cadeira.
+  // Usado tanto no "Ver operação" (espelho) quanto no "Gerenciar" (detalhe da mesa).
+  async function pickChairToken(mesaId, chairId, role, current, after){
+    if(!mesaId||!chairId){ toast('Cadeira não encontrada','err'); return; }
     await m3LoadCatalog();
-    const cur=opEditCurAsset[role];
-    const same=a=> !!cur&&a.symbol===cur.symbol&&a.network===cur.network&&((a.contractOrMint||'')===(cur.contractOrMint||''));
+    const same=a=> !!current&&a.symbol===current.symbol&&a.network===current.network&&((a.contractOrMint||'')===(current.contractOrMint||''));
     const list=m3Catalog||[];
     const title=role==='SELLER'?'Moeda do Vendedor':'Moeda do Comprador';
     const row=(a,i)=>'<div class="netrow'+(same(a)?' sel':'')+'" data-ai="'+i+'">'+netBadge({icon:a.icon,glyph:(a.symbol||'?').slice(0,3),color:a.color},32)+'<div><div class="nm">'+esc(a.symbol)+(a.representationOf?(' <span style="color:var(--ink-3);font-weight:400">· '+esc(a.representationOf)+'</span>'):'')+'</div><div class="sub">'+esc(a.networkLabel||a.network)+'</div></div></div>';
@@ -2795,13 +2797,14 @@ img,svg,canvas,video{max-width:100%}
     $('#otCancel').addEventListener('click',closeModal);
     const bind=()=>$$('#otList [data-ai]').forEach(el=>el.addEventListener('click',async()=>{
       const a=list[Number(el.dataset.ai)]; closeModal();
-      try{ await pmApi('/v1/portal/mesas/'+opMirror+'/chairs/'+chairId+'/asset',{method:'PATCH',body:{network:a.network,contractOrMint:a.contractOrMint,decimals:a.decimals,symbol:a.symbol}}); opCfgDirty=false; toast('Token do '+(role==='SELLER'?'Vendedor':'Comprador')+' atualizado: '+a.symbol,'ok'); opMirrorRefresh(); }
+      try{ await pmApi('/v1/portal/mesas/'+mesaId+'/chairs/'+chairId+'/asset',{method:'PATCH',body:{network:a.network,contractOrMint:a.contractOrMint,decimals:a.decimals,symbol:a.symbol}}); toast('Token do '+(role==='SELLER'?'Vendedor':'Comprador')+' atualizado: '+a.symbol,'ok'); if(typeof after==='function') after(); }
       catch(e){ toast(e.message||'Falha ao trocar o token','err'); }
     }));
     bind();
     const sb=$('#otSearch'); if(sb) sb.addEventListener('input',()=>{ const q=sb.value.trim().toLowerCase(); $('#otList').innerHTML=list.map((a,i)=>({a,i})).filter(o=>!q||((o.a.symbol+' '+(o.a.networkLabel||o.a.network)+' '+(o.a.representationOf||'')).toLowerCase().indexOf(q)>=0)).map(o=>row(o.a,o.i)).join(''); bind(); });
     setTimeout(()=>{ const s=$('#otSearch'); if(s) s.focus(); },30);
   }
+  function opEditPickToken(role){ return pickChairToken(opMirror, opEditChairIds[role], role, opEditCurAsset[role], ()=>{ opCfgDirty=false; opMirrorRefresh(); }); }
   function opEditStatusUI(savedNow){
     const st=$('#opEditStatus'); if(st){ st.innerHTML = opCfgDirty
       ? '<span style="color:var(--amber)">● Alterações não salvas — clique em "Salvar alterações na mesa".</span>'
@@ -2988,6 +2991,11 @@ img,svg,canvas,video{max-width:100%}
       const sellCh=(m.chairs||[]).find(c=>c.role==='SELLER'), buyCh=(m.chairs||[]).find(c=>c.role==='BUYER');
       if(sellCh) $('#m3dAmountHint').textContent='Em '+sellCh.expectedAsset.symbol;
       if(buyCh) $('#m3dBuyAmountHint').textContent='Em '+buyCh.expectedAsset.symbol;
+      // Campos de token (clicáveis) do Gerenciar — travam quando a mesa está aprovada.
+      m3dChairToken={ SELLER: sellCh||null, BUYER: buyCh||null };
+      if($('#m3dSellToken')) $('#m3dSellToken').innerHTML=opTokenFieldInner(sellCh&&sellCh.expectedAsset);
+      if($('#m3dBuyToken')) $('#m3dBuyToken').innerHTML=opTokenFieldInner(buyCh&&buyCh.expectedAsset);
+      ['#m3dSellToken','#m3dBuyToken'].forEach(sel=>{ const el=$(sel); if(el){ const fz=!!m.approvedAt; el.style.opacity=fz?'.5':''; el.style.pointerEvents=fz?'none':''; } });
       if(m.config && !m3CfgDirty){
         const setIf=(id,v)=>{ const el=$(id); if(el&&document.activeElement!==el) el.value=v; };
         setIf('#m3dAmount',m.config.amountInBase&&sellCh?baseToHuman(m.config.amountInBase,sellCh.expectedAsset.decimals):'');
@@ -3147,6 +3155,9 @@ img,svg,canvas,video{max-width:100%}
     ['sellNet','buyNet'].forEach(k=>{ const el=document.querySelector('[data-m3adv="'+k+'"]'); if(el) el.innerHTML=advNets; });
     ['sellNet','sellSym','sellContract','sellDec','buyNet','buySym','buyContract','buyDec'].forEach(k=>{ const el=document.querySelector('[data-m3adv="'+k+'"]'); if(el){ el.addEventListener('input',m3PlanHint); el.addEventListener('change',m3PlanHint); } });
     const sc=$('#m3dSaveCfg'); if(sc) sc.addEventListener('click',m3SaveCfg);
+    // Troca de token no Gerenciar: abre o modal de moedas e salva no ativo da cadeira (PATCH), recarrega.
+    const tkSell=$('#m3dSellToken'); if(tkSell) tkSell.addEventListener('click',()=>{ const c=m3dChairToken.SELLER; if(c) pickChairToken(m3Sel, c.chairId, 'SELLER', c.expectedAsset, ()=>{ m3CfgDirty=false; m3Refresh(); }); });
+    const tkBuy=$('#m3dBuyToken'); if(tkBuy) tkBuy.addEventListener('click',()=>{ const c=m3dChairToken.BUYER; if(c) pickChairToken(m3Sel, c.chairId, 'BUYER', c.expectedAsset, ()=>{ m3CfgDirty=false; m3Refresh(); }); });
     // Editar QUALQUER campo da config marca "dirty": o polling para de sobrescrever até salvar (ou trocar de mesa).
     ['#m3dAmount','#m3dBuyAmount','#m3dDiscount','#m3dCommission','#m3dPayer'].forEach(id=>{ const el=$(id); if(el){ el.addEventListener('input',m3MarkCfgDirty); el.addEventListener('change',m3MarkCfgDirty); } });
     const rb=$('#m3dReopen'); if(rb) rb.addEventListener('click',async()=>{
