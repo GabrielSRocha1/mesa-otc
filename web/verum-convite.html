@@ -286,14 +286,18 @@ h1{font-size:22px;margin-bottom:8px}
       return {address:pk.toString(),network};
     }
     if(network==='bitcoin'||network==='tron'){
-      // Endereço vem da PRÓPRIA Verum (getAddresses), não de UniSat/TronLink.
+      // Endereço vem SEMPRE da PRÓPRIA Verum (nunca UniSat/TronLink). A Verum expõe os endereços por
+      // DOIS canais: (A) embutidos na resposta do connect() e (C) via getAddresses(). Reunimos os dois
+      // — no app/dapp-browser o getAddresses é gated por flag (Tron pode faltar lá), mas o connect traz.
       const p=solProvider(); if(!p) throw walletErr('Carteira Verum Wallet não encontrada','NO_WALLET');
-      try{ await p.connect(); }catch(e){}
-      if(typeof p.getAddresses!=='function') throw walletErr('Esta Verum Wallet não expõe endereços multichain. Atualize a carteira.','NO_WALLET');
-      const r=await p.getAddresses(); const list=(r&&Array.isArray(r.addresses))?r.addresses:[];
-      const hit=list.find(a=>a&&a.network===network&&a.address);
-      if(!hit) throw walletErr('A Verum Wallet não tem endereço '+network+' disponível.','NO_WALLET');
-      return {address:hit.address,network};
+      const seen=new Map();
+      const add=arr=>{ (Array.isArray(arr)?arr:[]).forEach(a=>{ if(a&&a.network&&a.address&&!seen.has(a.network)) seen.set(a.network,a.address); }); };
+      try{ const r=await p.connect(); if(r&&Array.isArray(r.addresses)) add(r.addresses); }catch(e){}
+      add(window.__verumConnectAddresses); // caso um connect anterior já tenha trazido a lista
+      if(typeof p.getAddresses==='function'){ try{ const r=await p.getAddresses(); if(r&&Array.isArray(r.addresses)) add(r.addresses); }catch(e){} }
+      const address=seen.get(network);
+      if(!address) throw walletErr('A Verum Wallet não tem endereço '+network+' disponível.','NO_WALLET');
+      return {address,network};
     }
     throw walletErr('Rede não suportada','NO_WALLET');
   }
