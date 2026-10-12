@@ -269,7 +269,7 @@ h1{font-size:22px;margin-bottom:8px}
       setTimeout(()=>{
         window.removeEventListener('eip6963:announceProvider',onAnn);
         if(!picked){ const e=window.ethereum; if(e&&e.isVerum) picked=e; else if(e&&Array.isArray(e.providers)) picked=e.providers.find(p=>p&&p.isVerum)||null; }
-        resolve(picked||window.ethereum||null);
+        resolve(picked||null); // Verum-only: nunca cai para MetaMask/outra carteira EVM
       },350);
     });
   }
@@ -299,7 +299,7 @@ h1{font-size:22px;margin-bottom:8px}
   }
   async function signMessage(network,address,message){
     const w=window;
-    if(network==='ethereum'){ const p=ethProvider||w.ethereum; if(!p) throw walletErr('Verum Wallet (EVM) não encontrada','NO_WALLET'); return p.request({method:'personal_sign',params:[message,address]}); }
+    if(network==='ethereum'){ const p=ethProvider||(await findVerumEthProvider()); if(!p) throw walletErr('Verum Wallet (EVM) não encontrada','NO_WALLET'); return p.request({method:'personal_sign',params:[message,address]}); }
     if(network==='solana'){ const p=solProvider(); if(!p) throw walletErr('Carteira Verum Wallet não encontrada','NO_WALLET'); return signSolana(p,message,address); }
     if(network==='bitcoin'||network==='tron'){
       // Superfície ÚNICA da Verum: BIP-137 (bitcoin) / TIP-191 (tron) via signPersonalMessage —

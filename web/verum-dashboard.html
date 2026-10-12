@@ -1527,11 +1527,11 @@ img,svg,canvas,video{max-width:100%}
       try{ const p=await findVerumEthProvider(); if(p){ const accs=await p.request({method:'eth_requestAccounts'}); if(accs&&accs[0]) EVM_NETS.forEach(n=>put(n,accs[0])); } }catch(e){}
     }
     if(needNet==='bitcoin'&&!out.has('bitcoin')){
-      try{ const u=window.unisat||(window.verum&&window.verum.bitcoin)||null;
+      try{ const u=(window.verum&&window.verum.bitcoin)||null; // Verum-only (sem Unisat/outras)
         if(u){ const accs=await (u.requestAccounts?u.requestAccounts():u.getAccounts?u.getAccounts():null); if(accs&&accs[0]) put('bitcoin',accs[0]); } }catch(e){}
     }
     if(!out.has('tron')){
-      try{ const t=(window.verum&&window.verum.tron)||((window.tronLink&&window.tronLink.tronWeb)||window.tronWeb);
+      try{ const t=(window.verum&&window.verum.tron)||null; // Verum-only (sem TronLink/tronWeb)
         const addr=t&&((t.address&&(t.address.base58||t.address))||(t.defaultAddress&&t.defaultAddress.base58)); if(typeof addr==='string') put('tron',addr); }catch(e){}
     }
     return [...out.entries()].map(([network,address])=>({network,address}));
