@@ -483,27 +483,21 @@ h1{font-size:22px;margin-bottom:8px}
     // Celular sem provider injetado → abre ESTE convite dentro do navegador da Verum (síncrono no clique).
     if(!verumProvider()){ toast('Abrindo na Verum Wallet…'); openInVerumBrowser(); return; }
     try{
-      // Rede de auth da cadeira (mapeada da rede da mesa): a prova de posse e a assinatura
-      // usam o padrão da família — Solana (Ed25519), EVM (EIP-191), Tron (TIP-191), BTC (BIP-137).
-      const net=authNetFor(v3Info.network);
+      // Conexão SEMPRE multichain (Solana) — igual ao "Conectar Verum Wallet" da aba Operações.
+      // A moeda/rede escolhida na cadeira NÃO muda a chave que o convidado prova: ele sempre prova a
+      // identidade Verum (Solana, Ed25519) e envia os endereços multichain junto (o endereço da rede
+      // do ativo — Tron/BTC/EVM — vem em `addresses`, resolvido pelo backend por rede).
+      const net='solana';
       v3Busy(true,'Conectando Verum Wallet…');
       const prov=verumProvider();
-      let address, signAt;
-      if(net==='solana'){
-        const r=await prov.connect();
-        window.__verumConnectAddresses=(r&&Array.isArray(r.addresses)&&r.addresses.length)?r.addresses:null;
-        const pk=(r&&r.publicKey)?r.publicKey:prov.publicKey;
-        if(!pk) throw new Error('Não foi possível ler o endereço da Verum Wallet');
-        address=normalizeSolAddress(pk);
-        // A assinatura Solana é capturada do canal CRU da carteira (signSolana): o provider nativo
-        // não a entrega no retorno da Promise do signMessage.
-        signAt=(msg)=>signSolana(prov,msg,address);
-      } else {
-        // EVM/Tron/Bitcoin: endereço e assinatura vêm da PRÓPRIA Verum (connectWallet + signMessage).
-        const w=await connectWallet(net);
-        address=w.address;
-        signAt=(msg)=>signMessage(net,address,msg);
-      }
+      const r=await prov.connect();
+      window.__verumConnectAddresses=(r&&Array.isArray(r.addresses)&&r.addresses.length)?r.addresses:null;
+      const pk=(r&&r.publicKey)?r.publicKey:prov.publicKey;
+      if(!pk) throw new Error('Não foi possível ler o endereço da Verum Wallet');
+      const address=normalizeSolAddress(pk);
+      // A assinatura Solana é capturada do canal CRU da carteira (signSolana): o provider nativo
+      // não a entrega no retorno da Promise do signMessage.
+      const signAt=(msg)=>signSolana(prov,msg,address);
       v3Busy(true,'Gerando autorização…');
       const ch=await api('/v1/mesa-invites/'+encodeURIComponent(V3.inviteId)+'/challenge',{method:'POST',body:{code,firstName:name,network:net,address}});
       // O usuário DESLIZA/aprova para assinar na Verum Wallet — é a prova de posse.
