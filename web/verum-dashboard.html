@@ -174,6 +174,9 @@ svg{display:block}
 }
 .btn-primary:hover{filter:brightness(1.06);color:#04240f}
 .btn-primary[disabled]{filter:grayscale(.6);opacity:.5;cursor:not-allowed}
+/* Botão com alterações pendentes: pulsa para chamar a atenção ao "Salvar". */
+.btn.attn{animation:btnAttn 1.6s ease-in-out infinite}
+@keyframes btnAttn{0%,100%{box-shadow:0 10px 26px rgba(34,197,94,.28)}50%{box-shadow:0 0 0 4px rgba(34,197,94,.28),0 10px 26px rgba(34,197,94,.45)}}
 .btn-danger{background:transparent;color:var(--ink-2);border-color:var(--line-2)}
 .btn-danger:hover{color:var(--red);border-color:var(--red)}
 .btn-block{width:100%;height:50px;font-size:15px}
@@ -986,7 +989,8 @@ img,svg,canvas,video{max-width:100%}
             <div class="form-row"><div class="fl">Deságio (%)</div><input class="inp" id="m3dDiscount" type="number" min="0" max="20" step="0.1" value="0" style="text-align:right"></div>
             <div class="form-row"><div class="fl">Comissão (%)</div><input class="inp" id="m3dCommission" type="number" min="0" max="50" step="0.1" value="0" style="text-align:right"></div>
             <div class="form-row"><div class="fl">Quem paga a comissão</div><select class="inp" id="m3dPayer" style="max-width:180px"><option value="SELLER">Vendedor</option><option value="BUYER">Comprador</option><option value="SPLIT">Dividir 50/50</option></select></div>
-            <button class="btn btn-block" id="m3dSaveCfg" type="button" style="margin-top:8px">Salvar configuração</button>
+            <div id="m3dCfgStatus" class="fh" style="margin-top:10px;min-height:16px"></div>
+            <button class="btn btn-primary btn-block" id="m3dSaveCfg" type="button" style="margin-top:4px"><svg viewBox="0 0 24 24"><path d="M19 21H5a2 2 0 01-2-2V5a2 2 0 012-2h11l5 5v11a2 2 0 01-2 2z"/><path d="M17 21v-8H7v8M7 3v5h8"/></svg>Salvar alterações na mesa</button>
           </div>
           <div>
             <div class="card-h" style="margin-bottom:6px"><div class="t" style="font-size:13.5px">Saldos e aprovação</div></div>
@@ -2378,6 +2382,17 @@ img,svg,canvas,video{max-width:100%}
   // Config sendo EDITADA pelo admin: enquanto "dirty", o polling NÃO sobrescreve os campos (evita que
   // a alteração "volte sozinha"). Zera ao abrir outra mesa e após salvar (aí o servidor já reflete o novo).
   let m3CfgDirty=false;
+  // Reflete no botão/indicador se há alterações pendentes de salvar.
+  function m3CfgDirtyUI(savedNow){
+    const st=$('#m3dCfgStatus'), btn=$('#m3dSaveCfg');
+    if(st){
+      if(m3CfgDirty){ st.innerHTML='<span style="color:var(--amber)">● Alterações não salvas — clique em "Salvar alterações na mesa".</span>'; }
+      else if(savedNow){ st.innerHTML='<span style="color:var(--green)">✓ Salvo na mesa.</span>'; }
+      else { st.textContent=''; }
+    }
+    if(btn) btn.classList.toggle('attn', m3CfgDirty);
+  }
+  function m3MarkCfgDirty(){ m3CfgDirty=true; m3CfgDirtyUI(); }
   /* ---------- Conversões do cadastro: valor humano → unidades base, % → bps ---------- */
   function pctToBps(v){ const n=parseFloat(String(v==null?'':v).replace(',','.')); return isFinite(n)&&n>=0?Math.round(n*100):null; }
   function bpsToPct(bps){ return (Number(bps||0)/100); }
@@ -2668,7 +2683,7 @@ img,svg,canvas,video{max-width:100%}
     rows.querySelectorAll('[data-m3-vmesa]').forEach(b=>b.addEventListener('click',()=>{ clip(location.origin+'/ver/'+encodeURIComponent(b.dataset.m3Vmesa)); toast('Link da mesa copiado (somente leitura)','ok'); }));
     rows.querySelectorAll('[data-m3-tdel]').forEach(b=>b.addEventListener('click',()=>m3DeleteMesa(b.dataset.m3Tdel)));
   }
-  function m3Open(mesaId){ opExitMirror(); m3CfgDirty=false; m3Sel=mesaId; $('#m3Detail').style.display=''; m3Refresh(); if(!m3Timer) m3Timer=setInterval(m3Refresh,5000); if(!m3TickT) m3TickT=setInterval(m3Tick,1000); }
+  function m3Open(mesaId){ opExitMirror(); m3CfgDirty=false; m3CfgDirtyUI(); m3Sel=mesaId; $('#m3Detail').style.display=''; m3Refresh(); if(!m3Timer) m3Timer=setInterval(m3Refresh,5000); if(!m3TickT) m3TickT=setInterval(m3Tick,1000); }
   async function m3DeleteMesa(mesaId){
     if(!mesaId) return;
     if(!confirm('Excluir esta mesa? Esta ação remove a mesa e não pode ser desfeita.')) return;
@@ -2930,7 +2945,7 @@ img,svg,canvas,video{max-width:100%}
     if(d==null||d>2000){ toast('Deságio inválido (máx. 20%)','err'); return; }
     if(c==null||c>5000){ toast('Comissão inválida (máx. 50%)','err'); return; }
     body.discountBps=d; body.commissionBps=c; body.commissionPayer=$('#m3dPayer').value||'SELLER';
-    try{ await pmApi('/v1/portal/mesas/'+m3Sel+'/config',{method:'PATCH',body}); m3CfgDirty=false; toast('Configuração salva','ok'); m3Refresh(); }
+    try{ await pmApi('/v1/portal/mesas/'+m3Sel+'/config',{method:'PATCH',body}); m3CfgDirty=false; m3CfgDirtyUI(true); toast('Alterações salvas na mesa','ok'); m3Refresh(); }
     catch(e){ toast(e.message,'err'); }
   }
   async function m3Approve(){
@@ -3009,7 +3024,7 @@ img,svg,canvas,video{max-width:100%}
     ['sellNet','sellSym','sellContract','sellDec','buyNet','buySym','buyContract','buyDec'].forEach(k=>{ const el=document.querySelector('[data-m3adv="'+k+'"]'); if(el){ el.addEventListener('input',m3PlanHint); el.addEventListener('change',m3PlanHint); } });
     const sc=$('#m3dSaveCfg'); if(sc) sc.addEventListener('click',m3SaveCfg);
     // Editar QUALQUER campo da config marca "dirty": o polling para de sobrescrever até salvar (ou trocar de mesa).
-    ['#m3dAmount','#m3dBuyAmount','#m3dDiscount','#m3dCommission','#m3dPayer'].forEach(id=>{ const el=$(id); if(el){ const mark=()=>{ m3CfgDirty=true; }; el.addEventListener('input',mark); el.addEventListener('change',mark); } });
+    ['#m3dAmount','#m3dBuyAmount','#m3dDiscount','#m3dCommission','#m3dPayer'].forEach(id=>{ const el=$(id); if(el){ el.addEventListener('input',m3MarkCfgDirty); el.addEventListener('change',m3MarkCfgDirty); } });
     const ap=$('#m3dApprove'); if(ap) ap.addEventListener('click',m3Approve);
     const sg=$('#m3dSign'); if(sg) sg.addEventListener('click',m3Sign);
     const cm=$('#m3dCancelMesa'); if(cm) cm.addEventListener('click',async()=>{ const reason=prompt('Motivo do cancelamento:'); if(reason===null) return; try{ await pmApi('/v1/portal/mesas/'+m3Sel+'/cancel',{method:'POST',body:{reason}}); toast('Mesa cancelada','ok'); m3Refresh(); m3LoadList(); }catch(e){ toast(e.message,'err'); } });
