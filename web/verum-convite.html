@@ -509,17 +509,20 @@ h1{font-size:22px;margin-bottom:8px}
       v3Busy(true,'Confirmando posse…');
       const addresses=(await collectVerumAddresses()).slice(0,30);
       const join=await api('/v1/mesa-invites/'+encodeURIComponent(V3.inviteId)+'/join',{method:'POST',body:{code,firstName:name,network:net,address,nonce:ch.nonce,signature,addresses}});
-      // Redireciona DIRETO para a operação (visão do participante, somente leitura). Guarda o token
-      // também em sessionStorage p/ a mesa recuperá-lo mesmo se o fragmento #pt se perder.
-      // Se a mesa já tem operação ABERTA, cai exatamente nela (&op=<dealId>).
-      let opq='';
-      try{ const mv=await api('/v1/mesas/'+encodeURIComponent(join.mesaId),{token:join.token}); if(mv&&mv.deal&&mv.deal.id) opq='&op='+encodeURIComponent(mv.deal.id); }catch(e){}
-      const dest='/mesa?mesa='+encodeURIComponent(join.mesaId)+opq+'#pt='+encodeURIComponent(join.token);
-      // Guarda o token em session E localStorage: a reentrada "lembra no aparelho" (localStorage
-      // sobrevive a fechar o app); o fragmento #pt pode ser descartado pelo dapp-browser.
+      // Guarda o token em session E localStorage ANTES de redirecionar: a reentrada "lembra no
+      // aparelho" (localStorage sobrevive a fechar o app); o fragmento #pt pode ser descartado
+      // pelo dapp-browser. Vale para ambos os destinos (público ou dashboard).
       try{ sessionStorage.setItem('verum_mesa_pt_'+join.mesaId, join.token); }catch(e){}
       try{ localStorage.setItem('verum_mesa_pt_'+join.mesaId, join.token); }catch(e){}
-      renderState('ok','Conectado! Abrindo a operação…','');
+      // Mesa com operação ABERTA → o participante que acabou de conectar vai DIRETO para a página
+      // SOMENTE-LEITURA (/ver/<mesa>): acompanha a Negociação OTC em tempo real (assinatura acontece
+      // na própria Verum Wallet). Sem operação aberta ainda → visão do participante no dashboard.
+      let openMesa=false;
+      try{ const mv=await api('/v1/mesas/'+encodeURIComponent(join.mesaId),{token:join.token}); if(mv&&mv.deal&&mv.deal.id) openMesa=true; }catch(e){}
+      const dest=openMesa
+        ? ('/ver/'+encodeURIComponent(join.mesaId))
+        : ('/mesa?mesa='+encodeURIComponent(join.mesaId)+'#pt='+encodeURIComponent(join.token));
+      renderState('ok', openMesa?'Conectado! Abrindo a mesa (somente leitura)…':'Conectado! Abrindo a operação…','');
       window.location.replace(dest);
     }catch(ex){
       v3Busy(false);

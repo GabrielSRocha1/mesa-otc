@@ -243,7 +243,16 @@ export async function buildApi(deps: ApiDeps): Promise<FastifyInstance> {
   // + cadeiras + status; funciona logo após criar (antes de aprovar). Sem sessão; recorte do participante.
   app.get('/v1/mesas/:mesaId/public-view', async req => {
     const { mesaId } = req.params as { mesaId: string };
-    return deps.mesa.mesaPublicView(mesaId);
+    const view = await deps.mesa.mesaPublicView(mesaId) as { chairs?: { asset: string; network: string; icon?: string | null }[] };
+    // Logo REAL de cada ativo da cadeira (stablecoins por símbolo; nativos pelo id do logo da rede).
+    const icons = await getIconMap().catch(() => ({} as Record<string, string>));
+    for (const c of view.chairs ?? []) {
+      const sym = String(c.asset || '').toUpperCase();
+      if (sym === 'USDT') c.icon = icons['tether'] ? '/v1/chains/icon/tether' : null;
+      else if (sym === 'USDC') c.icon = icons['usd-coin'] ? '/v1/chains/icon/usd-coin' : null;
+      else { const chain = getChain(c.network); const iid = chain ? chainIconId(chain) : null; c.icon = iid && icons[iid] ? '/v1/chains/icon/' + iid : null; }
+    }
+    return view;
   });
   app.get('/v1/deals/:id/timeline', async req => { const s = requireSession(req); const { id } = req.params as { id: string }; const d = await deps.deals.get(id); deps.deals.view(d, s.address, s.role === 'operator'); return deps.store.listDealEvents(id); });
   app.post('/v1/deals/:id/participants/:role/bind', async (req, reply) => { const s = requireSession(req); const { id, role } = req.params as { id: string; role: Role }; return idempotent(req, reply, async () => deps.deals.view(await deps.deals.connectWallet(id, parse(RoleZ, role), s.address, s.address), s.address)); });
@@ -1023,19 +1032,14 @@ export async function buildApi(deps: ApiDeps): Promise<FastifyInstance> {
   // Saldo NATIVO por endereço em cada rede + valor em USD/BRL. Leitura pura;
   // a OTC lê aqui (backend) para evitar CORS e centralizar. Recebe os endereços
   // que a carteira já expôs via verum.getAddresses().
-  app.post('/v1/chains/balances', async req => {
-    const body = parse(z.object({
-      addresses: z.array(z.object({
-        network: z.string().min(2).max(40),
-        address: z.string().min(8).max(120),
-      })).min(1).max(30),
-    }), req.body);
-
-    // Carteiras da mesa DEMO → saldos canned (nunca toca RPC nem CoinGecko).
+  // Saldo nativo + tokens por endereço (valor USD/BRL + ícones). Atalho para carteiras DEMO (saldos
+  // canned, sem tocar RPC/CoinGecko); a leitura real usa os RPCs PÚBLICOS (ex.: Solana). Reusado
+  // pela rota pública /v1/chains/balances e pela visão pública da mesa (/v1/mesas/:id/balances).
+  const chainBalances = async (addresses: { network: string; address: string }[]) => {
     const demo = deps.dev?.demo;
-    if (demo && body.addresses.some(a => demo.addresses.has(a.address))) {
+    if (demo && addresses.some(a => demo.addresses.has(a.address))) {
       const { demoBalancesResponse } = await import('../portal/demo.js');
-      return demoBalancesResponse(demo.keyring, body.addresses);
+      return demoBalancesResponse(demo.keyring, addresses);
     }
 
     const [byId, icons] = await Promise.all([
@@ -1044,7 +1048,7 @@ export async function buildApi(deps: ApiDeps): Promise<FastifyInstance> {
     ]);
     const q = (id: string) => byId[id] ?? { usd: null, brl: null };
 
-    const items = await Promise.all(body.addresses.map(async ({ network, address }) => {
+    const items = await Promise.all(addresses.map(async ({ network, address }) => {
       const chain = getChain(network);
       if (!chain) return { network, address, supported: false as const };
       // Nativo + tokens em paralelo — a falha de um nunca derruba o outro.
@@ -1092,6 +1096,40 @@ export async function buildApi(deps: ApiDeps): Promise<FastifyInstance> {
       for (const t of i.tokens) { totalUsd += t.valueUsd || 0; totalBrl += t.valueBrl || 0; }
     }
     return { items, totalUsd, totalBrl };
+  };
+  app.post('/v1/chains/balances', async req => {
+    const body = parse(z.object({
+      addresses: z.array(z.object({
+        network: z.string().min(2).max(40),
+        address: z.string().min(8).max(120),
+      })).min(1).max(30),
+    }), req.body);
+    return chainBalances(body.addresses);
+  });
+  // SALDOS (somente leitura, PÚBLICO — sem login) das cadeiras conectadas de uma mesa — base dos
+  // saldos/ícones reais no link /ver/:mesaId. Resolve endereços internamente; NÃO expõe endereços.
+  // (A rota /v1/mesas/:id/balances acima é a versão autenticada, com relatório completo.)
+  app.get('/v1/mesas/:mesaId/public-balances', async req => {
+    const { mesaId } = req.params as { mesaId: string };
+    const wallets = deps.mesa.mesaConnectedWallets(mesaId);
+    if (!wallets.length) return { chairs: [] };
+    const resp = await chainBalances(wallets.map(w => ({ network: w.network, address: w.address })));
+    type BalItem = { address?: string; supported?: boolean; symbol?: string; icon?: string | null; amount?: number | null; valueUsd?: number | null; tokens?: { symbol: string; contract: string | null; icon: string | null; amount: number; valueUsd: number | null }[] };
+    const byAddr = new Map<string, BalItem>();
+    for (const it of resp.items as BalItem[]) if (it.address) byAddr.set(it.address, it);
+    const chairs = wallets.map(w => {
+      const it = byAddr.get(w.address);
+      const exp = w.expected;
+      const isNative = !exp.contractOrMint;
+      let symbol = exp.symbol, icon: string | null = null, amount: number | null = null, valueUsd: number | null = null;
+      if (it && it.supported) {
+        const tok = (it.tokens ?? []).find(t => t.symbol === exp.symbol || (!!exp.contractOrMint && t.contract === exp.contractOrMint));
+        if (!isNative && tok) { icon = tok.icon; amount = tok.amount; valueUsd = tok.valueUsd; symbol = tok.symbol; }
+        else { icon = it.icon ?? null; amount = it.amount ?? null; valueUsd = it.valueUsd ?? null; symbol = it.symbol ?? exp.symbol; }
+      }
+      return { role: w.role, roleLabel: w.roleLabel, symbol, icon, amount, valueUsd };
+    });
+    return { chairs };
   });
 
   return app;

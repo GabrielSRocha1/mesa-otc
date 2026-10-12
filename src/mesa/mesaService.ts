@@ -561,11 +561,28 @@ export class MesaService {
       chairs: mesa.chairs.map(c => ({
         role: c.role, roleLabel: CHAIR_ROLE_LABEL[c.role],
         asset: c.expectedAsset.symbol, network: c.expectedAsset.network,
+        assetNetworkLabel: getChain(c.expectedAsset.network)?.displayName ?? c.expectedAsset.network,
+        decimals: c.expectedAsset.decimals,
         firstName: c.firstName ?? null, connected: !!c.wallet,
         wallet: c.wallet ? this.shortAddr(c.wallet.address) : null,
       })),
       deal: this.dealSummary(deal),
     };
+  }
+
+  /** Endereços completos das cadeiras conectadas (uso interno das rotas públicas de SALDO — o
+   *  public-view NUNCA expõe endereços cheios). Resolve o endereço na rede do ativo esperado. */
+  mesaConnectedWallets(mesaId: string): { role: MesaChairRole; roleLabel: string; network: string; address: string; expected: ChairAsset }[] {
+    const mesa = this.d.portal.mesas()[mesaId];
+    if (!mesa) throw new DomainError('INVALID_INPUT', 'Mesa não encontrada.');
+    const out: { role: MesaChairRole; roleLabel: string; network: string; address: string; expected: ChairAsset }[] = [];
+    for (const c of mesa.chairs) {
+      const w = c.wallet; if (!w) continue;
+      const net = c.expectedAsset.network;
+      const addr = (w.addresses ?? []).find(a => a.network === net)?.address ?? w.address;
+      out.push({ role: c.role, roleLabel: CHAIR_ROLE_LABEL[c.role], network: net, address: addr, expected: c.expectedAsset });
+    }
+    return out;
   }
 
   /** Resumo canônico de uma operação (deal) para a UI — mesma forma na mesa, na lista e no deep link. */

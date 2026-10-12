@@ -4,120 +4,382 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <meta name="verum-otc-api" content="">
-<title>VERUM OTC — Visualizar operação</title>
+<title>VERUM OTC — Negociação OTC</title>
 <style>
-  :root{ --bg:#070b14; --bg-2:#0d1320; --panel:#0f1626; --line:#1e2a3f; --ink:#eaf0fb; --ink-2:#b9c6dd; --ink-3:#7f8fa6; --blue:#3b82f6; --ok:#22c55e; --wait:#f59e0b; --err:#ef4444; --f:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif; --mono:ui-monospace,SFMono-Regular,Menlo,monospace; }
-  *{box-sizing:border-box} html,body{margin:0}
-  body{background:var(--bg);color:var(--ink);font-family:var(--f);min-height:100vh;padding:20px 14px}
-  .wrap{max-width:560px;margin:0 auto}
-  .brand{display:flex;align-items:center;gap:8px;color:var(--ink-2);font-size:12.5px;margin-bottom:14px;letter-spacing:.04em}
-  .brand b{color:var(--ink)}
-  .ro{display:inline-flex;align-items:center;gap:6px;font-size:11.5px;color:var(--ink-3);border:1px solid var(--line);border-radius:999px;padding:3px 10px;margin-left:auto}
-  .card{background:var(--panel);border:1px solid var(--line);border-radius:16px;padding:18px;margin-bottom:14px}
-  .ch{display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:12px}
-  .t{font-weight:700;font-size:16px}
-  .pair{font-size:22px;font-weight:700;letter-spacing:.01em}
-  .sub{color:var(--ink-3);font-size:12.5px;margin-top:2px}
-  .mono{font-family:var(--mono)}
-  .badge{display:inline-block;font-size:11.5px;font-weight:700;border-radius:999px;padding:4px 10px;border:1px solid var(--line)}
-  .badge.ok{background:rgba(34,197,94,.12);color:#86efac;border-color:rgba(34,197,94,.4)}
-  .badge.wait{background:rgba(245,158,11,.12);color:#fcd34d;border-color:rgba(245,158,11,.4)}
-  .badge.info{background:rgba(59,130,246,.12);color:#93c5fd;border-color:rgba(59,130,246,.4)}
-  .badge.err{background:rgba(239,68,68,.12);color:#fca5a5;border-color:rgba(239,68,68,.4)}
-  .prog{height:8px;background:var(--bg-2);border-radius:999px;overflow:hidden;margin:10px 0 4px}
-  .prog>span{display:block;height:100%;background:var(--blue);width:0}
-  .part{display:flex;align-items:center;gap:10px;padding:10px 0;border-bottom:1px solid var(--line)}
-  .part:last-child{border-bottom:0}
-  .part .nm{font-weight:600;font-size:13.5px}
-  .part .ad{font-size:12px;color:var(--ink-3)}
-  .part .st{margin-left:auto}
-  .row{display:flex;justify-content:space-between;gap:10px;padding:7px 0;border-bottom:1px solid var(--line);font-size:13px}
-  .row:last-child{border-bottom:0}
-  .row .k{color:var(--ink-3)}
-  .foot{color:var(--ink-3);font-size:11.5px;text-align:center;margin-top:6px}
+  :root{
+    --bg:#080d1a; --bg-2:#0a1122; --sidebar:#0b1120;
+    --panel:#0f1a30; --panel-2:#111d36; --panel-3:#132241;
+    --line:#1c2b48; --line-2:#223350;
+    --ink:#e8eefc; --ink-2:#aebbd4; --ink-3:#7788a6; --ink-4:#5a6b8a;
+    --green:#22c55e; --green-2:#16a34a; --green-soft:rgba(34,197,94,.14);
+    --blue:#4f9bff; --blue-2:#3b82f6; --blue-soft:rgba(79,155,255,.14);
+    --amber:#eab308; --amber-soft:rgba(234,179,8,.14);
+    --purple:#a855f7; --red:#ef4444;
+    --btc:#f7931a; --usdt:#26a17b;
+    --f-head:"Sora",system-ui,sans-serif;
+    --f-body:"Inter",system-ui,sans-serif;
+    --f-mono:"JetBrains Mono",ui-monospace,monospace;
+    --r:14px; --r-sm:10px; --r-lg:18px;
+  }
+  *,*::before,*::after{box-sizing:border-box}
+  html,body{margin:0;height:100%}
+  body{
+    background:
+      radial-gradient(1200px 600px at 80% -10%, rgba(79,155,255,.06), transparent 60%),
+      radial-gradient(900px 500px at 0% 100%, rgba(34,197,94,.05), transparent 55%),
+      var(--bg);
+    color:var(--ink);font-family:var(--f-body);font-size:14px;line-height:1.5;
+    -webkit-font-smoothing:antialiased;min-height:100vh;
+  }
+  h1,h2,h3,h4{font-family:var(--f-head);margin:0;letter-spacing:-.01em;line-height:1.2}
+  svg{display:block}
+  .mono{font-family:var(--f-mono)}
+  .wrap{max-width:1240px;margin:0 auto;padding:22px 18px 40px}
+
+  /* topo */
+  .top{display:flex;align-items:center;gap:12px;margin-bottom:22px}
+  .logo{display:flex;align-items:center;gap:11px}
+  .logo .mark{width:40px;height:40px;border-radius:11px;background:var(--panel-3);display:grid;place-items:center}
+  .logo .mark svg{width:26px;height:26px}
+  .logo .name{font-family:var(--f-head);font-weight:800;font-size:17px;letter-spacing:.02em}
+  .logo .tag{font-size:10.5px;color:var(--ink-3);letter-spacing:.03em}
+  .ro{margin-left:auto;display:inline-flex;align-items:center;gap:6px;font-size:11.5px;color:var(--ink-2);border:1px solid var(--line-2);border-radius:999px;padding:5px 12px}
+  .ro svg{width:13px;height:13px;stroke:currentColor;fill:none;stroke-width:2}
+
+  /* cabeçalho operação */
+  .op-head{display:flex;align-items:flex-start;gap:14px;margin-bottom:18px}
+  .op-head .titw h1{font-size:24px}
+  .op-head .titw p{color:var(--ink-3);font-size:13.5px;margin:5px 0 0}
+  .op-head .op-status{margin-left:auto;display:flex;align-items:center;gap:12px;white-space:nowrap;flex-wrap:wrap;justify-content:flex-end}
+  .op-badge{display:inline-flex;align-items:center;gap:7px;padding:8px 13px;border-radius:10px;font-size:12.5px;font-weight:600}
+  .op-badge.run{background:var(--blue-soft);border:1px solid var(--blue);color:var(--blue)}
+  .op-badge.ok{background:var(--green-soft);border:1px solid var(--green);color:var(--green)}
+  .op-badge.wait{background:var(--amber-soft);border:1px solid var(--amber);color:var(--amber)}
+  .op-badge.err{background:rgba(239,68,68,.12);border:1px solid var(--red);color:var(--red)}
+  .op-badge svg{width:14px;height:14px;stroke:currentColor;fill:none;stroke-width:2}
+  .op-exp{font-size:12.5px;color:var(--ink-3)}
+
+  .card{background:linear-gradient(180deg,var(--panel),var(--bg-2));border:1px solid var(--line);border-radius:var(--r);padding:18px;box-shadow:0 1px 0 rgba(255,255,255,.02) inset,0 12px 30px rgba(0,0,0,.25)}
+  .card-h{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:16px}
+  .card-h .t{display:flex;align-items:center;gap:9px;font-size:13px;font-weight:700;letter-spacing:.04em;color:var(--ink-2);text-transform:uppercase}
+  .badge{display:inline-flex;align-items:center;gap:6px;padding:4px 10px;border-radius:999px;font-size:11.5px;font-weight:600;border:1px solid var(--line-2);color:var(--ink-2)}
+  .badge svg{width:12px;height:12px;stroke:currentColor;fill:none;stroke-width:2.2}
+  .badge.ok{border-color:var(--green);color:var(--green);background:var(--green-soft)}
+  .badge.wait{border-color:var(--amber);color:var(--amber);background:var(--amber-soft)}
+  .badge.err{border-color:var(--red);color:var(--red);background:rgba(239,68,68,.12)}
+  .badge.info{border-color:var(--blue);color:var(--blue);background:var(--blue-soft)}
+
+  .op-layout{display:grid;grid-template-columns:1fr 344px;gap:16px;align-items:start}
+  .op-main{display:flex;flex-direction:column;gap:16px;min-width:0}
+  .op-parts{display:grid;grid-template-columns:repeat(4,1fr);gap:12px}
+  .op-part{background:linear-gradient(180deg,var(--panel),var(--bg-2));border:1px solid var(--line);border-radius:var(--r);padding:15px}
+  .op-part .ph{display:flex;align-items:center;gap:10px;margin-bottom:11px}
+  .op-coin{width:38px;height:38px;border-radius:50%;display:grid;place-items:center;font-weight:800;color:#fff;font-size:17px;flex:none;box-shadow:0 3px 10px rgba(0,0,0,.35)}
+  .op-part .nm{font-family:var(--f-head);font-weight:700;font-size:14px;display:flex;align-items:center;gap:7px}
+  .op-tag{font-size:9.5px;font-weight:700;padding:2px 6px;border-radius:5px;background:var(--panel-3);color:var(--ink-2);letter-spacing:.04em}
+  .op-part .addr{font-family:var(--f-mono);font-size:11px;color:var(--ink-3);margin-top:1px}
+  .op-part .bal{font-family:var(--f-head);font-weight:700;font-size:15px;color:var(--ink-2)}
+  .op-part .usd{font-size:11.5px;color:var(--ink-3);margin-top:1px}
+  .op-part .foot{display:flex;justify-content:space-between;align-items:flex-end;margin-top:2px}
+  .op-conn{display:inline-flex;align-items:center;gap:5px;font-size:11px;color:var(--green)}
+  .op-conn i{width:7px;height:7px;border-radius:50%;background:var(--green);display:inline-block;box-shadow:0 0 6px var(--green)}
+  .op-conn.off{color:var(--ink-3)} .op-conn.off i{background:var(--ink-4);box-shadow:none}
+
+  .op-flow{position:relative;display:grid;grid-template-columns:1fr 1fr;gap:16px}
+  .op-side{background:linear-gradient(180deg,var(--panel),var(--bg-2));border:1px solid var(--line);border-radius:var(--r-lg);padding:20px;position:relative;overflow:hidden}
+  .op-side::before{content:"";position:absolute;left:0;top:0;bottom:0;width:4px}
+  .op-deliver{border-color:rgba(234,179,8,.4)} .op-deliver::before{background:var(--amber)}
+  .op-receive{border-color:rgba(34,197,94,.4)} .op-receive::before{background:var(--green)}
+  .op-side .sh{display:flex;align-items:center;gap:12px;margin-bottom:16px}
+  .op-ic{width:40px;height:40px;border-radius:11px;display:grid;place-items:center;flex:none}
+  .op-ic svg{width:22px;height:22px;stroke:currentColor;fill:none;stroke-width:2}
+  .op-deliver .op-ic{background:var(--amber-soft);color:var(--amber)}
+  .op-receive .op-ic{background:var(--green-soft);color:var(--green)}
+  .op-side .sh .st{font-family:var(--f-head);font-weight:700;font-size:16px}
+  .op-side .sh .ss{font-size:12px;color:var(--ink-3)}
+  .op-asset-tag{margin-left:auto;font-weight:800;font-size:12px;padding:6px 11px;border-radius:8px}
+  .op-deliver .op-asset-tag{background:rgba(247,147,26,.16);color:var(--btc)}
+  .op-receive .op-asset-tag{background:rgba(38,161,123,.20);color:#3ecf9a}
+  .op-assetbox{background:var(--bg-2);border:1px solid var(--line);border-radius:12px;padding:15px;display:flex;align-items:center;gap:13px;margin-bottom:14px}
+  .op-assetbox .amt{margin-left:auto;text-align:right}
+  .op-assetbox .amt .big{font-family:var(--f-head);font-weight:800;font-size:19px}
+  .op-assetbox .amt .sub{font-size:12px;color:var(--ink-3);margin-top:2px}
+  .op-assetbox .nm{font-family:var(--f-head);font-weight:700;font-size:15px}
+  .op-rows .row{display:flex;justify-content:space-between;gap:10px;padding:9px 0;border-bottom:1px solid var(--line);font-size:13px}
+  .op-rows .row:last-child{border-bottom:none}
+  .op-rows .k{color:var(--ink-3)} .op-rows .v{font-weight:600;font-family:var(--f-mono)}
+  .op-swap{position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);width:46px;height:46px;border-radius:50%;background:var(--panel-3);border:1px solid var(--blue);display:grid;place-items:center;color:var(--blue);z-index:3;box-shadow:0 6px 18px rgba(0,0,0,.45)}
+  .op-swap svg{width:20px;height:20px;stroke:currentColor;fill:none;stroke-width:2}
+
+  .op-ms-head{display:flex;align-items:center;gap:12px;flex-wrap:wrap}
+  .op-ms-head .op-ic{background:var(--blue-soft);color:var(--blue)}
+  .op-ms-prog{margin-left:auto;display:flex;align-items:center;gap:10px}
+  .op-bar{width:120px;height:7px;border-radius:999px;background:var(--line-2);overflow:hidden}
+  .op-bar span{display:block;height:100%;background:linear-gradient(90deg,var(--green),var(--green-2));border-radius:999px}
+  .op-steps{display:grid;grid-template-columns:repeat(4,1fr);margin-top:22px}
+  .op-step{text-align:center;position:relative;padding:0 4px}
+  .op-step .dot{width:44px;height:44px;border-radius:50%;display:grid;place-items:center;margin:0 auto 10px;position:relative;z-index:2;border:2px solid;background:var(--bg-2)}
+  .op-step .dot svg{width:20px;height:20px;stroke-width:2.4;fill:none}
+  .op-step.done .dot{background:var(--green-soft);border-color:var(--green);color:var(--green)}
+  .op-step.pend .dot{background:var(--amber-soft);border-color:var(--amber);color:var(--amber);box-shadow:0 0 0 5px rgba(234,179,8,.12)}
+  .op-step .line{position:absolute;top:22px;left:50%;width:100%;height:2px;background:var(--line-2);z-index:1}
+  .op-step.done .line{background:var(--green)}
+  .op-step:last-child .line{display:none}
+  .op-step .nm{font-weight:700;font-size:12.5px}
+  .op-step .meta{font-size:10.5px;color:var(--ink-3);margin-top:3px}
+  .op-step .addr2{font-family:var(--f-mono);font-size:10px;color:var(--ink-4);margin-top:2px}
+  .op-step.pend .meta{color:var(--amber);font-weight:600}
+  .op-step.turn .dot{background:var(--blue-soft);border-color:var(--blue);color:var(--blue);box-shadow:0 0 0 5px rgba(79,155,255,.14)}
+  .op-step.turn .meta{color:var(--blue);font-weight:700}
+  .op-step.lock{opacity:.5}
+  .op-step.lock .dot{background:var(--bg-2);border-color:var(--line-2);color:var(--ink-4)}
+  .op-step.lock .meta{color:var(--ink-4)}
+  .op-turn-chip{display:inline-flex;align-items:center;gap:5px;margin-top:5px;padding:2px 9px;border-radius:999px;background:var(--blue-soft);border:1px solid rgba(79,155,255,.3);color:var(--blue);font-size:10px;font-weight:700}
+
+  .op-aside{display:flex;flex-direction:column;gap:14px;position:sticky;top:16px}
+  .op-sum-asset{display:flex;align-items:center;gap:11px;padding:9px 0}
+  .op-sum-asset .val{font-family:var(--f-head);font-weight:700;font-size:14px}
+  .op-sum-asset .sub{font-size:11px;color:var(--ink-3)}
+  .op-sum-asset .op-coin{width:32px;height:32px;font-size:14px}
+  .op-net{margin-top:6px;padding:14px 15px;border-radius:12px;background:var(--green-soft);border:1px solid var(--green);display:flex;justify-content:space-between;align-items:center}
+  .op-net .lbl{font-size:12.5px;color:var(--ink-2)} .op-net .val{font-family:var(--f-head);font-weight:800;font-size:22px;color:var(--green);text-align:right}
+  .op-net .val small{display:block;font-size:11px;color:var(--ink-3);font-weight:600}
+  .kv{display:grid;gap:2px}
+  .kv .r{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:8px 0;border-bottom:1px solid var(--line);font-size:13px}
+  .kv .r:last-child{border-bottom:none}
+  .kv .r .k{color:var(--ink-3)}
+  .kv .r .v{font-weight:600;font-variant-numeric:tabular-nums;text-align:right}
+  .kv .r .v.mono{font-family:var(--f-mono);font-weight:500;font-size:12px}
+
+  .note{color:var(--ink-3);font-size:11.5px;text-align:center;margin-top:18px}
   .state{display:grid;place-items:center;min-height:50vh;text-align:center;color:var(--ink-3);padding:20px}
+  .state .big{font-size:17px;color:var(--ink);font-weight:700;margin-bottom:6px}
   .spin{width:26px;height:26px;border:2px solid rgba(255,255,255,.2);border-top-color:#fff;border-radius:50%;animation:sp .7s linear infinite;margin:0 auto 12px}
   @keyframes sp{to{transform:rotate(360deg)}}
+
+  @media(max-width:980px){
+    .op-layout{grid-template-columns:1fr}
+    .op-aside{position:static}
+    .op-parts{grid-template-columns:repeat(2,1fr)}
+    .op-flow{grid-template-columns:1fr}
+    .op-swap{position:static;transform:none;margin:4px auto}
+    .op-steps{grid-template-columns:repeat(2,1fr);gap:18px 0}
+  }
+  @media(max-width:560px){ .op-parts{grid-template-columns:1fr} }
 </style>
 </head>
 <body>
   <div class="wrap">
-    <div class="brand"><b>VERUM OTC</b> · Operação <span class="ro"><svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2"><path d="M1 12s4-7 11-7 11 7 11 7-4 7-11 7S1 12 1 12z"/><circle cx="12" cy="12" r="3"/></svg>Somente leitura</span></div>
-    <div id="body"><div class="state"><div><div class="spin"></div>Carregando operação…</div></div></div>
+    <div class="top">
+      <div class="logo">
+        <div class="mark"><svg viewBox="0 0 512 512" fill="none"><defs><linearGradient id="vmark" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#4f9bff"/><stop offset="1" stop-color="#22c55e"/></linearGradient></defs><path d="M140 150 L256 372 L372 150" stroke="url(#vmark)" stroke-width="46" stroke-linecap="round" stroke-linejoin="round"/><circle cx="256" cy="150" r="26" fill="#22c55e"/></svg></div>
+        <div><div class="name">VERUM OTC</div><div class="tag">Secure. Transparent. Institutional.</div></div>
+      </div>
+      <span class="ro"><svg viewBox="0 0 24 24"><path d="M1 12s4-7 11-7 11 7 11 7-4 7-11 7S1 12 1 12z"/><circle cx="12" cy="12" r="3"/></svg>Somente leitura</span>
+    </div>
+    <div id="body"><div class="state"><div><div class="spin"></div>Carregando negociação…</div></div></div>
   </div>
 <script>
 (function(){
   var META=document.querySelector('meta[name="verum-otc-api"]');
   var API=((META&&META.content)||'/').replace(/\/$/,'');
   var q=new URLSearchParams(location.search);
-  // Modo MESA (/ver/<mesaId> ou ?mesa=) mostra a mesa inteira (config+cadeiras); modo OPERAÇÃO (/op/<dealId>) mostra o deal.
   var mv=location.pathname.match(/\/ver\/([^/?#]+)/);
   var MESA_ID=(mv&&decodeURIComponent(mv[1]))||q.get('mesa')||'';
   var m=location.pathname.match(/\/op\/([^/?#]+)/);
   var ID=(m&&decodeURIComponent(m[1]))||q.get('id')||q.get('op')||'';
   var ROLE={SELLER:'Vendedor',BUYER:'Comprador',PAYMASTER_1:'Pay Master 1',PAYMASTER_2:'Pay Master 2'};
-  var STATE={AWAITING_SIGNATURES:['wait','Aguardando assinaturas'],FULLY_SIGNED:['info','Assinada'],SETTLEMENT_VALIDATION:['info','Validando liquidação'],SETTLING:['info','Liquidando'],SETTLED:['ok','Liquidada'],EXPIRED:['err','Expirada'],CANCELLED:['err','Cancelada'],BLOCKED:['err','Bloqueada'],REFUNDING:['err','Reembolsando'],REFUNDED:['err','Reembolsada'],DRAFT:['info','Rascunho'],CREATED:['info','Criada'],WALLETS_CONNECTED:['info','Carteiras conectadas'],ASSETS_VERIFIED:['info','Ativos verificados'],LIQUIDITY_VERIFIED:['info','Liquidez verificada']};
+  var SIGN_ORDER=['SELLER','PAYMASTER_1','PAYMASTER_2','BUYER'];
+  var STATE={AWAITING_SIGNATURES:['wait','Aguardando assinaturas'],FULLY_SIGNED:['info','Assinada'],SETTLEMENT_VALIDATION:['info','Validando liquidação'],SETTLING:['info','Liquidando'],SETTLED:['ok','Liquidada'],EXPIRED:['err','Expirada'],CANCELLED:['err','Cancelada'],BLOCKED:['err','Bloqueada'],REFUNDING:['err','Reembolsando'],REFUNDED:['err','Reembolsada'],DRAFT:['info','Rascunho'],CREATED:['info','Criada'],WALLETS_CONNECTED:['info','Carteiras conectadas'],ASSETS_VERIFIED:['info','Ativos verificados'],LIQUIDITY_VERIFIED:['info','Liquidez verificada'],ACTIVE:['run','Em andamento'],WAITING_CONNECTIONS:['wait','Aguardando conexões'],WAITING_SIGNATURES:['wait','Aguardando assinaturas'],SIGNING:['wait','Assinatura em andamento'],COMPLETED:['ok','Concluída'],FAILED:['err','Falha']};
+  // Fallback de glifo/cor quando o logo real não carrega.
+  var COIN={BTC:['₿','var(--btc)','#fff'],USDT:['₮','var(--usdt)','#fff'],USDC:['$','#2775ca','#fff'],ETH:['◆','#627eea','#fff'],SOL:['◎','linear-gradient(135deg,#9945FF,#14F195)','#fff'],TRX:['T','#ff060a','#fff'],BNB:['B','#f3ba2f','#1b1b1b'],ZEC:['Z','#f4b728','#3a2c00'],POL:['P','#8247e5','#fff'],AVAX:['A','#e84142','#fff'],XRP:['X','#23292f','#fff'],TON:['T','#0098ea','#fff'],APT:['A','#000','#fff'],NEAR:['N','#000','#fff'],ALGO:['A','#000','#fff'],XLM:['✶','#000','#fff'],CRO:['C','#0b1d3a','#fff']};
   function esc(s){return String(s==null?'':s).replace(/[&<>"]/g,function(c){return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c];});}
   function badge(st){var e=STATE[st]||['info',st];return '<span class="badge '+e[0]+'">'+esc(e[1])+'</span>';}
-  function fmtDate(ms){try{return new Date(ms).toLocaleString('pt-BR',{day:'2-digit',month:'2-digit',year:'2-digit',hour:'2-digit',minute:'2-digit'});}catch(e){return '—';}}
-  function stateMsg(kind,title,msg){document.getElementById('body').innerHTML='<div class="state"><div><div style="font-size:17px;color:var(--ink);font-weight:700;margin-bottom:6px">'+esc(title)+'</div>'+esc(msg||'')+'</div></div>';}
-  function render(o){
-    var parts=(o.participants||[]).map(function(p){
-      var st=p.signed?'<span class="badge ok">✓ Assinou</span>':(p.isTurn&&o.state==='AWAITING_SIGNATURES'?'<span class="badge wait">Vez de assinar</span>':'<span class="badge info">Aguardando</span>');
-      return '<div class="part"><div><div class="nm">'+esc(ROLE[p.role]||p.role)+'</div><div class="ad mono">'+esc(p.address||'')+(p.network?(' · '+esc(p.network)):'')+'</div></div><div class="st">'+st+'</div></div>';
-    }).join('');
-    var pct=o.requiredSignatures?Math.round((o.validSignatures||0)/o.requiredSignatures*100):0;
-    var turn=(o.state==='AWAITING_SIGNATURES'&&o.turnRole)?('<div class="sub">Vez atual: <b style="color:var(--ink-2)">'+esc(ROLE[o.turnRole]||o.turnRole)+'</b></div>'):'';
-    document.getElementById('body').innerHTML=
-      '<div class="card"><div class="ch"><div><div class="pair">'+esc(o.assetIn||'—')+' <span style="color:var(--ink-3)">→</span> '+esc(o.assetOut||'—')+'</div><div class="sub mono">'+esc(o.id)+'</div></div>'+badge(o.state)+'</div>'
-      +'<div class="prog"><span style="width:'+pct+'%"></span></div>'
-      +'<div class="sub">'+(o.validSignatures||0)+' de '+(o.requiredSignatures||0)+' assinaturas · '+pct+'%</div>'+turn+'</div>'
-      +'<div class="card"><div class="t" style="font-size:13.5px;margin-bottom:6px">Participantes</div>'+(parts||'<div class="sub">—</div>')+'</div>'
-      +'<div class="card"><div class="row"><span class="k">Criada em</span><span class="v">'+fmtDate(o.createdAt)+'</span></div>'
-      +'<div class="row"><span class="k">Expira em</span><span class="v">'+fmtDate(o.expiresAt)+'</span></div>'
-      +(o.amountInBase?'<div class="row"><span class="k">Quantidade (unid. base)</span><span class="v mono">'+esc(o.amountInBase)+'</span></div>':'')
-      +'</div>'
-      +'<div class="foot">Esta página é somente leitura — acompanha a operação em tempo real. Assinar/movimentar fundos acontece pela mesa, na Verum Wallet.</div>';
+  function statusPill(st){var e=STATE[st]||['run',st];var ic=(e[0]==='ok')?'<path d="M5 13l4 4L19 7"/>':'<circle cx="12" cy="12" r="9"/><path d="M12 8v4l2 2"/>';return '<span class="op-badge '+e[0]+'"><svg viewBox="0 0 24 24">'+ic+'</svg>'+esc(e[1])+'</span>';}
+  // Ícone REAL (logo) da moeda com fallback por glifo/cor (igual ao dashboard). `icon` é a URL servida
+  // pela própria OTC (/v1/chains/icon/<id>); se a imagem falhar, revela o badge colorido com o glifo.
+  function coin(sym,icon){
+    var c=COIN[String(sym||'').toUpperCase()]||[String(sym||'?').slice(0,1).toUpperCase(),'var(--panel-3)','var(--ink)'];
+    if(icon){
+      var url=/^(https?:|data:)/.test(icon)?icon:(API+icon);
+      return '<div class="op-coin" style="background:transparent;overflow:hidden;position:relative">'
+        +'<img src="'+esc(url)+'" alt="" loading="lazy" data-g="'+esc(c[0])+'" data-c="'+esc(c[1])+'" style="position:absolute;inset:0;width:100%;height:100%;object-fit:cover;border-radius:50%" '
+        +'onerror="var p=this.parentNode;this.remove();if(p){p.textContent=this.getAttribute(\'data-g\');p.style.background=this.getAttribute(\'data-c\')}"></div>';
+    }
+    return '<div class="op-coin" style="background:'+c[1]+';color:'+c[2]+'">'+esc(c[0])+'</div>';
   }
-  function pct2(n){ return n==null?'—':(Number(n)/100).toLocaleString('pt-BR')+'%'; }
-  function renderMesa(m){
-    var d=m.deal;
-    var chairs=(m.chairs||[]).map(function(c){
-      var st=c.connected
-        ? (d&&(d.signed||[]).indexOf(c.role)>=0?'<span class="badge ok">✓ Assinou</span>':(d&&d.state==='AWAITING_SIGNATURES'&&d.turnRole===c.role?'<span class="badge wait">Vez de assinar</span>':'<span class="badge ok">✓ Conectado</span>'))
-        : '<span class="badge info">Aguardando</span>';
-      return '<div class="part"><div><div class="nm">'+esc(c.roleLabel||c.role)+' <span style="color:var(--ink-3);font-weight:400">· '+esc(c.asset||'')+'</span></div>'
-        +'<div class="ad mono">'+esc(c.firstName||'—')+(c.wallet?(' · '+esc(c.wallet)):'')+'</div></div><div class="st">'+st+'</div></div>';
-    }).join('');
-    var cfg=m.config;
-    var cfgRows=cfg?(
-      (cfg.amountInBase?'<div class="row"><span class="k">Quantidade (unid. base)</span><span class="v mono">'+esc(cfg.amountInBase)+'</span></div>':'')
+  function fmtDate(ms){try{return new Date(ms).toLocaleString('pt-BR',{day:'2-digit',month:'2-digit',year:'numeric',hour:'2-digit',minute:'2-digit'});}catch(e){return '—';}}
+  function pct2(n){ return n==null?'—':(Number(n)/100).toLocaleString('pt-BR',{maximumFractionDigits:2})+'%'; }
+  function fmtAmt(n){ try{ return Number(n).toLocaleString('pt-BR',{maximumFractionDigits:6}); }catch(e){ return String(n); } }
+  function usd(n){ try{ return '≈ $'+Number(n).toLocaleString('pt-BR',{minimumFractionDigits:2,maximumFractionDigits:2}); }catch(e){ return '≈ $'+n; } }
+  function stateMsg(title,msg){document.getElementById('body').innerHTML='<div class="state"><div><div class="big">'+esc(title)+'</div>'+esc(msg||'')+'</div></div>';}
+  // base (inteiro em unidades mínimas) → humano com separador pt-BR
+  function human(base,dec){
+    if(base==null) return null;
+    var s=String(base).replace(/[^0-9]/g,''); if(!s) return null;
+    dec=dec||0;
+    while(s.length<=dec) s='0'+s;
+    var intp=s.slice(0,s.length-dec)||'0';
+    var frac=dec?s.slice(s.length-dec).replace(/0+$/,''):'';
+    var intf=Number(intp).toLocaleString('pt-BR');
+    return frac?intf+','+frac:intf;
+  }
+
+  // Card de participante — saldo/USD REAIS vêm de `bal` (/v1/mesas/:id/balances via RPC público).
+  function partCard(c,bal){
+    var conn=c.connected;
+    var balLine, usdLine, balGreen=false;
+    if(bal&&bal.amount!=null){ balLine=fmtAmt(bal.amount)+' '+esc(bal.symbol||c.asset); usdLine=bal.valueUsd!=null?usd(bal.valueUsd):esc(c.assetNetworkLabel||c.network||''); balGreen=true; }
+    else { balLine=c.firstName?esc(c.firstName):(conn?'Carteira conectada':'Aguardando conexão'); usdLine=esc(c.assetNetworkLabel||c.network||''); }
+    return '<div class="op-part">'
+      +'<div class="ph">'+coin(c.asset,c.icon)+'<div><div class="nm">'+esc(c.roleLabel||ROLE[c.role]||c.role)+' <span class="op-tag">'+esc(c.asset||'')+'</span></div><div class="addr">'+esc(c.wallet||'—')+'</div></div></div>'
+      +'<div class="foot"><div><div class="bal"'+(balGreen?' style="color:var(--green)"':'')+'>'+balLine+'</div><div class="usd">'+usdLine+'</div></div>'
+      +'<span class="op-conn'+(conn?'':' off')+'"><i></i>'+(conn?'Conectado':'Aguardando')+'</span></div></div>';
+  }
+
+  // Esteira de assinaturas sequencial (Vendedor → PM1 → PM2 → Comprador), limitada às cadeiras existentes.
+  function steps(chairsByRole, deal){
+    var signed=(deal&&deal.signed)||[];
+    var turnRole=deal&&deal.turnRole;
+    var awaiting=deal&&deal.state==='AWAITING_SIGNATURES';
+    var order=SIGN_ORDER.filter(function(r){return chairsByRole[r];});
+    var reachedTurn=false;
+    return '<div class="op-steps" style="grid-template-columns:repeat('+order.length+',1fr)">'+order.map(function(r){
+      var ch=chairsByRole[r];
+      var done=signed.indexOf(r)>=0;
+      var isTurn=awaiting&&turnRole===r&&!done;
+      var cls,meta,ic;
+      if(done){ cls='done'; meta='Assinado'; ic='<path d="M5 13l4 4L19 7"/>'; }
+      else if(isTurn){ cls='turn'; meta='Vez de assinar'; ic='<circle cx="12" cy="12" r="9"/><path d="M12 8v4l2 2"/>'; reachedTurn=true; }
+      else if(!reachedTurn&&awaiting){ cls='pend'; meta='Aguardando'; ic='<circle cx="12" cy="12" r="9"/><path d="M12 8v4l2 2"/>'; }
+      else { cls='lock'; meta=awaiting?'Bloqueado':'Aguardando'; ic='<rect x="5" y="11" width="14" height="9" rx="2"/><path d="M8 11V8a4 4 0 018 0v3"/>'; }
+      var chip=isTurn?'<div class="op-turn-chip"><svg viewBox="0 0 24 24" style="width:11px;height:11px;stroke:currentColor;fill:none;stroke-width:2"><circle cx="12" cy="12" r="9"/><path d="M12 8v4l2 2"/></svg>Sua vez</div>':'';
+      return '<div class="op-step '+cls+'"><div class="line"></div><div class="dot"><svg viewBox="0 0 24 24" style="stroke:currentColor">'+ic+'</svg></div>'
+        +'<div class="nm">'+esc(ROLE[r]||r)+'</div><div class="meta">'+meta+'</div>'+chip
+        +'<div class="addr2">'+esc(ch.wallet||'—')+'</div></div>';
+    }).join('')+'</div>';
+  }
+
+  function sideBox(kind,title,sub,c,amount){
+    var tag=kind==='deliver'?'op-deliver':'op-receive';
+    var ic=kind==='deliver'
+      ? '<path d="M12 3v18M17 8l-5-5-5 5"/>'
+      : '<circle cx="9" cy="8" r="3"/><path d="M3.5 19a5.5 5.5 0 0111 0M17 7a2.5 2.5 0 010 5"/>';
+    var amt=amount!=null?(amount+' '+esc(c?c.asset:'')):'—';
+    return '<section class="op-side '+tag+'">'
+      +'<div class="sh"><div class="op-ic"><svg viewBox="0 0 24 24">'+ic+'</svg></div>'
+      +'<div><div class="st">'+esc(title)+'</div><div class="ss">'+esc(sub)+'</div></div>'
+      +'<span class="op-asset-tag">'+esc(c?c.asset:'—')+'</span></div>'
+      +'<div class="op-assetbox">'+coin(c?c.asset:'',c?c.icon:null)+'<div><div class="nm">'+esc(c?c.asset:'—')+'</div><div class="usd" style="font-size:12px;color:var(--ink-3)">'+esc(c?(c.assetNetworkLabel||c.network||''):'')+'</div></div>'
+      +'<div class="amt"><div class="big">'+amt+'</div></div></div>'
+      +'<div class="op-rows"><div class="row"><span class="k">Destino</span><span class="v">'+(c&&c.connected?'Conectado':'Aguardando')+'</span></div>'
+      +'<div class="row"><span class="k">Endereço de destino</span><span class="v">'+esc(c?(c.wallet||'—'):'—')+'</span></div></div>'
+      +'</section>';
+  }
+
+  function renderMesa(mesa,bal){
+    bal=bal||{};
+    var deal=mesa.deal;
+    var chairs=mesa.chairs||[];
+    var byRole={}; chairs.forEach(function(c){ byRole[c.role]=c; });
+    var cfg=mesa.config||{};
+    var seller=byRole.SELLER, buyer=byRole.BUYER;
+    var delAmt=buyer?human(cfg.buyerAmountInBase,buyer.decimals):null;
+    var recvAmt=seller?human(cfg.amountInBase,seller.decimals):null;
+    var reqS=deal?deal.requiredSignatures:0, valS=deal?deal.validSignatures:0;
+    var pct=reqS?Math.round(valS/reqS*100):0;
+
+    var head='<div class="op-head"><div class="titw"><h1>Negociação OTC</h1><p>Mesa '+esc(mesa.code||'')+' · acompanhe os detalhes da operação (somente leitura).</p></div>'
+      +'<div class="op-status">'+statusPill(mesa.status)
+      +(mesa.expiresAt?'<span class="op-exp">Expira em <b style="color:var(--ink-2)">'+esc(fmtDate(mesa.expiresAt))+'</b></span>':'')+'</div></div>';
+
+    var partsHtml=chairs.length?chairs.map(function(c){return partCard(c,bal[c.role]);}).join(''):'';
+    var parts='<div class="op-parts" style="grid-template-columns:repeat('+Math.max(1,Math.min(4,chairs.length))+',1fr)">'+partsHtml+'</div>';
+
+    var flow='<div class="op-flow">'
+      +sideBox('deliver','Você Entrega','Ativo negociado',buyer,delAmt)
+      +'<div class="op-swap"><svg viewBox="0 0 24 24"><path d="M7 10l-3 3 3 3M4 13h11M17 14l3-3-3-3M20 11H9"/></svg></div>'
+      +sideBox('receive','Você Recebe','Ativo negociado',seller,recvAmt)
+      +'</div>';
+
+    var multisig='<section class="card"><div class="op-ms-head">'
+      +'<div class="op-ic"><svg viewBox="0 0 24 24" style="width:22px;height:22px;stroke:currentColor;fill:none;stroke-width:2"><path d="M12 3l7 3v5c0 5-3 8-7 10-4-2-7-5-7-10V6z"/><path d="M9 12l2 2 4-4"/></svg></div>'
+      +'<div><div class="st" style="font-family:var(--f-head);font-weight:700;font-size:16px">Assinaturas Multisig</div><div class="ss" style="font-size:12px;color:var(--ink-3)">A operação só será executada após a assinatura de todos os participantes.</div></div>'
+      +'<div class="op-ms-prog"><span style="font-size:12px;color:var(--ink-2)">'+valS+' de '+reqS+' assinaturas</span><div class="op-bar"><span style="width:'+pct+'%"></span></div><b style="font-size:12.5px">'+pct+'%</b></div></div>'
+      +(deal?steps(byRole,deal):'<div style="padding:11px 13px;border:1px solid var(--line);border-radius:11px;background:var(--bg-2);font-size:12.5px;color:var(--ink-3);margin-top:4px">Nenhuma operação ativa na mesa ainda.</div>')
+      +'</section>';
+
+    var aside='<aside class="op-aside">'
+      +'<section class="card"><div class="card-h"><div class="t"><svg viewBox="0 0 24 24" style="width:17px;height:17px;stroke:var(--blue);fill:none;stroke-width:2;vertical-align:-3px;margin-right:6px"><path d="M6 3h9l5 5v13a1 1 0 01-1 1H6a1 1 0 01-1-1V4a1 1 0 011-1z"/><path d="M14 3v6h6"/></svg>Resumo da Operação</div></div>'
+      +'<div style="font-size:11px;color:var(--ink-3);margin-top:2px">Ativo de entrega</div>'
+      +'<div class="op-sum-asset">'+coin(buyer?buyer.asset:'',buyer?buyer.icon:null)+'<div><div class="val">'+(delAmt!=null?delAmt+' '+esc(buyer?buyer.asset:''):'—')+'</div><div class="sub">'+esc(buyer?(buyer.assetNetworkLabel||''):'')+'</div></div></div>'
+      +'<div style="font-size:11px;color:var(--ink-3)">Ativo de recebimento</div>'
+      +'<div class="op-sum-asset">'+coin(seller?seller.asset:'',seller?seller.icon:null)+'<div><div class="val">'+(recvAmt!=null?recvAmt+' '+esc(seller?seller.asset:''):'—')+'</div><div class="sub">'+esc(seller?(seller.assetNetworkLabel||''):'')+'</div></div></div>'
+      +'<div class="op-rows" style="margin-top:6px">'
       +'<div class="row"><span class="k">Deságio</span><span class="v">'+pct2(cfg.discountBps)+'</span></div>'
-      +'<div class="row"><span class="k">Comissão</span><span class="v">'+pct2(cfg.commissionBps)+'</span></div>'
-      +(cfg.commissionPayer?'<div class="row"><span class="k">Quem paga a comissão</span><span class="v">'+esc(cfg.commissionPayer)+'</span></div>':'')
-    ):'<div class="row"><span class="k">Configuração</span><span class="v" style="color:var(--ink-3)">Aguardando o Pay Master</span></div>';
-    var pct=(d&&d.requiredSignatures)?Math.round((d.validSignatures||0)/d.requiredSignatures*100):0;
-    var prog=d?('<div class="prog"><span style="width:'+pct+'%"></span></div><div class="sub">'+(d.validSignatures||0)+' de '+(d.requiredSignatures||0)+' assinaturas · '+pct+'%</div>'):'';
-    document.getElementById('body').innerHTML=
-      '<div class="card"><div class="ch"><div><div class="pair">Mesa '+esc(m.code||'')+'</div><div class="sub">'+esc(m.networkLabel||m.network||'')+(m.operationCode?(' · '+esc(m.operationCode)):'')+'</div></div>'+badge(m.status)+'</div>'+prog+'</div>'
-      +'<div class="card"><div class="t" style="font-size:13.5px;margin-bottom:6px">Participantes</div>'+(chairs||'<div class="sub">—</div>')+'</div>'
-      +'<div class="card"><div class="t" style="font-size:13.5px;margin-bottom:6px">Condições</div>'+cfgRows
-      +'<div class="row"><span class="k">Criada em</span><span class="v">'+fmtDate(m.createdAt)+'</span></div>'
-      +'<div class="row"><span class="k">Expira em</span><span class="v">'+fmtDate(m.expiresAt)+'</span></div></div>'
-      +'<div class="foot">Esta página é somente leitura — acompanha a mesa em tempo real. Conectar carteira e assinar acontece na Verum Wallet.</div>';
+      +'<div class="row"><span class="k">Taxa de comissão</span><span class="v">'+pct2(cfg.commissionBps)+'</span></div>'
+      +(cfg.commissionPayer?'<div class="row"><span class="k">Quem paga a comissão</span><span class="v">'+esc(ROLE[cfg.commissionPayer]||cfg.commissionPayer)+'</span></div>':'')
+      +'</div></section>'
+      +'<section class="card"><div class="card-h"><div class="t">Informações da Negociação</div><span class="badge info">Somente leitura</span></div>'
+      +'<div class="kv">'
+      +'<div class="r"><span class="k">Código</span><span class="v mono">'+esc(mesa.operationCode||mesa.code||mesa.mesaId)+'</span></div>'
+      +'<div class="r"><span class="k">Status</span><span class="v">'+badge(mesa.status)+'</span></div>'
+      +'<div class="r"><span class="k">Rede</span><span class="v">'+esc(mesa.networkLabel||mesa.network||'—')+'</span></div>'
+      +'<div class="r"><span class="k">Criada em</span><span class="v">'+esc(fmtDate(mesa.createdAt))+'</span></div>'
+      +'<div class="r"><span class="k">Expira em</span><span class="v">'+esc(fmtDate(mesa.expiresAt))+'</span></div>'
+      +'<div class="r"><span class="k">Ordem de assinatura</span><span class="v" style="font-size:11px">Vendedor → PM 1 → PM 2 → Comprador</span></div>'
+      +'</div></section></aside>';
+
+    document.getElementById('body').innerHTML=head
+      +'<div class="op-layout"><div class="op-main">'+parts+flow+multisig+'</div>'+aside+'</div>'
+      +'<div class="note">Esta página é somente leitura — saldos e logos são lidos em tempo real das redes públicas (ex.: RPC público da Solana). Conectar carteira e assinar acontece na mesa, pela Verum Wallet.</div>';
   }
+
+  // Link por operação (/op/<dealId>): só temos o deal. Monta a mesma tela com os participantes do deal.
+  function renderDeal(o){
+    var parts=(o.participants||[]).map(function(p){ return {role:p.role,roleLabel:ROLE[p.role],asset:'',assetNetworkLabel:p.network,network:p.network,connected:true,wallet:p.address}; });
+    var byRole={}; parts.forEach(function(c){ byRole[c.role]=c; });
+    var deal={requiredSignatures:o.requiredSignatures,validSignatures:o.validSignatures,turnRole:o.turnRole,state:o.state,signed:(o.participants||[]).filter(function(p){return p.signed;}).map(function(p){return p.role;})};
+    var reqS=o.requiredSignatures||0,valS=o.validSignatures||0,pct=reqS?Math.round(valS/reqS*100):0;
+    var head='<div class="op-head"><div class="titw"><h1>Negociação OTC</h1><p>'+esc((o.assetIn||'—')+' → '+(o.assetOut||'—'))+' · '+esc(o.id)+'</p></div>'
+      +'<div class="op-status">'+statusPill(o.state)+(o.expiresAt?'<span class="op-exp">Expira em <b style="color:var(--ink-2)">'+esc(fmtDate(o.expiresAt))+'</b></span>':'')+'</div></div>';
+    var partsHtml='<div class="op-parts" style="grid-template-columns:repeat('+Math.max(1,Math.min(4,parts.length))+',1fr)">'+parts.map(function(c){return partCard(c,null);}).join('')+'</div>';
+    var multisig='<section class="card"><div class="op-ms-head">'
+      +'<div class="op-ic"><svg viewBox="0 0 24 24" style="width:22px;height:22px;stroke:currentColor;fill:none;stroke-width:2"><path d="M12 3l7 3v5c0 5-3 8-7 10-4-2-7-5-7-10V6z"/><path d="M9 12l2 2 4-4"/></svg></div>'
+      +'<div><div class="st" style="font-family:var(--f-head);font-weight:700;font-size:16px">Assinaturas Multisig</div><div class="ss" style="font-size:12px;color:var(--ink-3)">A operação só será executada após a assinatura de todos os participantes.</div></div>'
+      +'<div class="op-ms-prog"><span style="font-size:12px;color:var(--ink-2)">'+valS+' de '+reqS+' assinaturas</span><div class="op-bar"><span style="width:'+pct+'%"></span></div><b style="font-size:12.5px">'+pct+'%</b></div></div>'
+      +steps(byRole,deal)+'</section>';
+    var aside='<aside class="op-aside"><section class="card"><div class="card-h"><div class="t">Informações da Negociação</div><span class="badge info">Somente leitura</span></div>'
+      +'<div class="kv">'
+      +'<div class="r"><span class="k">Código</span><span class="v mono">'+esc(o.id)+'</span></div>'
+      +'<div class="r"><span class="k">Par</span><span class="v">'+esc((o.assetIn||'—')+' → '+(o.assetOut||'—'))+'</span></div>'
+      +'<div class="r"><span class="k">Status</span><span class="v">'+badge(o.state)+'</span></div>'
+      +'<div class="r"><span class="k">Criada em</span><span class="v">'+esc(fmtDate(o.createdAt))+'</span></div>'
+      +'<div class="r"><span class="k">Expira em</span><span class="v">'+esc(fmtDate(o.expiresAt))+'</span></div>'
+      +'<div class="r"><span class="k">Ordem de assinatura</span><span class="v" style="font-size:11px">Vendedor → PM 1 → PM 2 → Comprador</span></div>'
+      +'</div></section></aside>';
+    document.getElementById('body').innerHTML=head
+      +'<div class="op-layout"><div class="op-main">'+partsHtml+multisig+'</div>'+aside+'</div>'
+      +'<div class="note">Esta página é somente leitura — acompanha a operação em tempo real. Assinar/movimentar fundos acontece pela mesa, na Verum Wallet.</div>';
+  }
+
+  function okJson(r){ return r.json().then(function(d){ return {ok:r.ok,d:d}; }); }
   function load(){
     if(MESA_ID){
-      fetch(API+'/v1/mesas/'+encodeURIComponent(MESA_ID)+'/public-view',{headers:{accept:'application/json'}})
-        .then(function(r){ return r.json().then(function(d){ return {ok:r.ok,d:d}; }); })
-        .then(function(res){ if(!res.ok){ stateMsg('err','Mesa não encontrada',(res.d&&(res.d.message||res.d.error))||'Confira o link.'); return; } renderMesa(res.d); })
-        .catch(function(){});
+      Promise.all([
+        fetch(API+'/v1/mesas/'+encodeURIComponent(MESA_ID)+'/public-view',{headers:{accept:'application/json'}}).then(okJson),
+        fetch(API+'/v1/mesas/'+encodeURIComponent(MESA_ID)+'/public-balances',{headers:{accept:'application/json'}}).then(okJson).catch(function(){ return {ok:false,d:null}; })
+      ]).then(function(res){
+        var pv=res[0]; if(!pv.ok){ stateMsg('Mesa não encontrada',(pv.d&&(pv.d.message||pv.d.error))||'Confira o link.'); return; }
+        var bal={}; var bc=(res[1]&&res[1].ok&&res[1].d&&res[1].d.chairs)||[]; bc.forEach(function(c){ bal[c.role]=c; });
+        renderMesa(pv.d,bal);
+      }).catch(function(){});
       return;
     }
-    if(!ID){ stateMsg('err','Link inválido','Não foi possível identificar a operação.'); return; }
+    if(!ID){ stateMsg('Link inválido','Não foi possível identificar a operação.'); return; }
     fetch(API+'/v1/operations/'+encodeURIComponent(ID)+'/view',{headers:{accept:'application/json'}})
-      .then(function(r){ return r.json().then(function(d){ return {ok:r.ok,d:d}; }); })
-      .then(function(res){ if(!res.ok){ stateMsg('err','Operação não encontrada',(res.d&&(res.d.message||res.d.error))||'Confira o link.'); return; } render(res.d); })
+      .then(okJson)
+      .then(function(res){ if(!res.ok){ stateMsg('Operação não encontrada',(res.d&&(res.d.message||res.d.error))||'Confira o link.'); return; } renderDeal(res.d); })
       .catch(function(){ /* mantém o último render durante falhas de rede */ });
   }
   load(); setInterval(load,5000);
