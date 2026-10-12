@@ -82,6 +82,14 @@ export class PortalService {
   constructor(private readonly opts: { file?: string; sessionTtlMs?: number; now?: () => number; persistence?: PortalPersistence }) {
     this.persistence = opts.persistence;
     this.data = this.persistence ? (this.persistence.initial() ?? emptyPortalData()) : this.read();
+    this.normalizeMesas();
+  }
+  /** Migração idempotente: mesas legadas tinham expiresAt (TTL de 60 min); a política atual é SEM
+   *  expiração. Zera expiresAt das mesas existentes p/ não aparecerem como "Expirada". */
+  private normalizeMesas(): void {
+    let changed = false;
+    for (const m of Object.values(this.data.mesas ?? {})) { if ((m as { expiresAt: number | null }).expiresAt != null) { (m as { expiresAt: number | null }).expiresAt = null; changed = true; } }
+    if (changed) this.write();
   }
   private now(): number { return (this.opts.now ?? Date.now)(); }
   private sessionTtl(): number { return this.opts.sessionTtlMs ?? 24 * HOUR; }
@@ -92,7 +100,7 @@ export class PortalService {
     const d = await this.persistence.hydrate();
     // Só adota o documento do banco se NÃO for mais velho que a memória — um SELECT que resolve
     // tarde (concorrência na mesma instância) não pode desfazer uma mutação local recém-gravada.
-    if (d && (d.rev ?? 0) >= (this.data.rev ?? 0)) this.data = { seq: d.seq ?? 0, rev: d.rev ?? 0, payMasters: d.payMasters ?? {}, sessions: d.sessions ?? {}, codes: d.codes ?? {}, invites: d.invites ?? {}, mesas: d.mesas ?? {} };
+    if (d && (d.rev ?? 0) >= (this.data.rev ?? 0)) { this.data = { seq: d.seq ?? 0, rev: d.rev ?? 0, payMasters: d.payMasters ?? {}, sessions: d.sessions ?? {}, codes: d.codes ?? {}, invites: d.invites ?? {}, mesas: d.mesas ?? {} }; this.normalizeMesas(); }
   }
   /** Aguarda a última escrita pendente ser persistida (usado após mutações no serverless). */
   async flush(): Promise<void> { if (this.persistence) await this.persistence.flush(); }
