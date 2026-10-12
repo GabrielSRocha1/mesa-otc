@@ -991,6 +991,7 @@ img,svg,canvas,video{max-width:100%}
             <div class="form-row"><div class="fl">Quem paga a comissão</div><select class="inp" id="m3dPayer" style="max-width:180px"><option value="SELLER">Vendedor</option><option value="BUYER">Comprador</option><option value="SPLIT">Dividir 50/50</option></select></div>
             <div id="m3dCfgStatus" class="fh" style="margin-top:10px;min-height:16px"></div>
             <button class="btn btn-primary btn-block" id="m3dSaveCfg" type="button" style="margin-top:4px"><svg viewBox="0 0 24 24"><path d="M19 21H5a2 2 0 01-2-2V5a2 2 0 012-2h11l5 5v11a2 2 0 01-2 2z"/><path d="M17 21v-8H7v8M7 3v5h8"/></svg>Salvar alterações na mesa</button>
+            <button class="btn btn-block" id="m3dReopen" type="button" style="margin-top:8px;display:none;border-color:var(--amber);color:#fde68a"><svg viewBox="0 0 24 24"><path d="M3 12a9 9 0 019-9 9 9 0 018 5M21 12a9 9 0 01-9 9 9 9 0 01-8-5"/><path d="M17 8h4V4M7 16H3v4"/></svg>Reabrir para editar (invalida assinaturas)</button>
           </div>
           <div>
             <div class="card-h" style="margin-bottom:6px"><div class="t" style="font-size:13.5px">Saldos e aprovação</div></div>
@@ -2883,6 +2884,12 @@ img,svg,canvas,video{max-width:100%}
       ['m3dAmount','m3dBuyAmount','m3dDiscount','m3dCommission','m3dPayer'].forEach(id=>{ const el=document.getElementById(id); if(el) el.disabled=frozen; });
       $('#m3dSaveCfg').style.display=frozen?'none':'';
       $('#m3dApprove').style.display=frozen?'none':'';
+      // Mesa aprovada mas ainda NÃO irreversível → oferece reabrir para editar (invalida assinaturas).
+      const canReopen=frozen && !m.irreversible;
+      const rb=$('#m3dReopen'); if(rb) rb.style.display=canReopen?'':'none';
+      if(frozen && !m3CfgDirty){ const st=$('#m3dCfgStatus'); if(st) st.innerHTML = m.irreversible
+        ? '<span style="color:var(--ink-3)">🔒 Operação irreversível — configuração travada.</span>'
+        : '<span style="color:var(--amber)">Operação aprovada — configuração congelada. Clique em "Reabrir para editar" para alterar (as assinaturas serão invalidadas e os participantes reassinam).</span>'; }
       $('#m3dSign').style.display=(m.deal&&m.deal.state==='AWAITING_SIGNATURES')?'':'none';
       // Trava de irrevogabilidade (backend manda): leg de contrato financiada → sem "Cancelar mesa".
       const cmBtn=$('#m3dCancelMesa'); if(cmBtn) cmBtn.style.display=(m.canCancel===false)?'none':'';
@@ -3025,6 +3032,11 @@ img,svg,canvas,video{max-width:100%}
     const sc=$('#m3dSaveCfg'); if(sc) sc.addEventListener('click',m3SaveCfg);
     // Editar QUALQUER campo da config marca "dirty": o polling para de sobrescrever até salvar (ou trocar de mesa).
     ['#m3dAmount','#m3dBuyAmount','#m3dDiscount','#m3dCommission','#m3dPayer'].forEach(id=>{ const el=$(id); if(el){ el.addEventListener('input',m3MarkCfgDirty); el.addEventListener('change',m3MarkCfgDirty); } });
+    const rb=$('#m3dReopen'); if(rb) rb.addEventListener('click',async()=>{
+      if(!confirm('Reabrir esta operação para editar?\n\nA operação ativa será descartada e as assinaturas já feitas serão INVALIDADAS — os participantes precisarão assinar novamente após você editar e aprovar de novo.')) return;
+      try{ await pmApi('/v1/portal/mesas/'+m3Sel+'/reopen',{method:'POST',body:{}}); m3CfgDirty=false; m3CfgDirtyUI(); toast('Operação reaberta — edite a config, salve e aprove novamente','ok'); m3Refresh(); }
+      catch(e){ toast(e.message||'Não foi possível reabrir','err'); }
+    });
     const ap=$('#m3dApprove'); if(ap) ap.addEventListener('click',m3Approve);
     const sg=$('#m3dSign'); if(sg) sg.addEventListener('click',m3Sign);
     const cm=$('#m3dCancelMesa'); if(cm) cm.addEventListener('click',async()=>{ const reason=prompt('Motivo do cancelamento:'); if(reason===null) return; try{ await pmApi('/v1/portal/mesas/'+m3Sel+'/cancel',{method:'POST',body:{reason}}); toast('Mesa cancelada','ok'); m3Refresh(); m3LoadList(); }catch(e){ toast(e.message,'err'); } });

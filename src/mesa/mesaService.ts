@@ -445,6 +445,28 @@ export class MesaService {
     return next;
   }
 
+  /**
+   * Reabre uma mesa APROVADA (mas ainda NÃO irreversível) para edição da configuração: descarta a
+   * operação ativa — o que INVALIDA as assinaturas já feitas — e remove approvedAt/termsHash, deixando
+   * a config editável de novo. O admin edita e reaprova (gera uma nova operação; todos reassinam).
+   * Bloqueada quando a operação já é irreversível (fundos trancados no escrow / já totalmente assinada).
+   */
+  async reopenForEdit(portalToken: string | undefined, mesaId: string): Promise<void> {
+    const pm = this.d.portal.requirePayMaster(portalToken);
+    const mesa = this.mesaOf(pm.id, mesaId);
+    this.assertMesaOpen(mesa);
+    if (!mesa.approvedAt) return; // já editável — nada a reabrir
+    const deal = mesa.dealId ? await this.d.getDeal(mesa.dealId) : null;
+    if (this.isIrreversible(deal)) throw new DomainError('VERSION_CONFLICT', 'Operação irreversível: fundos já trancados (ou totalmente assinada) — não é possível reabrir para edição.');
+    // Descarta a operação ativa (assinaturas invalidadas) e volta a mesa ao estado editável.
+    if (mesa.dealId) mesa.dealIds = (mesa.dealIds ?? []).filter(id => id !== mesa.dealId);
+    mesa.dealId = null;
+    mesa.approvedAt = undefined;
+    mesa.termsHash = undefined;
+    this.d.portal.persistMesas();
+    void this.audit('mesa.operacao.reaberta', pm.id, { mesaId, discardedDealId: deal?.id ?? null });
+  }
+
   /** Congela os termos na aprovação (validações de saldo/gás acontecem na rota, com motivos nominais). */
   markApproved(mesa: MesaRecord, pmId: string): void {
     mesa.approvedAt = this.now();

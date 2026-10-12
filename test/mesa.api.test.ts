@@ -189,6 +189,30 @@ describe('API mesa v3 — fluxo completo', () => {
     await app.close();
   }, 120_000);
 
+  it('reopen: no-op em mesa NÃO aprovada (segue editável); bloqueado quando a operação é irreversível (fundos travados)', async () => {
+    const { readers } = mockReaders();
+    const { app } = await makeApp({ balanceReaders: readers });
+    const pm = await registerPm(app, uniqueEmail('reopen'));
+    const mesa = await createMesa(app, pm);
+    // Mesa não aprovada: reopen é no-op (200) e a config continua editável.
+    const noop = await app.api.inject({ method: 'POST', url: `/v1/portal/mesas/${mesa.mesaId}/reopen`, headers: pmHeaders(pm), payload: {} });
+    expect(noop.statusCode, noop.body).toBe(200);
+    expect(noop.json<{ approvedAt: number | null }>().approvedAt).toBeFalsy();
+    expect((await app.api.inject({ method: 'PATCH', url: `/v1/portal/mesas/${mesa.mesaId}/config`, headers: pmHeaders(pm), payload: { discountBps: 4 } })).statusCode).toBe(200);
+    // Conecta, aprova (no DEMO o escrow é financiado na hora → operação vira IRREVERSÍVEL) e tenta reabrir.
+    const seller = solWallet(); const buyer = solWallet();
+    const sChair = mesa.chairs.find(c => c.role === 'SELLER')!; const bChair = mesa.chairs.find(c => c.role === 'BUYER')!;
+    await inviteAndJoin(app, pm, mesa.mesaId, sChair.chairId, 'Gabriel', seller);
+    await inviteAndJoin(app, pm, mesa.mesaId, bChair.chairId, 'Beatriz', buyer);
+    await approveMesa(app, pm, mesa.mesaId);
+    expect((await app.api.inject({ method: 'PATCH', url: `/v1/portal/mesas/${mesa.mesaId}/config`, headers: pmHeaders(pm), payload: { discountBps: 5 } })).statusCode).toBe(409);
+    // Irreversível (fundos travados no demo) → reopen recusado com 409.
+    const re = await app.api.inject({ method: 'POST', url: `/v1/portal/mesas/${mesa.mesaId}/reopen`, headers: pmHeaders(pm), payload: {} });
+    expect(re.statusCode, re.body).toBe(409);
+    expect(re.body).toContain('irrevers');
+    await app.close();
+  }, 120_000);
+
   it('cadastro alinhado aos contratos: operationCode, /v1/tokens, buyerAmountInBase e saldo do Comprador no approve', async () => {
     // Gás sempre rico; saldo de token (lado Comprador) alternável para isolar o motivo nominal.
     const tokenAmount = { value: 10 };

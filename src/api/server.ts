@@ -788,6 +788,16 @@ export async function buildApi(deps: ApiDeps): Promise<FastifyInstance> {
     void reply.code(201);
     return { approved: true, termsHash: mesa.termsHash, deal: view };
   });
+  // Reabre a mesa APROVADA (não irreversível) para editar a config: descarta a operação ativa
+  // (invalida as assinaturas) e destrava approvedAt/termsHash. O admin edita e reaprova.
+  app.post('/v1/portal/mesas/:mesaId/reopen', async (req, reply) => {
+    const { mesaId } = req.params as { mesaId: string };
+    await deps.mesa.reopenForEdit(portalToken(req), mesaId);
+    const { pm, mesa } = adminMesa(req, mesaId, false);
+    await deps.audit.append({ actorType: 'user', actorId: pm.id, category: 'mesa.reaberta', dealId: null, payload: { mesaId } });
+    void reply.code(200);
+    return deps.mesa.mesaViewFor(mesa, { kind: 'admin' });
+  });
   app.post('/v1/portal/mesas/:mesaId/deal/sign', async req => {
     const { mesaId } = req.params as { mesaId: string };
     const token = portalToken(req);
