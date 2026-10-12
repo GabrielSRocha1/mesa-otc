@@ -652,6 +652,7 @@ export class MesaService {
         firstName: c.firstName ?? null,
         wallet: c.wallet ? this.shortAddr(c.wallet.address) : null,
         asset: c.expectedAsset.symbol,
+        decimals: c.expectedAsset.decimals,
         connected: !!c.wallet,
         isMe: c.chairId === viewer.chairId,
       })),

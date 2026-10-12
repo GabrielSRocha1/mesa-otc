@@ -918,30 +918,26 @@ img,svg,canvas,video{max-width:100%}
       <!-- Passo 2 — Ativos (tokens do registro oficial; contrato/decimais preenchidos sozinhos) -->
       <section class="card" id="m3s2" style="display:none;margin-bottom:16px">
         <div class="card-h"><div class="t">Nova mesa · Passo 2 de 4 — Ativos</div><span class="badge info" id="m3s2Net">—</span></div>
-        <p class="fh" style="margin:0 0 10px">Escolha rede e token de CADA lado no registro oficial — contrato/mint e decimais são preenchidos automaticamente. Redes diferentes liquidam via bridge (CCIP); BTC nativo liquida via HTLC (swap atômico).</p>
-        <div class="form-row"><div><div class="fl">Vendedor — rede e token</div><div class="fh">O que o Vendedor entrega</div></div>
-          <div style="display:flex;gap:8px;flex-wrap:wrap;justify-content:flex-end">
-            <select class="inp" id="m3cSellNet" style="max-width:170px"></select>
-            <select class="inp" id="m3cSellTok" style="max-width:260px"></select>
-          </div>
+        <p class="fh" style="margin:0 0 10px">Escolha a moeda de CADA lado — uma lista só com TODAS as moedas de TODAS as redes (com ícone); contrato/mint e decimais entram sozinhos. Redes diferentes liquidam via bridge (CCIP); BTC nativo liquida via HTLC (swap atômico).</p>
+        <div class="form-row"><div><div class="fl">Vendedor — moeda</div><div class="fh">O que o Vendedor entrega</div></div>
+          <div class="netfield" id="m3cSellField" style="max-width:300px" title="Escolher moeda — todas as redes numa lista só">Escolher moeda</div>
         </div>
-        <div class="form-row"><div><div class="fl">Comprador — rede e token</div><div class="fh">O que o Comprador entrega (lado ≠ do Vendedor)</div></div>
-          <div style="display:flex;gap:8px;flex-wrap:wrap;justify-content:flex-end">
-            <select class="inp" id="m3cBuyNet" style="max-width:170px"></select>
-            <select class="inp" id="m3cBuyTok" style="max-width:260px"></select>
-          </div>
+        <div class="form-row"><div><div class="fl">Comprador — moeda</div><div class="fh">O que o Comprador entrega (lado ≠ do Vendedor)</div></div>
+          <div class="netfield" id="m3cBuyField" style="max-width:300px" title="Escolher moeda — todas as redes numa lista só">Escolher moeda</div>
         </div>
         <div class="fh" id="m3cPlanHint" style="margin:4px 0 2px;color:var(--blue)"></div>
         <div style="margin:6px 0 2px"><a href="#" id="m3cAdvLink" style="color:var(--blue);font-size:12px;text-decoration:none">Avançado: informar token fora da lista…</a></div>
         <div id="m3cAdv" style="display:none">
           <div class="form-row"><div class="fl">Vendedor (manual)</div>
+            <select class="inp" data-m3adv="sellNet" style="width:150px"></select>
             <input class="inp" data-m3adv="sellSym" placeholder="Símbolo" style="width:110px">
-            <input class="inp" data-m3adv="sellContract" placeholder="Contrato/mint" style="flex:1;min-width:180px">
+            <input class="inp" data-m3adv="sellContract" placeholder="Contrato/mint" style="flex:1;min-width:160px">
             <input class="inp" data-m3adv="sellDec" type="number" min="0" max="30" placeholder="Decimais" style="width:90px">
           </div>
           <div class="form-row"><div class="fl">Comprador (manual)</div>
+            <select class="inp" data-m3adv="buyNet" style="width:150px"></select>
             <input class="inp" data-m3adv="buySym" placeholder="Símbolo" style="width:110px">
-            <input class="inp" data-m3adv="buyContract" placeholder="Contrato/mint" style="flex:1;min-width:180px">
+            <input class="inp" data-m3adv="buyContract" placeholder="Contrato/mint" style="flex:1;min-width:160px">
             <input class="inp" data-m3adv="buyDec" type="number" min="0" max="30" placeholder="Decimais" style="width:90px">
           </div>
         </div>
@@ -2398,32 +2394,89 @@ img,svg,canvas,video{max-width:100%}
   const M3_NETS=[['solana','Solana'],['ethereum','Ethereum'],['tron','Tron'],['bsc','BNB Smart Chain'],['polygon','Polygon'],['base','Base'],['arbitrum','Arbitrum One'],['bitcoin','Bitcoin (BTC nativo · HTLC)']];
   // BTC NATIVO: não é token — liquida via HTLC (swap atômico com hash secret compartilhado com o escrow).
   const M3_BTC_NATIVE={ symbol:'BTC', contractOrMint:null, decimals:8, representationOf:'BTC nativo — fluxo HTLC (atomic swap)' };
-  const m3TokLists={ sell:[], buy:[] };
-  async function m3LoadTokensSide(side,net){
-    let list=[];
-    if(net==='bitcoin') list=[M3_BTC_NATIVE];
-    else{ try{ const r=await fetch(API+'/v1/tokens?network='+encodeURIComponent(net)); const j=await r.json(); list=(j&&j.tokens)||[]; }catch(e){ list=[]; } }
-    m3TokLists[side]=list;
-    const sel=$(side==='sell'?'#m3cSellTok':'#m3cBuyTok');
-    sel.innerHTML=list.map((t,i)=>'<option value="'+i+'">'+esc(t.symbol)+(t.representationOf?(' — '+t.representationOf):'')+'</option>').join('')
-      ||'<option value="">(nenhum token no registro desta rede — use o modo avançado)</option>';
+  // Seleção de moeda via MODAL (todas as redes numa lista só, com ícone) — não há mais escolha por rede.
+  const m3PickAsset={ sell:null, buy:null };
+  let m3Catalog=null; // catálogo unificado (nativos + tokens do registro + BTC nativo), montado 1x
+  // Ícone REAL da moeda: stablecoins e BTC por símbolo; nativo pela rede (netCatalog). Fallback: glifo.
+  function m3AssetIcon(net,symbol){
+    const s=String(symbol||'').toUpperCase();
+    if(s==='USDT') return (opStableIcons&&opStableIcons.USDT)||'/v1/chains/icon/tether';
+    if(s==='USDC') return (opStableIcons&&opStableIcons.USDC)||'/v1/chains/icon/usd-coin';
+    if(s==='BTC'||s.indexOf('BTC')>=0){ const b=(netCatalog||[]).find(x=>x.chainKey==='bitcoin'); return (b&&b.icon)||'/v1/chains/icon/bitcoin'; }
+    const c=(netCatalog||[]).find(x=>x.chainKey===net); return (c&&c.icon)||null;
   }
-  async function m3LoadTokens(net){
-    const nets=M3_NETS.map(n=>'<option value="'+n[0]+'"'+(n[0]===net?' selected':'')+'>'+n[1]+'</option>').join('');
-    $('#m3cSellNet').innerHTML=nets; $('#m3cBuyNet').innerHTML=nets;
-    await Promise.all([m3LoadTokensSide('sell',net),m3LoadTokensSide('buy',net)]);
-    if(m3TokLists.buy.length>1) $('#m3cBuyTok').value='1'; // sugere par distinto
-    $('#m3s2Net').textContent='rede por lado';
-    m3PlanHint();
+  function m3MkAsset(net,label,t){
+    return { network:net, networkLabel:label, symbol:t.symbol, contractOrMint:(t.contractOrMint==null?null:t.contractOrMint), decimals:t.decimals, representationOf:t.representationOf||null,
+      icon:m3AssetIcon(net,t.symbol), color:(OP_COLORS[net]||'#3b4a68') };
   }
-  // Token efetivo por lado: dropdown do registro ou campos manuais do modo avançado.
+  // Monta UMA lista com TODAS as moedas de TODAS as redes (nativas + tokens do registro + BTC nativo).
+  async function m3LoadCatalog(){
+    if(m3Catalog) return m3Catalog;
+    const lists=await Promise.all(M3_NETS.map(async n=>{
+      const net=n[0];
+      if(net==='bitcoin') return [M3_BTC_NATIVE];
+      try{ const j=await (await fetch(API+'/v1/tokens?network='+encodeURIComponent(net))).json(); return (j&&j.tokens)||[]; }catch(e){ return []; }
+    }));
+    const out=[];
+    M3_NETS.forEach((n,i)=>{
+      const net=n[0], label=n[1];
+      if(net!=='bitcoin'){ const g=M3_GAS[net]; if(g) out.push(m3MkAsset(net,label,{symbol:g.symbol,contractOrMint:null,decimals:g.decimals})); }
+      (lists[i]||[]).forEach(t=> out.push(m3MkAsset(net,label,t)) );
+    });
+    m3Catalog=out; return out;
+  }
+  const m3SameAsset=(a,b)=> !!a&&!!b&&a.network===b.network&&a.symbol===b.symbol&&((a.contractOrMint||'')===(b.contractOrMint||''));
+  function m3FieldInner(a){
+    if(!a) return '<span style="color:var(--ink-3)">Escolher moeda</span>'+OP_CHEV;
+    return netBadge({icon:a.icon,glyph:(a.symbol||'?').slice(0,3),color:a.color},22)+'<span class="tt">'+esc(a.symbol)+' · '+esc(a.networkLabel||a.network)+'</span>'+OP_CHEV;
+  }
+  function m3RenderFields(){
+    const sf=$('#m3cSellField'); if(sf) sf.innerHTML=m3FieldInner(m3PickAsset.sell);
+    const bf=$('#m3cBuyField'); if(bf) bf.innerHTML=m3FieldInner(m3PickAsset.buy);
+  }
+  // Pré-seleção padrão (par distinto) ao entrar no passo 2: Vendedor = SOL nativo; Comprador = USDC (Solana).
+  async function m3EnterAssets(){
+    await m3LoadCatalog();
+    // Garante os preços de mercado (conversão Vendedor→Comprador em tempo real).
+    if(!opPrices||!Object.keys(opPrices).length){ try{ opPrices=((await (await fetch(API+'/v1/chains/prices')).json()).prices)||{}; }catch(e){} }
+    if(!m3PickAsset.sell) m3PickAsset.sell=(m3Catalog||[]).find(a=>a.network==='solana'&&a.contractOrMint==null)||(m3Catalog||[])[0]||null;
+    if(!m3PickAsset.buy) m3PickAsset.buy=(m3Catalog||[]).find(a=>a.symbol==='USDC'&&a.network==='solana')||(m3Catalog||[]).find(a=>!m3SameAsset(a,m3PickAsset.sell))||null;
+    const nb=$('#m3s2Net'); if(nb) nb.textContent='todas as redes';
+    m3RenderFields(); m3PlanHint();
+  }
+  function openAssetModal(side){
+    const cur=m3PickAsset[side];
+    const list=m3Catalog||[];
+    const title=side==='sell'?'Moeda do Vendedor':'Moeda do Comprador';
+    const row=(a,i)=>'<div class="netrow'+(m3SameAsset(a,cur)?' sel':'')+'" data-ai="'+i+'">'+netBadge({icon:a.icon,glyph:(a.symbol||'?').slice(0,3),color:a.color},32)+'<div><div class="nm">'+esc(a.symbol)+(a.representationOf?(' <span style="color:var(--ink-3);font-weight:400">· '+esc(a.representationOf)+'</span>'):'')+'</div><div class="sub">'+esc(a.networkLabel||a.network)+'</div></div></div>';
+    $('#modalRoot').innerHTML='<div class="modal-back" id="amBack"><div class="modal"><h3>'+esc(title)+'</h3>'
+      +'<p style="color:var(--ink-3);font-size:13px;margin:4px 0 8px">Todas as moedas de todas as redes numa lista só.</p>'
+      +'<input class="inp" id="amSearch" placeholder="Filtrar por moeda ou rede… (opcional)" style="width:100%;margin-bottom:10px">'
+      +'<div class="netlist" id="amList">'+list.map(row).join('')+'</div>'
+      +'<div class="modal-actions" style="margin-top:14px"><button class="btn" id="amCancel">Fechar</button></div></div></div>';
+    $('#amBack').addEventListener('click',e=>{ if(e.target.id==='amBack') closeModal(); });
+    $('#amCancel').addEventListener('click',closeModal);
+    const bind=()=>$$('#amList [data-ai]').forEach(el=>el.addEventListener('click',()=>{
+      const a=list[Number(el.dataset.ai)]; const other=side==='sell'?'buy':'sell';
+      // Escolher o mesmo ativo do outro lado → o outro herda o ativo anterior deste (evita par igual).
+      if(m3SameAsset(a,m3PickAsset[other])) m3PickAsset[other]=cur;
+      m3PickAsset[side]=a; closeModal(); m3RenderFields(); m3PlanHint(); m3OnSellAmt();
+    }));
+    bind();
+    const sb=$('#amSearch'); if(sb) sb.addEventListener('input',()=>{
+      const q=sb.value.trim().toLowerCase();
+      $('#amList').innerHTML=list.map((a,i)=>({a,i})).filter(o=>!q||((o.a.symbol+' '+(o.a.networkLabel||o.a.network)+' '+(o.a.representationOf||'')).toLowerCase().indexOf(q)>=0)).map(o=>row(o.a,o.i)).join('');
+      bind();
+    });
+    setTimeout(()=>{ const s=$('#amSearch'); if(s) s.focus(); },30);
+  }
+  // Moeda efetiva por lado: seleção do modal ou campos manuais do modo avançado.
   function m3TokenOf(side){
     const adv=$('#m3cAdv').style.display!=='none';
     const a=k=>{ const el=document.querySelector('[data-m3adv="'+k+'"]'); return el?el.value.trim():''; };
-    const net=$(side==='sell'?'#m3cSellNet':'#m3cBuyNet').value||'solana';
-    if(adv&&a(side+'Contract')){ return { network:net, symbol:(a(side+'Sym')||'TOKEN').toUpperCase(), contractOrMint:a(side+'Contract'), decimals:Number(a(side+'Dec')||'18'), representationOf:null }; }
-    const sel=$(side==='sell'?'#m3cSellTok':'#m3cBuyTok'); const t=m3TokLists[side][Number(sel.value)];
-    return t?{network:net,symbol:t.symbol,contractOrMint:t.contractOrMint,decimals:t.decimals,representationOf:t.representationOf}:null;
+    if(adv&&a(side+'Contract')){ const net=a(side+'Net')||'ethereum'; return { network:net, symbol:(a(side+'Sym')||'TOKEN').toUpperCase(), contractOrMint:a(side+'Contract'), decimals:Number(a(side+'Dec')||'18'), representationOf:null }; }
+    const s=m3PickAsset[side];
+    return s?{network:s.network,symbol:s.symbol,contractOrMint:s.contractOrMint,decimals:s.decimals,representationOf:s.representationOf}:null;
   }
   // Plano de liquidação derivado dos lados — espelha deriveSettlementPlan do backend.
   function m3Plan(sell,buy){
@@ -2471,8 +2524,34 @@ img,svg,canvas,video{max-width:100%}
   function m3RenderChairRows(){ $('#m3cChairs').innerHTML=m3Roles().map(m3cChairRow).join(''); }
   function m3AmtPreview(){
     const sell=m3TokenOf('sell'), buy=m3TokenOf('buy');
-    if(sell){ $('#m3cSellAmtHint').textContent='Em '+sell.symbol+' ('+sell.decimals+' decimais)'; const b=humanToBase($('#m3cSellAmt').value,sell.decimals); $('#m3cSellBase').textContent=b?('= '+b+' unidades base'):''; }
-    if(buy){ $('#m3cBuyAmtHint').textContent='Em '+buy.symbol+' ('+buy.decimals+' decimais)'; const b=humanToBase($('#m3cBuyAmt').value,buy.decimals); $('#m3cBuyBase').textContent=b?('= '+b+' unidades base'):''; }
+    // Eco do valor DIGITADO (número humano + símbolo) — nunca as "unidades base" (valor × 10^decimais).
+    const echo=(amtSel,outSel,sym,dec)=>{ const out=$(outSel); if(!out) return; const v=($(amtSel).value||'').trim(); if(!v){ out.textContent=''; return; } out.textContent=humanToBase(v,dec)?('= '+v+' '+sym):'valor inválido'; };
+    if(sell){ $('#m3cSellAmtHint').textContent='Em '+sell.symbol; echo('#m3cSellAmt','#m3cSellBase',sell.symbol,sell.decimals); }
+    if(buy){ $('#m3cBuyAmtHint').textContent='Em '+buy.symbol; echo('#m3cBuyAmt','#m3cBuyBase',buy.symbol,buy.decimals); }
+  }
+  // Preço USD do ativo do wizard: stablecoin = 1; BTC (e representações) = preço do bitcoin;
+  // nativo = preço da rede (opPrices por chainKey). Token desconhecido = 0 (sem conversão).
+  function m3AssetPriceUsd(a){
+    if(!a) return 0;
+    const s=String(a.symbol||'').toUpperCase();
+    if(s==='USDT'||s==='USDC') return 1;
+    if(s==='BTC'||s.indexOf('BTC')>=0) return (opPrices.bitcoin&&opPrices.bitcoin.usd)||0;
+    if(a.contractOrMint==null) return (opPrices[a.network]&&opPrices[a.network].usd)||0;
+    return 0;
+  }
+  function m3Round(n,dec){ const d=Math.min(dec==null?6:dec,6); let s=Number(n).toFixed(d); if(s.indexOf('.')>=0) s=s.replace(/\.?0+$/,''); return s; }
+  // Preenche a quantidade do COMPRADOR em tempo real = quantidade do Vendedor × preço do token do
+  // Vendedor ÷ preço do token do Comprador (preço de mercado). Não atropela digitação manual no campo.
+  function m3OnSellAmt(){
+    const sell=m3TokenOf('sell'), buy=m3TokenOf('buy'), out=$('#m3cBuyAmt');
+    let auto=false, rate=null;
+    if(sell&&buy&&out&&document.activeElement!==out){
+      const sp=m3AssetPriceUsd(sell), bp=m3AssetPriceUsd(buy);
+      const v=parseFloat(String(($('#m3cSellAmt').value||'')).replace(',','.'));
+      if(isFinite(v)&&v>0&&sp>0&&bp>0){ out.value=m3Round(v*sp/bp,buy.decimals); auto=true; rate=sp/bp; }
+    }
+    m3AmtPreview();
+    if(auto){ const be=$('#m3cBuyBase'); if(be&&sell&&buy) be.textContent='= '+out.value+' '+buy.symbol+' · preço de mercado (1 '+sell.symbol+' ≈ '+m3Round(rate,buy.decimals)+' '+buy.symbol+')'; }
   }
   // Dados consolidados do wizard (validados a cada transição de passo).
   function m3WizardData(){
@@ -2512,9 +2591,9 @@ img,svg,canvas,video{max-width:100%}
       row('Cadeiras',chairsTxt),
       row('Liquidação','<span style="color:var(--blue)">'+esc(d.plan.txt)+'</span>'),
       row('Vendedor entrega',esc(d.sell.symbol)+' em '+esc(d.sell.network)+(d.sell.representationOf?' <span style="color:var(--ink-3)">· '+esc(d.sell.representationOf)+'</span>':'')),
-      row('Quantidade do Vendedor',d.amountInBase?esc($('#m3cSellAmt').value.trim())+' '+esc(d.sell.symbol)+' <span class="mono" style="color:var(--ink-3)">('+d.amountInBase+' base)</span>':'<span style="color:#fecaca">não informada</span>'),
+      row('Quantidade do Vendedor',d.amountInBase?esc($('#m3cSellAmt').value.trim())+' '+esc(d.sell.symbol):'<span style="color:#fecaca">não informada</span>'),
       row('Comprador entrega',esc(d.buy.symbol)+' em '+esc(d.buy.network)+(d.buy.representationOf?' <span style="color:var(--ink-3)">· '+esc(d.buy.representationOf)+'</span>':'')),
-      row('Quantidade do Comprador',d.buyerAmountInBase?esc($('#m3cBuyAmt').value.trim())+' '+esc(d.buy.symbol)+' <span class="mono" style="color:var(--ink-3)">('+d.buyerAmountInBase+' base)</span>':'<span style="color:#fecaca">não informada</span>'),
+      row('Quantidade do Comprador',d.buyerAmountInBase?esc($('#m3cBuyAmt').value.trim())+' '+esc(d.buy.symbol):'<span style="color:#fecaca">não informada</span>'),
       row('Deságio',bpsToPct(d.discountBps)+'% ('+d.discountBps+' bps)'),
       row('Comissão',bpsToPct(d.commissionBps)+'% ('+d.commissionBps+' bps) · paga por: '+payerTxt),
       row('Validade da mesa','60 minutos · janela on-chain da operação: 40 minutos'),
@@ -2771,16 +2850,16 @@ img,svg,canvas,video{max-width:100%}
       $('#m3dPlan').textContent=m.settlement?('Liquidação: '+m.settlement.summary):'';
       // Config em valores humanos: converte unidades base/bps usando os decimais das cadeiras.
       const sellCh=(m.chairs||[]).find(c=>c.role==='SELLER'), buyCh=(m.chairs||[]).find(c=>c.role==='BUYER');
-      if(sellCh) $('#m3dAmountHint').textContent='Em '+sellCh.expectedAsset.symbol+' ('+sellCh.expectedAsset.decimals+' decimais)';
-      if(buyCh) $('#m3dBuyAmountHint').textContent='Em '+buyCh.expectedAsset.symbol+' ('+buyCh.expectedAsset.decimals+' decimais)';
+      if(sellCh) $('#m3dAmountHint').textContent='Em '+sellCh.expectedAsset.symbol;
+      if(buyCh) $('#m3dBuyAmountHint').textContent='Em '+buyCh.expectedAsset.symbol;
       if(m.config){
         const setIf=(id,v)=>{ const el=$(id); if(el&&document.activeElement!==el) el.value=v; };
         setIf('#m3dAmount',m.config.amountInBase&&sellCh?baseToHuman(m.config.amountInBase,sellCh.expectedAsset.decimals):'');
         setIf('#m3dBuyAmount',m.config.buyerAmountInBase&&buyCh?baseToHuman(m.config.buyerAmountInBase,buyCh.expectedAsset.decimals):'');
         setIf('#m3dDiscount',bpsToPct(m.config.discountBps)); setIf('#m3dCommission',bpsToPct(m.config.commissionBps));
         setIf('#m3dPayer',m.config.commissionPayer||'SELLER');
-        if(sellCh&&m.config.amountInBase) $('#m3dAmountBase').textContent='= '+m.config.amountInBase+' base';
-        if(buyCh&&m.config.buyerAmountInBase) $('#m3dBuyAmountBase').textContent='= '+m.config.buyerAmountInBase+' base';
+        if(sellCh&&m.config.amountInBase) $('#m3dAmountBase').textContent='= '+baseToHuman(m.config.amountInBase,sellCh.expectedAsset.decimals)+' '+sellCh.expectedAsset.symbol;
+        if(buyCh&&m.config.buyerAmountInBase) $('#m3dBuyAmountBase').textContent='= '+baseToHuman(m.config.buyerAmountInBase,buyCh.expectedAsset.decimals)+' '+buyCh.expectedAsset.symbol;
       }
       const frozen=!!m.approvedAt;
       ['m3dAmount','m3dBuyAmount','m3dDiscount','m3dCommission','m3dPayer'].forEach(id=>{ const el=document.getElementById(id); if(el) el.disabled=frozen; });
@@ -2907,20 +2986,24 @@ img,svg,canvas,video{max-width:100%}
     const cc=$('#m3cCancel'); if(cc) cc.addEventListener('click',m3ExitCreate);
     // Navegação do wizard: 1 Mesa → 2 Ativos → 3 Valores/taxas → 4 Revisão.
     const on=(id,fn)=>{ const el=$(id); if(el) el.addEventListener('click',fn); };
-    on('#m3cNext',async()=>{ await m3LoadTokens($('#m3cSellNet')?.value||'solana'); m3Step(2); });
+    on('#m3cNext',async()=>{ await m3EnterAssets(); m3Step(2); });
     on('#m3cBack2',()=>m3Step(1));
-    on('#m3cNext2',()=>{ const d=m3WizardData(); if(d.err){ toast(d.err,'err'); return; } m3AmtPreview(); m3Step(3); });
+    on('#m3cNext2',()=>{ const d=m3WizardData(); if(d.err){ toast(d.err,'err'); return; } m3OnSellAmt(); m3Step(3); });
     on('#m3cBack',()=>m3Step(2));
     on('#m3cNext3',()=>{ if(m3RenderReview()) m3Step(4); else toast('Revise os campos destacados','err'); });
     on('#m3cBack4',()=>m3Step(3));
     on('#m3cSubmit',m3SubmitCreate);
-    ['#m3cSellAmt','#m3cBuyAmt'].forEach(id=>{ const el=$(id); if(el) el.addEventListener('input',m3AmtPreview); });
+    const sa=$('#m3cSellAmt'); if(sa) sa.addEventListener('input',m3OnSellAmt);   // vendedor → calcula comprador
+    const ba=$('#m3cBuyAmt'); if(ba) ba.addEventListener('input',m3AmtPreview);    // comprador: ajuste manual livre
     const adv=$('#m3cAdvLink'); if(adv) adv.addEventListener('click',e=>{ e.preventDefault(); const box=$('#m3cAdv'); box.style.display=box.style.display==='none'?'':'none'; });
     const md=$('#m3cMode'); if(md) md.addEventListener('change',m3RenderChairRows);
-    // Troca de rede por lado recarrega os tokens daquele lado e atualiza o plano de liquidação.
-    const sn=$('#m3cSellNet'); if(sn) sn.addEventListener('change',async()=>{ await m3LoadTokensSide('sell',sn.value); m3PlanHint(); });
-    const bn=$('#m3cBuyNet'); if(bn) bn.addEventListener('change',async()=>{ await m3LoadTokensSide('buy',bn.value); m3PlanHint(); });
-    ['#m3cSellTok','#m3cBuyTok'].forEach(id=>{ const el=$(id); if(el) el.addEventListener('change',m3PlanHint); });
+    // Escolha de moeda: campo clicável → modal com TODAS as moedas de TODAS as redes (ícones).
+    const sf=$('#m3cSellField'); if(sf) sf.addEventListener('click',()=>openAssetModal('sell'));
+    const bf=$('#m3cBuyField'); if(bf) bf.addEventListener('click',()=>openAssetModal('buy'));
+    // Modo avançado: popular as redes dos selects manuais e recalcular o plano ao mudar.
+    const advNets=M3_NETS.map(n=>'<option value="'+n[0]+'">'+esc(n[1])+'</option>').join('');
+    ['sellNet','buyNet'].forEach(k=>{ const el=document.querySelector('[data-m3adv="'+k+'"]'); if(el) el.innerHTML=advNets; });
+    ['sellNet','sellSym','sellContract','sellDec','buyNet','buySym','buyContract','buyDec'].forEach(k=>{ const el=document.querySelector('[data-m3adv="'+k+'"]'); if(el){ el.addEventListener('input',m3PlanHint); el.addEventListener('change',m3PlanHint); } });
     const sc=$('#m3dSaveCfg'); if(sc) sc.addEventListener('click',m3SaveCfg);
     const ap=$('#m3dApprove'); if(ap) ap.addEventListener('click',m3Approve);
     const sg=$('#m3dSign'); if(sg) sg.addEventListener('click',m3Sign);
@@ -2977,8 +3060,10 @@ img,svg,canvas,video{max-width:100%}
         +'<div style="margin-top:6px">'+pBadgePart(c)+'</div></div>';
     }).join('');
     const cfg=m.config;
+    const pSellCh=(m.chairs||[]).find(c=>c.role==='SELLER');
+    const cfgQty=(cfg&&cfg.amountInBase&&pSellCh&&pSellCh.decimals!=null)?(baseToHuman(cfg.amountInBase,pSellCh.decimals)+' '+(pSellCh.asset||'')):((cfg&&cfg.amountInBase)||'—');
     $('#pSummary').innerHTML = cfg
-      ? '<div class="r"><span class="k">Quantidade (unid. base)</span><span class="v mono">'+esc(cfg.amountInBase||'—')+'</span></div>'
+      ? '<div class="r"><span class="k">Quantidade</span><span class="v mono">'+esc(cfgQty)+'</span></div>'
         +'<div class="r"><span class="k">Deságio</span><span class="v">'+(cfg.discountBps/100).toLocaleString('pt-BR')+'%</span></div>'
         +'<div class="r"><span class="k">Comissão</span><span class="v">'+(cfg.commissionBps/100).toLocaleString('pt-BR')+'%</span></div>'
         +'<div class="r"><span class="k">Taxa da plataforma</span><span class="v">0,03%</span></div>'
@@ -3019,7 +3104,7 @@ img,svg,canvas,video{max-width:100%}
       +'<div class="kv">'
       +'<div class="r"><span class="k">Mesa</span><span class="v mono">'+esc(m.code)+'</span></div>'
       +'<div class="r"><span class="k">Participante</span><span class="v">'+esc((me.firstName||'')+' · '+(me.roleLabel||''))+'</span></div>'
-      +'<div class="r"><span class="k">Quantidade</span><span class="v mono">'+esc((m.config&&m.config.amountInBase)||'—')+'</span></div>'
+      +'<div class="r"><span class="k">Quantidade</span><span class="v mono">'+esc((function(){var sc=(m.chairs||[]).find(c=>c.role==='SELLER');return (m.config&&m.config.amountInBase&&sc&&sc.decimals!=null)?(baseToHuman(m.config.amountInBase,sc.decimals)+' '+(sc.asset||'')):((m.config&&m.config.amountInBase)||'—');})())+'</span></div>'
       +'<div class="r"><span class="k">Rede</span><span class="v">'+esc(m.networkLabel||m.network)+'</span></div>'
       +'<div class="r"><span class="k">Operação</span><span class="v mono">'+esc(d.id)+'</span></div>'
       +'</div>'
