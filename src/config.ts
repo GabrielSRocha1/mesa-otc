@@ -73,6 +73,9 @@ const Schema = z.object({
   // Conta DEMO do portal (apresentações): semeada no boot fora de produção.
   DEMO_EMAIL: z.string().default('demo@verumotc.com'),
   DEMO_PASSWORD: z.string().min(8).default('VerumDemo2026'),
+  // Demo: adia o financiamento do escrow para a 1ª assinatura (em vez de financiar ao criar o deal).
+  // Assim a mesa aprovada fica "não irreversível" e o botão "Reabrir para editar" aparece no demo.
+  DEMO_DEFER_FUNDING: z.coerce.boolean().default(false),
   LOG_LEVEL: z.string().default('info')
 });
 export type Config = z.infer<typeof Schema> & { sessionSecret: string; operators: Set<string>; identityMasterSecret: string };

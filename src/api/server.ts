@@ -52,7 +52,7 @@ export interface DevDemo { keyring: import('../portal/demo.js').DemoMesaKeyring;
 /** Modo EVM dev: contrato real (Sepolia/anvil), keyring de EOAs dev e mint dos tokens mock. */
 export interface DevEvmKeyring { addressFor(owner: string): string; accountByAddress(address: string): import('viem/accounts').PrivateKeyAccount | null }
 export interface DevEvm { chainId: string; escrow: string; tbtc: `0x${string}`; tusdt: `0x${string}`; explorerBase: string | null; keyring: DevEvmKeyring; mintToken: (token: `0x${string}`, to: string, amount: bigint) => Promise<void> }
-export interface ApiDeps { deals: DealEngine; settlement: SettlementEngine; price: PriceEngine; liquidity: LiquidityEngine; router: RouterEngine; registry: AssetRegistry; adapters?: AdapterRegistry; platformFeeBps: number; networkCostUsd: (n: Network) => Promise<string>; auth: WalletAuth; portal: PortalService; identity: IdentityService; identityDev?: { email: FakeEmailChannel; sms: FakeSmsChannel }; rooms: RoomService; proposals: ProposalService; mesa: MesaService; balanceReaders?: BalanceReaders; store: Store; audit: AuditLog; mesaHtmlPath?: string; portalHtmlPath?: string; conviteHtmlPath?: string; operacaoHtmlPath?: string; env: string; rateLimit?: { windowMs: number; max: number }; dev?: DevMint }
+export interface ApiDeps { deals: DealEngine; settlement: SettlementEngine; price: PriceEngine; liquidity: LiquidityEngine; router: RouterEngine; registry: AssetRegistry; adapters?: AdapterRegistry; platformFeeBps: number; networkCostUsd: (n: Network) => Promise<string>; auth: WalletAuth; portal: PortalService; identity: IdentityService; identityDev?: { email: FakeEmailChannel; sms: FakeSmsChannel }; rooms: RoomService; proposals: ProposalService; mesa: MesaService; balanceReaders?: BalanceReaders; store: Store; audit: AuditLog; mesaHtmlPath?: string; portalHtmlPath?: string; conviteHtmlPath?: string; operacaoHtmlPath?: string; env: string; rateLimit?: { windowMs: number; max: number }; dev?: DevMint; demoDeferFunding?: boolean }
 declare module 'fastify' { interface FastifyRequest { session: Session | null } }
 
 const NetworkZ = z.enum(['bitcoin', 'ethereum', 'solana', 'zcash', 'tron']); const RoleZ = z.enum(['SELLER', 'BUYER', 'PAYMASTER_1', 'PAYMASTER_2']);
@@ -432,7 +432,11 @@ export async function buildApi(deps: ApiDeps): Promise<FastifyInstance> {
     for (const p of parts) await deps.deals.connectWallet(created.id, p.role, p.address, p.address); // último connect verifica e congela termos
     const opened = await deps.deals.open(created.id, seller.address); // → AWAITING_SIGNATURES (turno do Vendedor)
     // Financiamento automático (dev) p/ liberar as assinaturas — em prod cada depositante financia pela própria carteira.
-    try { await deps.deals.fund(created.id, 'SELLER', seller.address); if (buyer) await deps.deals.fund(created.id, 'BUYER', buyer.address); } catch (e) { logger.warn({ dealId: created.id, err: (e as Error).message }, 'auto-funding dev falhou'); }
+    // Com DEMO_DEFER_FUNDING, o funding é adiado para a 1ª assinatura (signTurnOfDeal refaz): a mesa aprovada
+    // fica "não irreversível", habilitando o botão "Reabrir para editar" no demo.
+    if (!deps.demoDeferFunding) {
+      try { await deps.deals.fund(created.id, 'SELLER', seller.address); if (buyer) await deps.deals.fund(created.id, 'BUYER', buyer.address); } catch (e) { logger.warn({ dealId: created.id, err: (e as Error).message }, 'auto-funding dev falhou'); }
+    } else { logger.info({ dealId: created.id }, 'demo: funding adiado (DEMO_DEFER_FUNDING) — financia na 1ª assinatura'); }
     onCreated(created.id);
     await deps.audit.append({ actorType: 'user', actorId: seller.address, category: 'portal.mesa.deal.created', dealId: created.id, payload: { participants: parts.length } });
     return mesaDealView(opened);

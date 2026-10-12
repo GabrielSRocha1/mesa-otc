@@ -213,6 +213,30 @@ describe('API mesa v3 — fluxo completo', () => {
     await app.close();
   }, 120_000);
 
+  it('DEMO_DEFER_FUNDING: aprovar NÃO trava os fundos → mesa fica reabrível e editável de novo', async () => {
+    const { readers } = mockReaders();
+    const { app } = await makeApp({ balanceReaders: readers, env: { DEMO_DEFER_FUNDING: '1' } });
+    const pm = await registerPm(app, uniqueEmail('defer'));
+    const mesa = await createMesa(app, pm);
+    const seller = solWallet(); const buyer = solWallet();
+    const sChair = mesa.chairs.find(c => c.role === 'SELLER')!; const bChair = mesa.chairs.find(c => c.role === 'BUYER')!;
+    await inviteAndJoin(app, pm, mesa.mesaId, sChair.chairId, 'Gabriel', seller);
+    await inviteAndJoin(app, pm, mesa.mesaId, bChair.chairId, 'Beatriz', buyer);
+    await approveMesa(app, pm, mesa.mesaId);
+    // Funding adiado → operação aprovada, mas NÃO irreversível (admin view mostra o botão "Reabrir").
+    const av = (await app.api.inject({ method: 'GET', url: `/v1/portal/mesas/${mesa.mesaId}`, headers: pmHeaders(pm) })).json<{ irreversible: boolean; approvedAt: number }>();
+    expect(av.approvedAt).toBeTruthy();
+    expect(av.irreversible).toBe(false);
+    // Reabrir destrava (200) e a config volta a ser editável/persistida.
+    const re = await app.api.inject({ method: 'POST', url: `/v1/portal/mesas/${mesa.mesaId}/reopen`, headers: pmHeaders(pm), payload: {} });
+    expect(re.statusCode, re.body).toBe(200);
+    expect(re.json<{ approvedAt: number | null }>().approvedAt).toBeFalsy();
+    const edit = await app.api.inject({ method: 'PATCH', url: `/v1/portal/mesas/${mesa.mesaId}/config`, headers: pmHeaders(pm), payload: { discountBps: 450 } });
+    expect(edit.statusCode, edit.body).toBe(200);
+    expect(edit.json<{ discountBps: number }>().discountBps).toBe(450);
+    await app.close();
+  }, 120_000);
+
   it('cadastro alinhado aos contratos: operationCode, /v1/tokens, buyerAmountInBase e saldo do Comprador no approve', async () => {
     // Gás sempre rico; saldo de token (lado Comprador) alternável para isolar o motivo nominal.
     const tokenAmount = { value: 10 };
