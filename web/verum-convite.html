@@ -217,7 +217,18 @@ h1{font-size:22px;margin-bottom:8px}
         if(d.__verum_channel==='cs->page'&&d.msg) d=d.msg;          // modo extensão: desembrulha
         if(typeof d!=='object') return;
         var t=String(d.type||d.method||'msg');
-        if(/reject|denied|cancel/i.test(t)){ typesSeen[t]='(rejeitada)'; return; } // rejeição → timeout/erro
+        if(/reject|denied|cancel/i.test(t)){                          // rejeição EXPLÍCITA da carteira
+          typesSeen[t]='(rejeitada)';
+          var rz=String((d&&(d.reason||d.error))||'');
+          // Falha RÁPIDO (sem esperar o timeout de 120s): a carteira recusou ou não
+          // conseguiu assinar. WALLET_NOT_FOUND/FAILED logo após o PIN normalmente é
+          // sessão ainda não pronta — orienta a tentar de novo.
+          cleanup();
+          reject(walletErr(/not_found|wallet|failed/i.test(rz)
+            ? 'A carteira não conseguiu assinar (sessão indisponível). Reabra o convite e tente de novo.'
+            : 'Assinatura recusada na Verum Wallet.','SIGN_REJECTED'));
+          return;
+        }
         if(!/sign|msg|message|signature/i.test(t)) return;          // ignora connect/balance/etc.
         var sig=extractSolSig(d);
         if(sig){ resolve(sig); return; }
@@ -236,6 +247,7 @@ h1{font-size:22px;margin-bottom:8px}
       return sig;
     }catch(e){
       cleanup();
+      if(e&&e.code==='SIGN_REJECTED') throw e;                       // rejeição explícita → mensagem clara (sem o dump genérico)
       var seen=Object.keys(typesSeen).map(function(k){ return k+'='+typesSeen[k]; });
       throw walletErr('A Verum Wallet não devolveu a assinatura. '+attempts.join(' ‖ ')+(seen.length?(' · mensagens da carteira: '+seen.join(' ; ')):' · nenhuma mensagem da carteira capturada'),'BAD_SIG_SHAPE');
     }
