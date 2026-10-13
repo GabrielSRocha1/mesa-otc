@@ -243,6 +243,9 @@ img,svg{max-width:100%}
 /* Em telas de toque o "mostrar senha" fica visível; ao revelar, o app avisa que
    a proteção anti-gravação de tela deixa de valer enquanto a senha estiver exposta. */
 </style>
+<script>/* Rede de segurança: rejeição de promessa não-tratada não quebra a UI nem polui o console
+   (visível em dev via console.warn; neutralizada via preventDefault). Não mascara erro síncrono. */
+window.addEventListener('unhandledrejection',function(e){try{console.warn('[verum] promessa não tratada:',(e&&e.reason&&(e.reason.message||e.reason))||e);}catch(_){}try{e.preventDefault();}catch(_){}});</script>
 </head>
 <body>
 

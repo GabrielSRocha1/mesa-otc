@@ -67,6 +67,9 @@ h1{font-size:22px;margin-bottom:8px}
 .toast{padding:11px 16px;border-radius:11px;border:1px solid var(--line-2);background:#0d1730;font-size:13px;box-shadow:0 12px 30px rgba(0,0,0,.4);max-width:88vw}
 .toast.err{border-color:var(--red);color:#fecaca}.toast.ok{border-color:var(--green);color:#bbf7d0}
 </style>
+<script>/* Rede de segurança: rejeição de promessa não-tratada não quebra a UI nem polui o console
+   (visível em dev via console.warn; neutralizada via preventDefault). Não mascara erro síncrono. */
+window.addEventListener('unhandledrejection',function(e){try{console.warn('[verum] promessa não tratada:',(e&&e.reason&&(e.reason.message||e.reason))||e);}catch(_){}try{e.preventDefault();}catch(_){}});</script>
 </head>
 <body>
 <div class="card" id="card">

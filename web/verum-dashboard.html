@@ -690,6 +690,11 @@ img,svg,canvas,video{max-width:100%}
   .page-head h1{font-size:19px}
 }
 </style>
+<script>/* Rede de segurança: pollings/ações de fundo são best-effort; uma rejeição de promessa
+   não-tratada não deve quebrar a UI nem poluir o console (esp. dentro do dapp-browser da
+   Verum). Visível em dev (console.warn) e neutralizada (preventDefault). NÃO mascara erros
+   síncronos — só rejeições que o código já tratava como ignoráveis. */
+window.addEventListener('unhandledrejection',function(e){try{console.warn('[verum] promessa não tratada:',(e&&e.reason&&(e.reason.message||e.reason))||e);}catch(_){}try{e.preventDefault();}catch(_){}});</script>
 </head>
 <body>
 <div class="shell">
@@ -2288,7 +2293,7 @@ img,svg,canvas,video{max-width:100%}
     });
   }
   // Chamado quando a mesa é (re)carregada.
-  function opOnMesa(){ if(!$('#opParts')) return; opRenderParticipants(); opUpdateSellerCap().then(()=>{ if(typeof opRecalc==='function') opRecalc(); }); }
+  function opOnMesa(){ if(!$('#opParts')) return; opRenderParticipants(); opUpdateSellerCap().then(()=>{ if(typeof opRecalc==='function') opRecalc(); }).catch(()=>{}); }
 
   /* ---------- Configurações da mesa (persistentes em localStorage) ---------- */
   // A aba Configurações passa a ter estado real: os campos são restaurados ao

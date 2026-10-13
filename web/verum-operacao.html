@@ -173,6 +173,9 @@
     .op-steps{grid-template-columns:1fr!important}
   }
 </style>
+<script>/* Rede de segurança: rejeição de promessa não-tratada não quebra a UI nem polui o console
+   (visível em dev via console.warn; neutralizada via preventDefault). Não mascara erro síncrono. */
+window.addEventListener('unhandledrejection',function(e){try{console.warn('[verum] promessa não tratada:',(e&&e.reason&&(e.reason.message||e.reason))||e);}catch(_){}try{e.preventDefault();}catch(_){}});</script>
 </head>
 <body>
   <div class="wrap">
