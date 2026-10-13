@@ -157,15 +157,21 @@
   .spin{width:26px;height:26px;border:2px solid rgba(255,255,255,.2);border-top-color:#fff;border-radius:50%;animation:sp .7s linear infinite;margin:0 auto 12px}
   @keyframes sp{to{transform:rotate(360deg)}}
 
+  /* !important: .op-parts e .op-steps recebem grid-template-columns INLINE via JS
+     (repeat(N,1fr)); sem !important o inline venceria estas media queries e os cards
+     de cadeira ficariam em N colunas no celular, estourando a largura (overflow). */
   @media(max-width:980px){
     .op-layout{grid-template-columns:1fr}
     .op-aside{position:static}
-    .op-parts{grid-template-columns:repeat(2,1fr)}
+    .op-parts{grid-template-columns:repeat(2,1fr)!important}
     .op-flow{grid-template-columns:1fr}
     .op-swap{position:static;transform:none;margin:4px auto}
-    .op-steps{grid-template-columns:repeat(2,1fr);gap:18px 0}
+    .op-steps{grid-template-columns:repeat(2,1fr)!important;gap:18px 0}
   }
-  @media(max-width:560px){ .op-parts{grid-template-columns:1fr} }
+  @media(max-width:560px){
+    .op-parts{grid-template-columns:1fr!important}
+    .op-steps{grid-template-columns:1fr!important}
+  }
 </style>
 </head>
 <body>

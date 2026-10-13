@@ -122,6 +122,6 @@ const PWA_SW_PURGE = `<script>(function(){try{if('serviceWorker'in navigator){na
 /** Variante para o CONVITE: injeta manifest/ícones mas, em vez de registrar o SW, faz a
  *  auto-limpeza (desregistra SW antigo + limpa caches). O convite não precisa de PWA/offline. */
 export function injectPwaNoSW(html: string): string {
-  let out = html.includes('</head>') ? html.replace('</head>', PWA_HEAD_TAGS + PWA_SW_PURGE + '</head>') : PWA_SW_PURGE + PWA_HEAD_TAGS + html;
+  const out = html.includes('</head>') ? html.replace('</head>', PWA_HEAD_TAGS + PWA_SW_PURGE + '</head>') : PWA_SW_PURGE + PWA_HEAD_TAGS + html;
   return out;
 }

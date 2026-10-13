@@ -8,7 +8,7 @@
  * do portal, isolamento participante×admin e não-vazamento de segredos na public-view.
  */
 import { describe, it, expect } from 'vitest';
-import { makeApp, solWallet, prepareDeal, signAs, type Wallet, type Parts } from './helpers.js';
+import { makeApp, solWallet, prepareDeal, signAs, type Parts } from './helpers.js';
 import type { App } from '../src/app.js';
 import type { BalanceReaders } from '../src/mesa/balances.js';
 import { SIGNING_ORDER, type Role } from '../src/domain/types.js';
