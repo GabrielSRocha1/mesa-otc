@@ -784,11 +784,14 @@ export async function buildApi(deps: ApiDeps): Promise<FastifyInstance> {
       await deps.audit.append({ actorType: 'user', actorId: pm.id, category: 'mesa.aprovacao.bloqueada', dealId: null, payload: { mesaId, motivos } });
       throw new DomainError('VERSION_CONFLICT', 'Não foi possível aprovar a operação', { motivos });
     }
-    deps.mesa.markApproved(mesa, pm.id);
     const body = { ...b, amountInBase: mesa.config?.amountInBase ?? b.amountInBase, discountBps: mesa.config?.discountBps ?? b.discountBps, commissionBps: mesa.config?.commissionBps ?? b.commissionBps };
     // Plano HTLC_BTC → deal REAL com os ativos das CADEIRAS (BTC nativo ↔ token no escrow V2).
     // Demais planos seguem o caminho legado (base dev) até o wiring ESCROW_DIRECT/CROSS_CHAIN.
     const plan = deriveSettlementPlan(mesa.chairs);
+    // APPROVE ATÔMICO: cria a operação (deal) PRIMEIRO; só marca a mesa como aprovada se o deal
+    // nasceu de fato. Antes, markApproved rodava ANTES da criação e persistia — se a criação falhasse
+    // (ex.: ASSET_NOT_CANONICAL), a mesa ficava travada em "Aprovado" SEM deal e sem nada para assinar,
+    // escondendo o erro real. Agora, na falha, a mesa permanece READY_FOR_APPROVAL e o motivo sobe.
     const view = plan?.mode === 'HTLC_BTC'
       ? await createMesaHtlcDeal(mesa, body, id => deps.mesa.attachDeal(mesa, id))
       : await createMesaDealForParts(mesa.chairs.filter(c => c.wallet).map(c => {
@@ -796,6 +799,7 @@ export async function buildApi(deps: ApiDeps): Promise<FastifyInstance> {
         const sol = (w.addresses ?? []).find(a => a.network === 'solana')?.address ?? (w.network === 'solana' ? w.address : null);
         return { role: c.role as Role, address: sol ?? w.address };
       }), body, id => deps.mesa.attachDeal(mesa, id));
+    deps.mesa.markApproved(mesa, pm.id);
     void reply.code(201);
     return { approved: true, termsHash: mesa.termsHash, deal: view };
   });
