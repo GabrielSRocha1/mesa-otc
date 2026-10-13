@@ -1385,7 +1385,30 @@ img,svg,canvas,video{max-width:100%}
     if(!res.ok){ if(res.status===401||res.status===403) goToRegister(); const m=(data&&(data.message||data.error))||('Erro '+res.status); const e=new Error(m); e.status=res.status; e.code=(data&&data.error)||null; throw e; }
     return data;
   }
-  function clip(t){ try{ if(navigator.clipboard&&navigator.clipboard.writeText) return navigator.clipboard.writeText(t); }catch(e){} return Promise.resolve(); }
+  // Cópia resiliente: a Clipboard API (writeText) REJEITA sem permissão/gesto e dentro de
+  // iframes (ex.: dapp-browser da Verum). A rejeição escapava como "unhandled" porque os
+  // chamadores fazem clip(url);toast(). Aqui NUNCA rejeita e cai para execCommand('copy'),
+  // que funciona em mais contextos. Resolve com true/false (cópia bem-sucedida?).
+  function legacyCopy(t){
+    try{
+      var ta=document.createElement('textarea'); ta.value=t;
+      ta.setAttribute('readonly',''); ta.style.position='fixed'; ta.style.top='-1000px'; ta.style.opacity='0';
+      document.body.appendChild(ta); ta.focus(); ta.select(); try{ ta.setSelectionRange(0,ta.value.length); }catch(e){}
+      var ok=document.execCommand&&document.execCommand('copy');
+      document.body.removeChild(ta); return !!ok;
+    }catch(e){ return false; }
+  }
+  function clip(t){
+    return new Promise(function(resolve){
+      try{
+        if(navigator.clipboard&&navigator.clipboard.writeText){
+          navigator.clipboard.writeText(t).then(function(){ resolve(true); }).catch(function(){ resolve(legacyCopy(t)); });
+          return;
+        }
+      }catch(e){}
+      resolve(legacyCopy(t));
+    });
+  }
   function inviteUrl(token){ return location.origin+'/convite/'+encodeURIComponent(token); }
   // ── Seletor de rede via MODAL com ícones ─────────────────────────────────
   // Glifos por rede p/ o "ícone" (badge colorido). Fallback: ticker.

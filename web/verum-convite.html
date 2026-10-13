@@ -541,7 +541,7 @@ h1{font-size:22px;margin-bottom:8px}
         renderState('err','Não foi possível ler a assinatura',det,
           '<button class="btn" id="v3Copy" style="margin-top:14px">Copiar erro</button>'
           +'<button class="btn btn-primary" id="v3Retry" style="margin-top:10px">Tentar de novo</button>');
-        const c=$('#v3Copy'); if(c) c.addEventListener('click',()=>{ try{ navigator.clipboard.writeText(det); toast('Erro copiado','ok'); }catch(e){} });
+        const c=$('#v3Copy'); if(c) c.addEventListener('click',()=>{ try{ const p=navigator.clipboard&&navigator.clipboard.writeText(det); if(p&&p.catch) p.catch(()=>{}); toast('Erro copiado','ok'); }catch(e){} });
         const rt=$('#v3Retry'); if(rt) rt.addEventListener('click',()=>{ v3Render(); });
         return;
       }
