@@ -631,7 +631,14 @@ export async function buildApi(deps: ApiDeps): Promise<FastifyInstance> {
   const readers = deps.balanceReaders ?? defaultBalanceReaders();
   // Verificação de segurança de tokens: registro oficial + (opcional) API da Verum Wallet.
   // Em dev, os tokens de teste (tUSDT/tBTC Sepolia e mints locais da Solana) são canônicos.
-  const devAllowedTokens = deps.dev ? ['USDT1111111111111111111111111111111111111111', 'USDC1111111111111111111111111111111111111111', deps.dev.evm?.tusdt, deps.dev.evm?.tbtc] : [];
+  // Allowlist anti-golpe = TODOS os tokens do registro canônico da plataforma (deps.registry), que é
+  // a fonte da verdade curada pelo operador (ambiente certo: testnet ou mainnet). Antes a allowlist
+  // era manual (só alguns), e o fallback canônico olhava o registro de MAINNET — então, com adapters
+  // em testnet, o token de teste REGISTRADO (ex.: tUSDT Sepolia) era barrado como "possível golpe" e
+  // nenhuma operação de token aprovava. Agora anti-golpe e motor de deal usam o MESMO registro; um
+  // token NÃO registrado continua bloqueado (proteção preservada).
+  const registryAllowed = deps.registry.list().map(a => a.contractOrMint).filter((x): x is string => !!x);
+  const devAllowedTokens = [...registryAllowed, ...(deps.dev ? ['USDT1111111111111111111111111111111111111111', 'USDC1111111111111111111111111111111111111111', deps.dev.evm?.tusdt, deps.dev.evm?.tbtc] : [])];
   const tokenSecurity = process.env.VERUM_WALLET_SECURITY_URL
     ? composeCheckers(registryChecker({ allowed: devAllowedTokens }), verumWalletChecker(process.env.VERUM_WALLET_SECURITY_URL))
     : registryChecker({ allowed: devAllowedTokens });
@@ -682,14 +689,18 @@ export async function buildApi(deps: ApiDeps): Promise<FastifyInstance> {
     const tokens = registryData.tokens
       .filter(t => t.status === 'ACTIVE' && (chainId === undefined || t.chainId === chainId))
       .map(t => ({ symbol: t.symbol, contractOrMint: t.address, decimals: t.decimals, representationOf: ('representationOf' in t ? (t as { representationOf?: string }).representationOf : undefined) ?? null }));
-    // Em dev (Sepolia) os tokens reais de teste do escrow entram na lista para o wizard funcionar de ponta a ponta.
-    if (deps.dev?.evm && (!network || network === 'ethereum')) {
-      tokens.unshift(
-        { symbol: 'tUSDT', contractOrMint: deps.dev.evm.tusdt, decimals: 6, representationOf: 'USDT (teste Sepolia)' },
-        { symbol: 'tBTC', contractOrMint: deps.dev.evm.tbtc, decimals: 8, representationOf: 'BTC (teste Sepolia)' },
-      );
-    }
-    return { network: network ?? null, tokens };
+    // Tokens do REGISTRO REAL da plataforma (deps.registry) para a rede pedida — são os que o motor de
+    // deal aceita como canônicos E o anti-golpe libera (mesmo registro). Entram PRIMEIRO no dropdown
+    // para o wizard oferecer exatamente o que vai passar no approve (em testnet, os tokens de teste;
+    // em mainnet, os reais). Sem isto, o wizard mostrava só mainnet e a escolha era reprovada.
+    const seen = new Set<string>();
+    const real = deps.registry.list()
+      .filter(a => a.status === 'active' && a.contractOrMint && (!network || a.network === network))
+      .map(a => ({ symbol: a.code, contractOrMint: a.contractOrMint as string, decimals: a.decimals, representationOf: a.issuer ?? null }))
+      .filter(t => { const k = t.contractOrMint.toLowerCase(); if (seen.has(k)) return false; seen.add(k); return true; });
+    // dedup: remove do catálogo mainnet os contratos já cobertos pelo registro real
+    const merged = [...real, ...tokens.filter(t => !t.contractOrMint || !seen.has(String(t.contractOrMint).toLowerCase()))];
+    return { network: network ?? null, tokens: merged };
   });
 
   // --- admin (sessão do portal) ---
