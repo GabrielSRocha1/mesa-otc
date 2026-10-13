@@ -3225,6 +3225,7 @@ window.addEventListener('unhandledrejection',function(e){try{console.warn('[veru
   // operação (histórico/ativa) em vez da ativa da mesa. Somente leitura, exceto se for a vez do papel.
   const P_OP=(new URLSearchParams(location.search)).get('op')||'';
   let P_TOK='';
+  let pAutoTurnKey=null; // "ser puxado para assinar": abre a tela de assinatura 1x quando chega a vez
   (function(){ try{ const m=/[#&]pt=([^&]+)/.exec(location.hash); if(m){ P_TOK=decodeURIComponent(m[1]); try{ sessionStorage.setItem('verum_mesa_pt_'+P_MESA,P_TOK); localStorage.setItem('verum_mesa_pt_'+P_MESA,P_TOK); }catch(e){} history.replaceState(null,'',location.pathname+location.search); } if(!P_TOK&&P_MESA){ try{ P_TOK=sessionStorage.getItem('verum_mesa_pt_'+P_MESA)||localStorage.getItem('verum_mesa_pt_'+P_MESA)||''; }catch(e){} } }catch(e){} })();
   const P_ON=!!(P_MESA&&P_TOK);
   async function pApi(path,opts){
@@ -3280,6 +3281,17 @@ window.addEventListener('unhandledrejection',function(e){try{console.warn('[veru
       +(m.irreversible?'<br><span style="color:var(--amber)">🔒 Operação irreversível — fundos trancados; o contrato roda até a liquidação (preimage) ou o reembolso após o timelock.</span>':'');
     const myTurn=d&&d.state==='AWAITING_SIGNATURES'&&d.turnRole===me.role&&!(d.signed||[]).includes(me.role);
     $('#pSignBtn').style.display=myTurn?'':'none';
+    // "SER PUXADO PARA ASSINAR": na SUA vez, com a Verum Wallet presente, abre automaticamente a tela
+    // de revisão/assinatura — a pessoa só confirma (desliza) na carteira. Dispara 1x por turno
+    // (pAutoTurnKey) e nunca por cima de outro modal já aberto. Fora da vez, reseta a trava.
+    try{
+      if(myTurn){
+        const key=d.id+':'+me.role;
+        if(pAutoTurnKey!==key && solProvider() && !document.querySelector('#modalRoot #pRvBack')){
+          pAutoTurnKey=key; pReview();
+        }
+      } else if(!d || d.turnRole!==me.role){ pAutoTurnKey=null; }
+    }catch(e){}
   }
   function pTick(){
     const m=pDto; if(!m) return;
