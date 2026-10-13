@@ -76,6 +76,11 @@ const Schema = z.object({
   // Demo: adia o financiamento do escrow para a 1ª assinatura (em vez de financiar ao criar o deal).
   // Assim a mesa aprovada fica "não irreversível" e o botão "Reabrir para editar" aparece no demo.
   DEMO_DEFER_FUNDING: z.coerce.boolean().default(false),
+  // Web Push (notificação "é sua vez de assinar"). Sem as chaves → push simplesmente desligado
+  // (degradação graciosa). Gere com `npx web-push generate-vapid-keys`.
+  VAPID_PUBLIC_KEY: z.string().optional(),
+  VAPID_PRIVATE_KEY: z.string().optional(),
+  VAPID_SUBJECT: z.string().default('mailto:suporte@verumcrypto.com'),
   LOG_LEVEL: z.string().default('info')
 });
 export type Config = z.infer<typeof Schema> & { sessionSecret: string; operators: Set<string>; identityMasterSecret: string };

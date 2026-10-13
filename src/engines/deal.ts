@@ -43,7 +43,7 @@ export const CreateDealInput = z.object({
 });
 export type CreateDealInputT = z.infer<typeof CreateDealInput>;
 
-export interface DealEngineConfig { env: Environment; platformFeeBps: number; paymasterShareBps: number; treasury: string; networkCostUsd: (n: Network) => Promise<string>; execMarginMs: number; defaultExpiresSec: number; /** Preimage HTLC fixa (hex 32B) — só para o runner de swap RESUMÍVEL em testnet: permite recriar a deal com o MESMO htlcHash de um lock já confirmado. Em produção NUNCA é setada (preimage é aleatória por deal). */ htlcPreimageHex?: string }
+export interface DealEngineConfig { env: Environment; platformFeeBps: number; paymasterShareBps: number; treasury: string; networkCostUsd: (n: Network) => Promise<string>; execMarginMs: number; defaultExpiresSec: number; /** Preimage HTLC fixa (hex 32B) — só para o runner de swap RESUMÍVEL em testnet: permite recriar a deal com o MESMO htlcHash de um lock já confirmado. Em produção NUNCA é setada (preimage é aleatória por deal). */ htlcPreimageHex?: string; /** Chamado (best-effort) quando a VEZ de assinar passa para um novo papel (deal.turnRole != null) — usado p/ notificar "é sua vez" (Web Push). Nunca deve lançar. */ onTurnChange?: (deal: Deal) => void }
 export interface DealEngineDeps { store: Store; registry: AssetRegistry; adapters: AdapterRegistry; price: PriceEngine; liquidity: LiquidityEngine; router: RouterEngine; signature: SignatureEngine; risk: RiskEngine; audit: AuditLog; config: DealEngineConfig; now?: () => number }
 
 export interface DealEventMsg { type: string; dealId: string; state: DealState; at: number; payload: Record<string, unknown> }
@@ -88,6 +88,8 @@ export class DealEngine {
     const next = this.nextTurn(deal);
     deal.turnRole = next;
     deal.turnExpiresAt = next ? Math.min(this.now() + SIGNER_WINDOW_MS, deal.expiresAt) : null;
+    // Notifica "é sua vez" (Web Push) — best-effort, nunca quebra a transição de estado.
+    if (next) { try { this.d.config.onTurnChange?.(deal); } catch { /* notificação é opcional */ } }
   }
   /** Vez atual expirou (assinante não assinou dentro dos 5 min dele)? */
   private turnExpired(deal: Deal): boolean { return deal.state === 'AWAITING_SIGNATURES' && deal.turnExpiresAt != null && this.now() >= deal.turnExpiresAt; }

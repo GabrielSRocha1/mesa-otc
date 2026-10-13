@@ -34,12 +34,14 @@
     "tronweb": "^6.5.1",
     "tweetnacl": "^1.0.3",
     "viem": "^2.56.8",
+    "web-push": "^3.6.7",
     "zod": "^4.6.5"
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",
     "@types/node": "^26.6.2",
     "@types/pg": "^8.23.1",
+    "@types/web-push": "^3.6.4",
     "@types/ws": "^8.18.1",
     "eslint": "^10.11.0",
     "jsdom": "^30.1.1",

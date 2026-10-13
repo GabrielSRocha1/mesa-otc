@@ -42,6 +42,7 @@ import { deriveSettlementPlan } from '../mesa/settlementPlan.js';
 import type { MesaChair, MesaRecord } from '../mesa/types.js';
 import registryData from '../onchain/registry/registryData.js';
 import { registryChecker, verumWalletChecker, composeCheckers, validateMesaTokens } from '../mesa/antiscam.js';
+import type { PushService } from '../mesa/push.js';
 
 const MAX_STREAMS_PER_SESSION = 8; const streams = new Map<string, number>();
 
@@ -52,7 +53,7 @@ export interface DevDemo { keyring: import('../portal/demo.js').DemoMesaKeyring;
 /** Modo EVM dev: contrato real (Sepolia/anvil), keyring de EOAs dev e mint dos tokens mock. */
 export interface DevEvmKeyring { addressFor(owner: string): string; accountByAddress(address: string): import('viem/accounts').PrivateKeyAccount | null }
 export interface DevEvm { chainId: string; escrow: string; tbtc: `0x${string}`; tusdt: `0x${string}`; explorerBase: string | null; keyring: DevEvmKeyring; mintToken: (token: `0x${string}`, to: string, amount: bigint) => Promise<void> }
-export interface ApiDeps { deals: DealEngine; settlement: SettlementEngine; price: PriceEngine; liquidity: LiquidityEngine; router: RouterEngine; registry: AssetRegistry; adapters?: AdapterRegistry; platformFeeBps: number; networkCostUsd: (n: Network) => Promise<string>; auth: WalletAuth; portal: PortalService; identity: IdentityService; identityDev?: { email: FakeEmailChannel; sms: FakeSmsChannel }; rooms: RoomService; proposals: ProposalService; mesa: MesaService; balanceReaders?: BalanceReaders; store: Store; audit: AuditLog; mesaHtmlPath?: string; portalHtmlPath?: string; conviteHtmlPath?: string; operacaoHtmlPath?: string; env: string; rateLimit?: { windowMs: number; max: number }; dev?: DevMint; demoDeferFunding?: boolean }
+export interface ApiDeps { deals: DealEngine; settlement: SettlementEngine; price: PriceEngine; liquidity: LiquidityEngine; router: RouterEngine; registry: AssetRegistry; adapters?: AdapterRegistry; platformFeeBps: number; networkCostUsd: (n: Network) => Promise<string>; auth: WalletAuth; portal: PortalService; identity: IdentityService; identityDev?: { email: FakeEmailChannel; sms: FakeSmsChannel }; rooms: RoomService; proposals: ProposalService; mesa: MesaService; push?: PushService; balanceReaders?: BalanceReaders; store: Store; audit: AuditLog; mesaHtmlPath?: string; portalHtmlPath?: string; conviteHtmlPath?: string; operacaoHtmlPath?: string; env: string; rateLimit?: { windowMs: number; max: number }; dev?: DevMint; demoDeferFunding?: boolean }
 declare module 'fastify' { interface FastifyRequest { session: Session | null } }
 
 const NetworkZ = z.enum(['bitcoin', 'ethereum', 'solana', 'zcash', 'tron']); const RoleZ = z.enum(['SELLER', 'BUYER', 'PAYMASTER_1', 'PAYMASTER_2']);
@@ -950,6 +951,21 @@ export async function buildApi(deps: ApiDeps): Promise<FastifyInstance> {
     }
     const { mesa } = adminMesa(req, mesaId, false);
     return deps.mesa.mesaViewFor(mesa, { kind: 'admin' });
+  });
+  // Web Push — chave pública VAPID (p/ o front se inscrever). Vazia = push desligado (sem VAPID).
+  app.get('/v1/push/vapid', async () => ({ publicKey: deps.push?.publicKey ?? '', enabled: !!deps.push?.enabled }));
+  // Participante registra sua inscrição Web Push na própria cadeira (p/ receber "é sua vez de assinar").
+  app.post('/v1/mesas/:mesaId/push/subscribe', async req => {
+    const { mesaId } = req.params as { mesaId: string };
+    const claim = req.session?.mesa;
+    if (!claim || claim.mesaId !== mesaId) throw new DomainError('FORBIDDEN', 'Sessão de participante necessária');
+    const b = parse(z.object({ subscription: z.record(z.string(), z.unknown()) }), req.body);
+    const mesa = deps.mesa.mesaById(mesaId);
+    const chair = mesa?.chairs.find(c => c.chairId === claim.chairId);
+    if (!mesa || !chair) throw new DomainError('INVALID_INPUT', 'Cadeira não encontrada');
+    chair.pushSub = b.subscription;
+    deps.portal.persistMesas();
+    return { ok: true, enabled: !!deps.push?.enabled };
   });
   // Saldos para exibição a todos os participantes (indicadores suficiente/insuficiente).
   app.get('/v1/mesas/:mesaId/balances', async req => {

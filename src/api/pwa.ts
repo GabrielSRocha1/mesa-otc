@@ -49,7 +49,7 @@ export const MANIFEST_JSON = JSON.stringify({
 
 /** Service worker — shell estático + offline; jamais cacheia API/HTML autenticado. */
 export const SW_JS = `/* VERUM OTC service worker */
-const CACHE = 'verum-otc-shell-v4'; // v4: força troca de SW (versão antiga presa servindo convite velho no dapp-browser)
+const CACHE = 'verum-otc-shell-v5'; // v5: SW com Web Push ("é sua vez de assinar") — força troca do SW antigo
 const SHELL = ['/offline.html', '/icons/verum.svg', '/manifest.webmanifest'];
 self.addEventListener('install', e => { e.waitUntil(caches.open(CACHE).then(c => c.addAll(SHELL)).then(() => self.skipWaiting())); });
 self.addEventListener('activate', e => { e.waitUntil(caches.keys().then(ks => Promise.all(ks.filter(k => k !== CACHE).map(k => caches.delete(k)))).then(() => self.clients.claim())); });
@@ -74,6 +74,22 @@ self.addEventListener('fetch', e => {
       return res;
     }).catch(() => cached || new Response('', { status: 504 }));
     return cached || net;
+  }));
+});
+/* Web Push "é sua vez de assinar": mostra a notificação; o clique abre (ou foca) a mesa — dentro do
+   navegador da Verum Wallet a página auto-abre a tela de assinatura na vez do participante. */
+self.addEventListener('push', e => {
+  let d = {}; try { d = e.data ? e.data.json() : {}; } catch (_) { d = {}; }
+  const title = d.title || 'VERUM OTC';
+  const opts = { body: d.body || 'É a sua vez de assinar.', tag: d.tag || 'verum-otc', data: { url: d.url || '/' }, icon: '/icons/verum.svg', badge: '/icons/verum.svg', renotify: true };
+  e.waitUntil(self.registration.showNotification(title, opts));
+});
+self.addEventListener('notificationclick', e => {
+  e.notification.close();
+  const url = (e.notification.data && e.notification.data.url) || '/';
+  e.waitUntil(self.clients.matchAll({ type: 'window', includeUncontrolled: true }).then(cl => {
+    for (const c of cl) { if (c.url.indexOf(url) >= 0 && 'focus' in c) return c.focus(); }
+    return self.clients.openWindow ? self.clients.openWindow(url) : null;
   }));
 });
 `;

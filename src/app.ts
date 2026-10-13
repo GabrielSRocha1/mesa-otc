@@ -37,6 +37,7 @@ import { verifyMessage } from 'viem';
 import { buildApi } from './api/server.js';
 import { CHALLENGE_TTL_MS } from './domain/constants.js';
 import { MesaService } from './mesa/mesaService.js';
+import { PushService, vapidFrom } from './mesa/push.js';
 import { metrics, logger } from './monitoring/metrics.js';
 import type { Config } from './config.js';
 import type { Deal, Participant, Role } from './domain/types.js';
@@ -176,7 +177,10 @@ export async function createApp(config: Config, o: AppOverrides = {}): Promise<A
   const price = new PriceEngine(priceSources, undefined, now); const liquidity = new LiquidityEngine(liquiditySources, undefined, now);
   const router = new RouterEngine(adapters); const signature = new SignatureEngine(store, config.OTC_ENV, escrowByChain, now);
   const risk = new RiskEngine(store, o.screening ?? new DenylistScreening(new Set(o.denylist ?? [])), { maxDealUsd: config.MAX_DEAL_USD, maxWalletDailyUsd: config.MAX_DEAL_USD * 5, maxOpenDealsPerWallet: 10 }, now);
-  const deals = new DealEngine({ store, registry, adapters, price, liquidity, router, signature, risk, audit, now, config: { env: config.OTC_ENV, platformFeeBps: config.PLATFORM_FEE_BPS, paymasterShareBps: config.PAYMASTER_SHARE_BPS, treasury: config.TREASURY_ADDRESS, networkCostUsd: async n => adapters.require(n).estimateCostUsd('settle'), execMarginMs: config.EXEC_MARGIN_MS, defaultExpiresSec: 3600, ...(o.htlcPreimageHex ? { htlcPreimageHex: o.htlcPreimageHex } : {}) } });
+  // Hook mutável "é sua vez" (Web Push): o DealEngine é criado ANTES de portal/mesa/push, então o
+  // callback real é atribuído depois (ver notifyTurn abaixo). Best-effort, nunca lança.
+  let notifyTurn: (dealId: string, role: string) => void = () => {};
+  const deals = new DealEngine({ store, registry, adapters, price, liquidity, router, signature, risk, audit, now, config: { env: config.OTC_ENV, platformFeeBps: config.PLATFORM_FEE_BPS, paymasterShareBps: config.PAYMASTER_SHARE_BPS, treasury: config.TREASURY_ADDRESS, networkCostUsd: async n => adapters.require(n).estimateCostUsd('settle'), execMarginMs: config.EXEC_MARGIN_MS, defaultExpiresSec: 3600, onTurnChange: (deal) => { if (deal.turnRole) notifyTurn(deal.id, deal.turnRole); }, ...(o.htlcPreimageHex ? { htlcPreimageHex: o.htlcPreimageHex } : {}) } });
   // o simulador precisa do envelope para verificar: registra a Deal por hash quando os termos congelam
   // mapa limitado: só Deals com termos congelados e não terminais (sem vazamento de memória em runs longos)
   deals.events.on('deal', (ev: { dealId: string; type: string; state: string }) => { void (async () => { const d = await store.getDeal(ev.dealId); if (!d?.hash) return; if (['SETTLED', 'REFUNDED', 'CANCELLED', 'BLOCKED', 'EXPIRED'].includes(ev.state)) verifierDealRef.delete(d.hash.dealHash); else verifierDealRef.set(d.hash.dealHash, d); if (verifierDealRef.size > 10_000) verifierDealRef.delete(verifierDealRef.keys().next().value as string); })(); });
@@ -249,7 +253,18 @@ export async function createApp(config: Config, o: AppOverrides = {}): Promise<A
   const proposals = new ProposalService({ deals, now, audit, notifier: { notify: dealId => logger.info({ dealId }, 'atualização de proposta de termos') } });
   // Mesas multi-instância (v3): cadeiras + convites por cadeira + prova de posse na conexão.
   const mesa = new MesaService({ portal, store, audit, auth, getDeal: id => store.getDeal(id), baseUrl: `https://${config.APP_DOMAIN}`, now });
-  const api = await buildApi({ deals, settlement, price, liquidity, router, registry, adapters, platformFeeBps: config.PLATFORM_FEE_BPS, mesa, networkCostUsd: async n => adapters.require(n).estimateCostUsd('settle'), auth, portal, identity, identityDev, rooms, proposals, store, audit, balanceReaders: o.balanceReaders, mesaHtmlPath: config.MESA_HTML_PATH, portalHtmlPath: config.PORTAL_HTML_PATH, conviteHtmlPath: config.CONVITE_HTML_PATH, operacaoHtmlPath: config.OPERACAO_HTML_PATH, env: config.OTC_ENV, demoDeferFunding: config.DEMO_DEFER_FUNDING, rateLimit: { windowMs: 60_000, max: config.OTC_ENV === 'dev' ? 100_000 : 120 }, dev: local ? { solanaChainId: adapters.require('solana').chain.chainId, mint: (a, c, amt) => local!.solana.mint(a, c, amt), demo, ensureOnChain, evm: verumEvm && verumEvmKeyring && verumEvmCfg ? { chainId: String(verumEvmCfg.chainId), escrow: verumEvmCfg.escrow, tbtc: verumEvmCfg.tbtc, tusdt: verumEvmCfg.tusdt, explorerBase: verumEvmCfg.explorerBase, keyring: verumEvmKeyring, mintToken: (t, to, amt) => verumEvm!.mintToken(t, to, amt) } : undefined } : undefined });
+  // Web Push "é sua vez": serviço (gracioso se VAPID ausente) + hook real do DealEngine. Procura a
+  // mesa do deal, acha a cadeira do papel da vez e dispara a notificação para a inscrição dela.
+  const push = new PushService(vapidFrom(config), logger);
+  notifyTurn = (dealId, role) => {
+    try {
+      const m = Object.values(portal.mesas()).find(x => x.dealId === dealId);
+      const chair = m?.chairs.find(c => c.role === role);
+      if (!m || !chair?.pushSub) return;
+      void push.send(chair.pushSub, { title: 'É a sua vez de assinar', body: `Mesa ${m.code}: toque para abrir e assinar na Verum Wallet.`, url: `https://${config.APP_DOMAIN}/mesa?mesa=${m.mesaId}`, tag: `turn:${m.mesaId}` });
+    } catch { /* best-effort */ }
+  };
+  const api = await buildApi({ deals, settlement, price, liquidity, router, registry, adapters, platformFeeBps: config.PLATFORM_FEE_BPS, mesa, push, networkCostUsd: async n => adapters.require(n).estimateCostUsd('settle'), auth, portal, identity, identityDev, rooms, proposals, store, audit, balanceReaders: o.balanceReaders, mesaHtmlPath: config.MESA_HTML_PATH, portalHtmlPath: config.PORTAL_HTML_PATH, conviteHtmlPath: config.CONVITE_HTML_PATH, operacaoHtmlPath: config.OPERACAO_HTML_PATH, env: config.OTC_ENV, demoDeferFunding: config.DEMO_DEFER_FUNDING, rateLimit: { windowMs: 60_000, max: config.OTC_ENV === 'dev' ? 100_000 : 120 }, dev: local ? { solanaChainId: adapters.require('solana').chain.chainId, mint: (a, c, amt) => local!.solana.mint(a, c, amt), demo, ensureOnChain, evm: verumEvm && verumEvmKeyring && verumEvmCfg ? { chainId: String(verumEvmCfg.chainId), escrow: verumEvmCfg.escrow, tbtc: verumEvmCfg.tbtc, tusdt: verumEvmCfg.tusdt, explorerBase: verumEvmCfg.explorerBase, keyring: verumEvmKeyring, mintToken: (t, to, amt) => verumEvm!.mintToken(t, to, amt) } : undefined } : undefined });
   let timer: NodeJS.Timeout | null = null;
   let ticks = 0;
   const tick = async () => { try { const ids = await deals.expireDue(); if (ids.length) logger.info({ ids }, 'deals expiradas'); if (++ticks % 720 === 0) { const purged = await store.purge(now(), 24 * 3600_000); logger.info(purged, 'retenção'); } metrics.priceBreakerOpen.set(price.breakerState().open ? 1 : 0); for (const s of ['AWAITING_SIGNATURES', 'SETTLING', 'SETTLEMENT_VALIDATION', 'REFUNDING'] as const) metrics.activeDeals.set({ state: s }, (await store.listDeals({ states: [s] })).length); } catch (e) { logger.error({ err: (e as Error).message }, 'scheduler'); } };

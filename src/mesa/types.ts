@@ -22,6 +22,8 @@ export interface MesaChair {
   wallet: WalletLink | null;          // preenchido só após convite válido + challenge assinado
   firstName?: string;                 // o nome exibido é o que o PRÓPRIO participante digita
   connectedAt?: number;
+  /** Inscrição Web Push do participante (PWA) — p/ notificar "é sua vez de assinar". Opcional. */
+  pushSub?: unknown;
 }
 
 /** Configuração da operação (editável só pelo admin; congelada na aprovação). */
