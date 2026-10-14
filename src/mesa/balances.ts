@@ -34,13 +34,24 @@ export function defaultBalanceReaders(): BalanceReaders {
     tokens: async (network, address) => (await readTokenBalances(network, address).catch(() => [])).map(t => ({ symbol: t.symbol, contract: t.contract, amount: t.amount })),
     priceUsdOf: async network => { const chain = getChain(network); if (!chain) return null; const byId = await getPricesById().catch(() => ({} as Record<string, { usd: number | null }>)); return byId[chain.coingeckoId]?.usd ?? null; },
     tokenDirect: async (network, contract, address, decimals) => {
-      const c = getChain(network); if (!c || c.family !== 'evm') return null; // EVM por ora; demais caem no catálogo
+      const c = getChain(network); if (!c) return null;
       try {
-        const data = '0x70a08231' + address.toLowerCase().replace(/^0x/, '').padStart(64, '0');
-        const r = await fetch(c.endpoint, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'eth_call', params: [{ to: contract, data }, 'latest'] }) });
-        const j = await r.json() as { result?: string };
-        if (!j?.result || j.result === '0x') return null;
-        return Number(BigInt(j.result)) / 10 ** decimals;
+        if (c.family === 'evm') {
+          const data = '0x70a08231' + address.toLowerCase().replace(/^0x/, '').padStart(64, '0');
+          const r = await fetch(c.endpoint, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'eth_call', params: [{ to: contract, data }, 'latest'] }) });
+          const j = await r.json() as { result?: string };
+          if (!j?.result || j.result === '0x') return null;
+          return Number(BigInt(j.result)) / 10 ** decimals;
+        }
+        if (c.family === 'solana') {
+          // getTokenAccountsByOwner filtrado pelo mint: cobre mints de teste/custom fora da
+          // whitelist mainnet (que descartava o saldo real e bloqueava o precheck da mesa).
+          const r = await fetch(c.endpoint, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'getTokenAccountsByOwner', params: [address, { mint: contract }, { encoding: 'jsonParsed' }] }) });
+          const j = await r.json() as { result?: { value?: { account: { data: { parsed: { info: { tokenAmount: { amount: string } } } } } }[] } };
+          const accounts = j?.result?.value; if (!accounts) return null;
+          return Number(accounts.reduce((s, a) => s + BigInt(a.account.data.parsed.info.tokenAmount.amount), 0n)) / 10 ** decimals;
+        }
+        return null; // demais famílias caem no catálogo
       } catch { return null; }
     },
   };
