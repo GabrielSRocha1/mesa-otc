@@ -199,6 +199,13 @@ export class VerumEvmV2Adapter implements SettlementAdapter, ParticipantStepProv
     try { const h = await this.keeperWallet.writeContract({ address: token, abi: ERC20_ABI, functionName: 'mint', args: [to as Hex, amount], account: this.keeper, chain: this.viemChain }); await this.pub.waitForTransactionReceipt({ hash: h }); }
     catch (e) { this.fail('mint', e); }
   }
+  /** Ativa um token na allowlist on-chain do escrow V2 (addToken) — ex.: WETH p/ "ETH embrulhado".
+   *  Requer que o keeper seja o owner do contrato; senão a tx reverte (reportado ao chamador). */
+  async addToken(token: Hex, decimals: number, symbol: string): Promise<{ txHash: string }> {
+    const hash = await this.write('addToken', [token, decimals, symbol]);
+    await this.pub.waitForTransactionReceipt({ hash: hash as Hex });
+    return { txHash: hash };
+  }
 
   async verifyAsset(asset: CanonicalAsset): Promise<AssetVerification> {
     const checkedAt = Date.now(); const reasons: string[] = [];

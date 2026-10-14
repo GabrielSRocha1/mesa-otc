@@ -53,7 +53,7 @@ export interface DevDemo { keyring: import('../portal/demo.js').DemoMesaKeyring;
 /** Modo EVM dev: contrato real (Sepolia/anvil), keyring de EOAs dev e mint dos tokens mock. */
 export interface DevEvmKeyring { addressFor(owner: string): string; accountByAddress(address: string): import('viem/accounts').PrivateKeyAccount | null }
 export interface DevEvm { chainId: string; escrow: string; tbtc: `0x${string}`; tusdt: `0x${string}`; explorerBase: string | null; keyring: DevEvmKeyring; mintToken: (token: `0x${string}`, to: string, amount: bigint) => Promise<void> }
-export interface ApiDeps { deals: DealEngine; settlement: SettlementEngine; price: PriceEngine; liquidity: LiquidityEngine; router: RouterEngine; registry: AssetRegistry; adapters?: AdapterRegistry; platformFeeBps: number; networkCostUsd: (n: Network) => Promise<string>; auth: WalletAuth; portal: PortalService; identity: IdentityService; identityDev?: { email: FakeEmailChannel; sms: FakeSmsChannel }; rooms: RoomService; proposals: ProposalService; mesa: MesaService; push?: PushService; balanceReaders?: BalanceReaders; store: Store; audit: AuditLog; mesaHtmlPath?: string; portalHtmlPath?: string; conviteHtmlPath?: string; operacaoHtmlPath?: string; env: string; rateLimit?: { windowMs: number; max: number }; dev?: DevMint; demoDeferFunding?: boolean }
+export interface ApiDeps { deals: DealEngine; settlement: SettlementEngine; price: PriceEngine; liquidity: LiquidityEngine; router: RouterEngine; registry: AssetRegistry; adapters?: AdapterRegistry; platformFeeBps: number; networkCostUsd: (n: Network) => Promise<string>; auth: WalletAuth; portal: PortalService; identity: IdentityService; identityDev?: { email: FakeEmailChannel; sms: FakeSmsChannel }; rooms: RoomService; proposals: ProposalService; mesa: MesaService; push?: PushService; escrowAddToken?: (token: `0x${string}`, decimals: number, symbol: string) => Promise<{ txHash: string }>; balanceReaders?: BalanceReaders; store: Store; audit: AuditLog; mesaHtmlPath?: string; portalHtmlPath?: string; conviteHtmlPath?: string; operacaoHtmlPath?: string; env: string; rateLimit?: { windowMs: number; max: number }; dev?: DevMint; demoDeferFunding?: boolean }
 declare module 'fastify' { interface FastifyRequest { session: Session | null } }
 
 const NetworkZ = z.enum(['bitcoin', 'ethereum', 'solana', 'zcash', 'tron']); const RoleZ = z.enum(['SELLER', 'BUYER', 'PAYMASTER_1', 'PAYMASTER_2']);
@@ -1025,6 +1025,19 @@ export async function buildApi(deps: ApiDeps): Promise<FastifyInstance> {
     chair.pushSub = b.subscription;
     deps.portal.persistMesas();
     return { ok: true, enabled: !!deps.push?.enabled };
+  });
+  // Ativa um token (ex.: WETH) na allowlist ON-CHAIN do escrow V2 via keeper — habilita "ETH embrulhado".
+  // Só em dev/demo (sandbox testnet) e SÓ funciona se o keeper for o owner do contrato (senão a tx reverte).
+  // (wSOL não precisa disto: a Solana não tem allowlist on-chain.)
+  app.post('/v1/portal/escrow/add-token', async req => {
+    const token = portalToken(req);
+    if (deps.env !== 'dev' && !deps.portal.isDemoSession(token)) throw new DomainError('FORBIDDEN', 'Disponível apenas em dev ou na conta demo');
+    deps.portal.requirePayMaster(token);
+    const b = parse(z.object({ token: z.string().regex(/^0x[0-9a-fA-F]{40}$/), decimals: z.number().int().min(0).max(30), symbol: z.string().min(1).max(20) }), req.body);
+    if (!deps.escrowAddToken) throw new DomainError('SETTLEMENT_NOT_ALLOWED', 'addToken indisponível (escrow V2/keeper não configurado)');
+    const r = await deps.escrowAddToken(b.token as `0x${string}`, b.decimals, b.symbol);
+    await deps.audit.append({ actorType: 'user', actorId: 'portal', category: 'escrow.token.ativado', dealId: null, payload: { token: b.token, symbol: b.symbol } });
+    return { ok: true, ...r };
   });
   // Saldos para exibição a todos os participantes (indicadores suficiente/insuficiente).
   app.get('/v1/mesas/:mesaId/balances', async req => {

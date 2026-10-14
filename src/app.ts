@@ -46,6 +46,10 @@ import type { ApprovalSignature } from './adapters/types.js';
 export interface AppOverrides { autoSettle?: boolean; store?: Store; adapters?: SettlementAdapter[]; priceSources?: PriceSource[]; liquiditySources?: LiquiditySource[]; screening?: WalletScreening; now?: () => number; denylist?: string[]; balanceReaders?: import('./mesa/balances.js').BalanceReaders; btcAddressOf?: (dealId: string, role: Role) => Promise<string | null>; evmAddressOf?: (dealId: string, role: Role) => Promise<string | null>; /** Runner de swap resumível (testnet): preimage HTLC fixa p/ recriar a deal com o mesmo htlcHash de um lock confirmado. */ htlcPreimageHex?: string }
 export interface App { config: Config; store: Store; adapters: AdapterRegistry; local?: { evm: LocalChainAdapter; solana: LocalChainAdapter; bitcoin: LocalChainAdapter; tron?: LocalChainAdapter }; verumEvm?: VerumEvmAdapter; verumSolana?: VerumSolanaAdapter; verumTron?: VerumTronAdapter; verumEvmKeyring?: VerumEvmDevKeyring; tronKeyring?: TronDevKeyring; registry: AssetRegistry; price: PriceEngine; liquidity: LiquidityEngine; router: RouterEngine; signature: SignatureEngine; risk: RiskEngine; audit: AuditLog; deals: DealEngine; settlement: SettlementEngine; auth: WalletAuth; identity: IdentityService; rooms: RoomService; proposals: ProposalService; mesa: import('./mesa/mesaService.js').MesaService; api: Awaited<ReturnType<typeof buildApi>>; sources: { price: StaticPriceSource[]; liquidity: StaticLiquiditySource[] }; startScheduler(): void; stopScheduler(): void; close(): Promise<void> }
 
+/** Mint canônico do Wrapped SOL (mesmo em todos os clusters) — SOL como token SPL. */
+export const WSOL_MINT = 'So11111111111111111111111111111111111111112';
+/** WETH canônico na Sepolia (ETH embrulhado como ERC-20). */
+export const WETH_SEPOLIA = '0xfFf9976782d46CC05630D1f6eBAb18b2324d6B14';
 export const LOCAL_TOKENS = { usdtEth: '0x0000000000000000000000000000000000000001', usdcEth: '0x0000000000000000000000000000000000000002', usdtSol: 'USDT1111111111111111111111111111111111111111', usdcSol: 'USDC1111111111111111111111111111111111111111', usdtTron: 'TUsdtDemo1111111111111111111111111', btcTron: 'TBtcDemo11111111111111111111111111' };
 export const LOCAL_CODE_HASHES = { usdtEth: 'codehash-usdt-v1', usdcEth: 'codehash-usdc-v1' };
 export const LOCAL_PRICES: Record<string, number> = { 'bip122:regtest/slip44:0': 64_230.5, 'eip155:31337/slip44:60': 2_418.75, 'solana:localnet/slip44:501': 151.2, [`eip155:31337/erc20:${LOCAL_TOKENS.usdtEth}`]: 1.0002, [`eip155:31337/erc20:${LOCAL_TOKENS.usdcEth}`]: 0.9999, [`solana:localnet/token:${LOCAL_TOKENS.usdtSol}`]: 1.0001, [`solana:localnet/token:${LOCAL_TOKENS.usdcSol}`]: 1.0 };
@@ -86,7 +90,7 @@ export async function createApp(config: Config, o: AppOverrides = {}): Promise<A
   const dealDeps = { getDeal: (id: string) => store.getDeal(id) };
   let portalRef: PortalService | null = null; // preenchido quando o portal sobe (resolvedor BTC multichain)
   let demoKeyringRef: DemoMesaKeyring | null = null; // preenchido quando a conta demo é semeada (assina txs Solana dev)
-  let verumEvm: VerumEvmAdapter | undefined; let verumEvmKeyring: VerumEvmDevKeyring | undefined;
+  let verumEvm: VerumEvmAdapter | undefined; let verumEvmV2: VerumEvmV2Adapter | undefined; let verumEvmKeyring: VerumEvmDevKeyring | undefined;
   let verumSolana: VerumSolanaAdapter | undefined; let verumTron: VerumTronAdapter | undefined; let tronKeyring: TronDevKeyring | undefined;
   if (o.adapters) o.adapters.forEach(a => adapters.register(a));
   else { local = createLocalAdapters(verifier, now); adapters.register(local.evm).register(local.solana).register(local.bitcoin);
@@ -112,7 +116,7 @@ export async function createApp(config: Config, o: AppOverrides = {}): Promise<A
           }
           return null;
         });
-        adapters.register(new VerumEvmV2Adapter(verumEvmCfg, verumEvmKeyring ?? null, { ...dealDeps, evmAddressOf }));
+        verumEvmV2 = new VerumEvmV2Adapter(verumEvmCfg, verumEvmKeyring ?? null, { ...dealDeps, evmAddressOf }); adapters.register(verumEvmV2);
         logger.info({ chainId: verumEvmCfg.chainId, escrowV2: verumEvmCfg.escrowV2 }, 'modo VERUM_EVM_V2 ativo: escrow VerumOTCEscrowV2EVM (2–4 cadeiras + HTLC)');
       } else {
         verumEvm = new VerumEvmAdapter(verumEvmCfg, verumEvmKeyring ?? null, dealDeps); adapters.register(verumEvm);
@@ -152,6 +156,10 @@ export async function createApp(config: Config, o: AppOverrides = {}): Promise<A
   const tokens = verumEvmCfg ? { ...LOCAL_TOKENS, usdtEth: verumEvmCfg.tusdt } : LOCAL_TOKENS;
   const registry = defaultRegistry({ ethereum: adapters.require('ethereum').chain.chainId, solana: adapters.require('solana').chain.chainId, bitcoin: adapters.require('bitcoin').chain.chainId }, tokens, LOCAL_CODE_HASHES, { usdtSol: null, usdcSol: null });
   if (verumEvmCfg) registry.add({ code: 'BTC', network: 'ethereum', chainId: String(verumEvmCfg.chainId), contractOrMint: verumEvmCfg.tbtc, assetId: `eip155:${verumEvmCfg.chainId}/erc20:${verumEvmCfg.tbtc.toLowerCase()}`, decimals: 8, tokenStandard: 'ERC-20', issuer: 'Verum tBTC (mock)', status: 'active' });
+  // WETH (ETH embrulhado) na rede EVM: habilita "vender ETH" como token via ESCROW_DIRECT. Diferente da
+  // Solana, o escrow EVM TEM allowlist on-chain — o WETH precisa ser ativado via addToken (keeper owner).
+  // A carteira embrulha ETH→WETH (deposit) e desembrulha (withdraw) na ponta.
+  if (verumEvmCfg) registry.add({ code: 'WETH', network: 'ethereum', chainId: String(verumEvmCfg.chainId), contractOrMint: WETH_SEPOLIA, assetId: `eip155:${verumEvmCfg.chainId}/erc20:${WETH_SEPOLIA.toLowerCase()}`, decimals: 18, tokenStandard: 'ERC-20', issuer: 'Wrapped ETH (nativo embrulhado)', status: 'active' });
   // Ativos TRC-20 (simulado ou Nile real) — um deal Tron↔Tron usa USDT e tBTC na mesma rede.
   const tronChainId = adapters.require('tron').chain.chainId;
   const tronUsdt = tronCfg ? tronCfg.tusdt : LOCAL_TOKENS.usdtTron;
@@ -163,14 +171,18 @@ export async function createApp(config: Config, o: AppOverrides = {}): Promise<A
     const solChainId = adapters.require('solana').chain.chainId;
     registry.add({ code: 'USDT', network: 'solana', chainId: solChainId, contractOrMint: solCfg.tusdtMint, assetId: `solana:${solChainId}/token:${solCfg.tusdtMint}`, decimals: 6, tokenStandard: 'SPL', issuer: 'Verum tUSDT (devnet)', status: 'active' });
     registry.add({ code: 'BTC', network: 'solana', chainId: solChainId, contractOrMint: solCfg.tbtcMint, assetId: `solana:${solChainId}/token:${solCfg.tbtcMint}`, decimals: 8, tokenStandard: 'SPL', issuer: 'Verum tBTC (devnet)', status: 'active' });
+    // wSOL (SOL embrulhado): o programa Solana NÃO tem allowlist (aceita qualquer SPL válido), então
+    // basta registrar no backend — habilita "vender SOL" como token (wSOL) via ESCROW_DIRECT na Solana.
+    // A carteira embrulha SOL→wSOL antes de depositar e desembrulha na ponta.
+    registry.add({ code: 'wSOL', network: 'solana', chainId: solChainId, contractOrMint: WSOL_MINT, assetId: `solana:${solChainId}/token:${WSOL_MINT}`, decimals: 9, tokenStandard: 'SPL', issuer: 'Wrapped SOL (nativo embrulhado)', status: 'active' });
   }
   // Preços/profundidade dev: assetIds reais das testnets entram na fonte estática.
   const prices: Record<string, number> = { ...LOCAL_PRICES };
-  if (verumEvmCfg) { prices[`eip155:${verumEvmCfg.chainId}/erc20:${verumEvmCfg.tbtc.toLowerCase()}`] = 64_230.5; prices[`eip155:${verumEvmCfg.chainId}/erc20:${verumEvmCfg.tusdt.toLowerCase()}`] = 1.0002; prices[`eip155:${verumEvmCfg.chainId}/slip44:60`] = 2_418.75; }
+  if (verumEvmCfg) { prices[`eip155:${verumEvmCfg.chainId}/erc20:${verumEvmCfg.tbtc.toLowerCase()}`] = 64_230.5; prices[`eip155:${verumEvmCfg.chainId}/erc20:${verumEvmCfg.tusdt.toLowerCase()}`] = 1.0002; prices[`eip155:${verumEvmCfg.chainId}/slip44:60`] = 2_418.75; prices[`eip155:${verumEvmCfg.chainId}/erc20:${WETH_SEPOLIA.toLowerCase()}`] = 2_418.75; }
   prices[`tron:${tronChainId}/trc20:${tronUsdt}`] = 1.0001; prices[`tron:${tronChainId}/trc20:${tronTbtc}`] = 64_230.5;
   // BTC nativo na chainId REAL do adapter (testnet/mainnet via BITCOIN_*; o regtest já está em LOCAL_PRICES).
   prices[`bip122:${adapters.require('bitcoin').chain.chainId}/slip44:0`] = 64_230.5;
-  if (solCfg) { const solChainId = adapters.require('solana').chain.chainId; prices[`solana:${solChainId}/token:${solCfg.tusdtMint}`] = 1.0001; prices[`solana:${solChainId}/token:${solCfg.tbtcMint}`] = 64_230.5; }
+  if (solCfg) { const solChainId = adapters.require('solana').chain.chainId; prices[`solana:${solChainId}/token:${solCfg.tusdtMint}`] = 1.0001; prices[`solana:${solChainId}/token:${solCfg.tbtcMint}`] = 64_230.5; prices[`solana:${solChainId}/token:${WSOL_MINT}`] = 151.2; }
   const depth: Record<string, number> = Object.fromEntries(Object.keys(prices).map(k => [k, 8_000_000]));
   const priceSources = (o.priceSources as StaticPriceSource[] | undefined) ?? [new StaticPriceSource('Pyth', 1.0, prices), new StaticPriceSource('Chainlink', 1.0, prices), new StaticPriceSource('Coinbase', 0.8, prices), new StaticPriceSource('Kraken', 0.8, prices)];
   const liquiditySources = (o.liquiditySources as StaticLiquiditySource[] | undefined) ?? [new StaticLiquiditySource('Binance', 1.0, depth), new StaticLiquiditySource('Coinbase', 0.9, depth), new StaticLiquiditySource('Jupiter', 0.7, depth)];
@@ -264,7 +276,9 @@ export async function createApp(config: Config, o: AppOverrides = {}): Promise<A
       void push.send(chair.pushSub, { title: 'É a sua vez de assinar', body: `Mesa ${m.code}: toque para abrir e assinar na Verum Wallet.`, url: `https://${config.APP_DOMAIN}/mesa?mesa=${m.mesaId}`, tag: `turn:${m.mesaId}` });
     } catch { /* best-effort */ }
   };
-  const api = await buildApi({ deals, settlement, price, liquidity, router, registry, adapters, platformFeeBps: config.PLATFORM_FEE_BPS, mesa, push, networkCostUsd: async n => adapters.require(n).estimateCostUsd('settle'), auth, portal, identity, identityDev, rooms, proposals, store, audit, balanceReaders: o.balanceReaders, mesaHtmlPath: config.MESA_HTML_PATH, portalHtmlPath: config.PORTAL_HTML_PATH, conviteHtmlPath: config.CONVITE_HTML_PATH, operacaoHtmlPath: config.OPERACAO_HTML_PATH, env: config.OTC_ENV, demoDeferFunding: config.DEMO_DEFER_FUNDING, rateLimit: { windowMs: 60_000, max: config.OTC_ENV === 'dev' ? 100_000 : 120 }, dev: local ? { solanaChainId: adapters.require('solana').chain.chainId, mint: (a, c, amt) => local!.solana.mint(a, c, amt), demo, ensureOnChain, evm: verumEvm && verumEvmKeyring && verumEvmCfg ? { chainId: String(verumEvmCfg.chainId), escrow: verumEvmCfg.escrow, tbtc: verumEvmCfg.tbtc, tusdt: verumEvmCfg.tusdt, explorerBase: verumEvmCfg.explorerBase, keyring: verumEvmKeyring, mintToken: (t, to, amt) => verumEvm!.mintToken(t, to, amt) } : undefined } : undefined });
+  // Ativação de token na allowlist on-chain do escrow V2 (ex.: WETH) — só quando o V2 está ativo.
+  const escrowAddToken = verumEvmV2 ? ((t: `0x${string}`, d: number, s: string) => verumEvmV2!.addToken(t, d, s)) : undefined;
+  const api = await buildApi({ deals, settlement, price, liquidity, router, registry, adapters, platformFeeBps: config.PLATFORM_FEE_BPS, mesa, push, escrowAddToken, networkCostUsd: async n => adapters.require(n).estimateCostUsd('settle'), auth, portal, identity, identityDev, rooms, proposals, store, audit, balanceReaders: o.balanceReaders, mesaHtmlPath: config.MESA_HTML_PATH, portalHtmlPath: config.PORTAL_HTML_PATH, conviteHtmlPath: config.CONVITE_HTML_PATH, operacaoHtmlPath: config.OPERACAO_HTML_PATH, env: config.OTC_ENV, demoDeferFunding: config.DEMO_DEFER_FUNDING, rateLimit: { windowMs: 60_000, max: config.OTC_ENV === 'dev' ? 100_000 : 120 }, dev: local ? { solanaChainId: adapters.require('solana').chain.chainId, mint: (a, c, amt) => local!.solana.mint(a, c, amt), demo, ensureOnChain, evm: verumEvm && verumEvmKeyring && verumEvmCfg ? { chainId: String(verumEvmCfg.chainId), escrow: verumEvmCfg.escrow, tbtc: verumEvmCfg.tbtc, tusdt: verumEvmCfg.tusdt, explorerBase: verumEvmCfg.explorerBase, keyring: verumEvmKeyring, mintToken: (t, to, amt) => verumEvm!.mintToken(t, to, amt) } : undefined } : undefined });
   let timer: NodeJS.Timeout | null = null;
   let ticks = 0;
   const tick = async () => { try { const ids = await deals.expireDue(); if (ids.length) logger.info({ ids }, 'deals expiradas'); if (++ticks % 720 === 0) { const purged = await store.purge(now(), 24 * 3600_000); logger.info(purged, 'retenção'); } metrics.priceBreakerOpen.set(price.breakerState().open ? 1 : 0); for (const s of ['AWAITING_SIGNATURES', 'SETTLING', 'SETTLEMENT_VALIDATION', 'REFUNDING'] as const) metrics.activeDeals.set({ state: s }, (await store.listDeals({ states: [s] })).length); } catch (e) { logger.error({ err: (e as Error).message }, 'scheduler'); } };
