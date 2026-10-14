@@ -275,7 +275,15 @@ export async function createApp(config: Config, o: AppOverrides = {}): Promise<A
   // Propostas estruturadas de alteração de termos (§5.3/§6) — porta de entrada tipada para o amend.
   const proposals = new ProposalService({ deals, now, audit, notifier: { notify: dealId => logger.info({ dealId }, 'atualização de proposta de termos') } });
   // Mesas multi-instância (v3): cadeiras + convites por cadeira + prova de posse na conexão.
-  const mesa = new MesaService({ portal, store, audit, auth, getDeal: id => store.getDeal(id), baseUrl: `https://${config.APP_DOMAIN}`, now });
+  // Embrulho canônico por rede: SOL→wSOL com o adapter Solana real ativo (mesma condição do
+  // registro canônico do wSOL — no sim local o nativo segue o caminho legado); ETH→WETH só com o
+  // escrow V2 ativo (WETH precisa estar na allowlist on-chain via addToken). BTC fica de fora (HTLC nativo).
+  const nativeWrapOf = (network: string): { contractOrMint: string; decimals: number } | null => {
+    if (network === 'solana' && solCfg) return { contractOrMint: WSOL_MINT, decimals: 9 };
+    if (network === 'ethereum' && verumEvmCfg?.escrowV2) return { contractOrMint: WETH_SEPOLIA, decimals: 18 };
+    return null;
+  };
+  const mesa = new MesaService({ portal, store, audit, auth, getDeal: id => store.getDeal(id), baseUrl: `https://${config.APP_DOMAIN}`, now, nativeWrapOf });
   // Web Push "é sua vez": serviço (gracioso se VAPID ausente) + hook real do DealEngine. Procura a
   // mesa do deal, acha a cadeira do papel da vez e dispara a notificação para a inscrição dela.
   const push = new PushService(vapidFrom(config), logger);

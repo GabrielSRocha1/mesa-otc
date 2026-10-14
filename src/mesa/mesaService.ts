@@ -59,6 +59,10 @@ export interface MesaServiceDeps {
   baseUrl: string;
   walletDownloadUrl?: string;
   now?: () => number;
+  /** Embrulho canônico da moeda nativa (SOL→wSOL, ETH→WETH): o escrow é só-token, então a cadeira
+   *  criada com nativo vira o token embrulhado por baixo (símbolo exibido continua o nativo;
+   *  a tx de lock/depósito embrulha sozinha). null/ausente = rede sem embrulho (ex.: BTC → HTLC). */
+  nativeWrapOf?: (network: string) => { contractOrMint: string; decimals: number } | null;
 }
 
 export interface CreateMesaChairInput { role: MesaChairRole; expectedAsset: ChairAsset; label?: string }
@@ -95,7 +99,12 @@ export class MesaService {
     const chairs: MesaChair[] = input.chairs.map(c => {
       const asset = c.expectedAsset;
       if (!asset || typeof asset.symbol !== 'string' || typeof asset.decimals !== 'number') throw new DomainError('INVALID_INPUT', `Ativo esperado inválido na cadeira ${CHAIR_ROLE_LABEL[c.role]}`);
-      const chair: MesaChair = { chairId: 'ch_' + randomUUID(), role: c.role, expectedAsset: { network: asset.network || network, contractOrMint: asset.contractOrMint ?? null, decimals: asset.decimals, symbol: asset.symbol }, label: c.label?.trim() || undefined, wallet: null };
+      const net = asset.network || network;
+      // Nativo com embrulho canônico → vira o token por baixo (wSOL/WETH); o usuário continua
+      // vendo "SOL"/"ETH" e a tx de depósito embrulha sozinha — sem isso o approve recusa com
+      // "escrow é só-token" e o usuário não tem o que fazer na tela.
+      const wrap = asset.contractOrMint == null ? this.d.nativeWrapOf?.(net) ?? null : null;
+      const chair: MesaChair = { chairId: 'ch_' + randomUUID(), role: c.role, expectedAsset: wrap ? { network: net, contractOrMint: wrap.contractOrMint, decimals: wrap.decimals, symbol: asset.symbol } : { network: net, contractOrMint: asset.contractOrMint ?? null, decimals: asset.decimals, symbol: asset.symbol }, label: c.label?.trim() || undefined, wallet: null };
       // A cadeira Pay Master 1 é do próprio admin — já conectada com a wallet dele (quando houver).
       if (c.role === 'PAYMASTER_1' && pm.wallet) { chair.wallet = pm.wallet; chair.firstName = pm.name.split(/\s+/)[0]; chair.connectedAt = t; }
       return chair;

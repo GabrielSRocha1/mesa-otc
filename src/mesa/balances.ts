@@ -49,15 +49,7 @@ export function defaultBalanceReaders(): BalanceReaders {
           const r = await fetch(c.endpoint, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'getTokenAccountsByOwner', params: [address, { mint: contract }, { encoding: 'jsonParsed' }] }) });
           const j = await r.json() as { result?: { value?: { account: { data: { parsed: { info: { tokenAmount: { amount: string } } } } } }[] } };
           const accounts = j?.result?.value; if (!accounts) return null;
-          let amount = Number(accounts.reduce((s, a) => s + BigInt(a.account.data.parsed.info.tokenAmount.amount), 0n)) / 10 ** decimals;
-          // wSOL: SOL nativo também cobre o exigido — a tx de lock/depósito embrulha (SyncNative)
-          // na hora. Sem isso, quem tem SOL mas nunca embrulhou seria barrado com a ATA zerada.
-          if (contract === 'So11111111111111111111111111111111111111112') {
-            const n = await fetch(c.endpoint, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'getBalance', params: [address] }) });
-            const nj = await n.json() as { result?: { value?: number } };
-            if (typeof nj?.result?.value === 'number') amount += Math.max(0, nj.result.value / 1e9 - 0.01); // reserva ~0.01 SOL p/ gás
-          }
-          return amount;
+          return Number(accounts.reduce((s, a) => s + BigInt(a.account.data.parsed.info.tokenAmount.amount), 0n)) / 10 ** decimals;
         }
         return null; // demais famílias caem no catálogo
       } catch { return null; }
@@ -66,6 +58,9 @@ export function defaultBalanceReaders(): BalanceReaders {
 }
 
 const fmt = (n: number): string => n.toLocaleString('pt-BR', { maximumFractionDigits: 6 });
+
+/** Mint nativo embrulhado (wSOL) — igual em todos os clusters. */
+const WSOL_MINT = 'So11111111111111111111111111111111111111112';
 
 /**
  * Revalida on-chain o saldo do ativo exigido e o gás de cada cadeira conectada.
@@ -104,6 +99,9 @@ export async function validateChairBalances(mesa: MesaRecord, readers: BalanceRe
         if (direct != null) assetAmount = direct;
         else { const toks = await readers.tokens(net, address); const hit = toks.find(t => t.contract?.toLowerCase() === chair.expectedAsset.contractOrMint?.toLowerCase() || t.symbol === chair.expectedAsset.symbol); assetAmount = hit?.amount ?? 0; }
       }
+      // wSOL: SOL nativo também cobre o exigido (a tx de lock/depósito embrulha o que faltar via
+      // SyncNative) — sem isso quem tem SOL mas nunca embrulhou é barrado com a ATA zerada.
+      if (chair.expectedAsset.contractOrMint === WSOL_MINT && native != null) assetAmount = (assetAmount ?? 0) + Math.max(0, native.amount - 0.01);
       if (assetAmount == null) { assetOk = false; failures.push(`${who}: não foi possível ler o saldo de ${chair.expectedAsset.symbol}`); }
       else { assetOk = assetAmount >= required; if (!assetOk) failures.push(`${who}: saldo de ${chair.expectedAsset.symbol} insuficiente (faltam ${fmt(required - assetAmount)})`); }
     }

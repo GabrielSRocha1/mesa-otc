@@ -153,7 +153,15 @@ export class SolanaChainAdapter implements ChainAdapter {
   private async tokenBalance(owner: string, mint: string): Promise<bigint> {
     const program = await this.tokenProgramFor(mint);
     const ata = associatedTokenAddress(pk(owner), pk(mint), program);
-    try { return BigInt((await this.conn.getTokenAccountBalance(ata, this.commitment)).value.amount); } catch { return 0n; }
+    let bal = 0n;
+    try { bal = BigInt((await this.conn.getTokenAccountBalance(ata, this.commitment)).value.amount); } catch { /* ATA inexistente */ }
+    // wSOL: SOL nativo também conta (a tx de depósito embrulha o que faltar) — reserva p/ gás.
+    if (mint === WSOL_MINT) {
+      const lamports = BigInt(await this.conn.getBalance(pk(owner), this.commitment));
+      const reserve = 10_000_000n; // 0.01 SOL
+      bal += lamports > reserve ? lamports - reserve : 0n;
+    }
+    return bal;
   }
 
   // ----------------------------------------------------------------- construção de instruções
@@ -216,7 +224,9 @@ export class SolanaChainAdapter implements ChainAdapter {
           meta(treasury, false), meta(associatedTokenAddress(treasury, mint, program), true),
           meta(program, false), meta(ASSOCIATED_TOKEN_PROGRAM_ID, false), meta(SystemProgram.programId, false),
         ];
-        return this.toUnsigned(terms.seller, this.ix("seller_sign", keys, data), "seller_sign (deposita principal + paga fee)");
+        // Vendedor de "SOL": embrulha na própria tx o principal + fee que faltam na ATA de wSOL.
+        const sellerWrap = terms.sellerAsset === WSOL_MINT ? await this.wrapSolIxs(seller, terms.sellerAmount + computeFee(terms.sellerAmount, terms.platformFeeBps)) : [];
+        return this.toUnsigned(terms.seller, [...sellerWrap, this.ix("seller_sign", keys, data)], "seller_sign (deposita principal + paga fee)");
       }
       case Role.PAYMASTER_01:
       case Role.PAYMASTER_02: {
@@ -235,7 +245,8 @@ export class SolanaChainAdapter implements ChainAdapter {
           meta(associatedTokenAddress(trade, mint, program), true),
           meta(program, false), meta(ASSOCIATED_TOKEN_PROGRAM_ID, false), meta(SystemProgram.programId, false),
         ];
-        return this.toUnsigned(terms.buyer, this.ix("buyer_sign", keys, data), "buyer_sign (deposita principal)");
+        const buyerWrap = terms.buyerAsset === WSOL_MINT ? await this.wrapSolIxs(buyer, terms.buyerAmount) : [];
+        return this.toUnsigned(terms.buyer, [...buyerWrap, this.ix("buyer_sign", keys, data)], "buyer_sign (deposita principal)");
       }
       default: throw new Error(`role inválida ${approval.role}`);
     }
