@@ -22,6 +22,8 @@ import type { ChainAdapter, Confirmation, OnChainTrade, PreflightReport, SubmitR
 export const TOKEN_PROGRAM_ID = new PublicKey("TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA");
 export const TOKEN_2022_PROGRAM_ID = new PublicKey("TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb");
 export const ASSOCIATED_TOKEN_PROGRAM_ID = new PublicKey("ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL");
+/** Mint nativo (wSOL) — igual em todos os clusters; habilita o embrulho automático no htlc_lock. */
+export const WSOL_MINT = "So11111111111111111111111111111111111111112";
 
 const SEEDS = { config: "config", token: "token", trade: "trade", nonce: "nonce", attest: "attest", htlc: "htlc" } as const;
 
@@ -159,8 +161,10 @@ export class SolanaChainAdapter implements ChainAdapter {
     return new TransactionInstruction({ programId: this.programId, keys, data: concat(anchorDiscriminator("global", name), data) });
   }
 
-  private async toUnsigned(signer: string | "ANY", ix: TransactionInstruction, description: string, feePayer?: PublicKey): Promise<UnsignedTx> {
-    const tx = new Transaction().add(ix);
+  private async toUnsigned(signer: string | "ANY", ixOrIxs: TransactionInstruction | TransactionInstruction[], description: string, feePayer?: PublicKey): Promise<UnsignedTx> {
+    const ixs = Array.isArray(ixOrIxs) ? ixOrIxs : [ixOrIxs];
+    const ix = ixs[ixs.length - 1] as TransactionInstruction; // a do programa (payload expõe só ela)
+    const tx = new Transaction().add(...ixs);
     const payer = feePayer ?? (signer === "ANY" ? this.executor?.publicKey : pk(signer));
     if (payer) tx.feePayer = payer;
     const { blockhash, lastValidBlockHeight } = await this.conn.getLatestBlockhash(this.commitment);
@@ -283,6 +287,23 @@ export class SolanaChainAdapter implements ChainAdapter {
   // ----------------------------------------------------------------- perna HTLC cross-chain (ADR-v5)
   htlcPda(htlcIdHex: string): PublicKey { return findPda(this.programId, [SEEDS.htlc, fromHex(htlcIdHex)])[0]; }
 
+  /** Embrulho SOL→wSOL dentro da PRÓPRIA tx (mint nativo): cria a ATA (idempotente), transfere os
+   *  lamports que faltam e dá SyncNative — o vendedor escolhe "wSOL" tendo só SOL e o lock funciona. */
+  private async wrapSolIxs(funder: PublicKey, amount: bigint): Promise<TransactionInstruction[]> {
+    const mint = pk(WSOL_MINT);
+    const ata = associatedTokenAddress(funder, mint, TOKEN_PROGRAM_ID);
+    let have = 0n;
+    try { have = BigInt((await this.conn.getTokenAccountBalance(ata, this.commitment)).value.amount); } catch { /* ATA inexistente */ }
+    if (have >= amount) return [];
+    const createAta = new TransactionInstruction({
+      programId: ASSOCIATED_TOKEN_PROGRAM_ID,
+      keys: [meta(funder, true, true), meta(ata, true), meta(funder, false), meta(mint, false), meta(SystemProgram.programId, false), meta(TOKEN_PROGRAM_ID, false)],
+      data: Buffer.from([1]), // CreateIdempotent
+    });
+    const syncNative = new TransactionInstruction({ programId: TOKEN_PROGRAM_ID, keys: [meta(ata, true)], data: Buffer.from([17]) });
+    return [createAta, SystemProgram.transfer({ fromPubkey: funder, toPubkey: ata, lamports: amount - have }), syncNative];
+  }
+
   /** Tranca `amount` do mint sob hashlock sha256 — assinada pelo funder (vendedor) na Verum Wallet.
    *  Contas na ORDEM EXATA de `HtlcLockIx` (Rust); dados borsh: htlc_id | hash | recipient | amount | expires_at. */
   async buildHtlcLock(p: { htlcId: string; hash: string; funder: string; recipient: string; mint: string; amount: bigint; expiresAt: number }): Promise<UnsignedTx> {
@@ -297,7 +318,8 @@ export class SolanaChainAdapter implements ChainAdapter {
       meta(program, false), meta(ASSOCIATED_TOKEN_PROGRAM_ID, false), meta(SystemProgram.programId, false),
     ];
     const data = concat(fromHex(p.htlcId), fromHex(p.hash), pk(p.recipient).toBytes(), u64le(p.amount), i64le(p.expiresAt));
-    return this.toUnsigned(p.funder, this.ix("htlc_lock", keys, data), "htlc_lock (tranca o token sob hashlock)");
+    const wrap = p.mint === WSOL_MINT ? await this.wrapSolIxs(funder, p.amount) : [];
+    return this.toUnsigned(p.funder, [...wrap, this.ix("htlc_lock", keys, data)], "htlc_lock (tranca o token sob hashlock)");
   }
 
   /** Claim com a preimage revelada na outra rede — qualquer executor; destino fixo (recipient). */

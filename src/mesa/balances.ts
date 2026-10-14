@@ -49,7 +49,15 @@ export function defaultBalanceReaders(): BalanceReaders {
           const r = await fetch(c.endpoint, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'getTokenAccountsByOwner', params: [address, { mint: contract }, { encoding: 'jsonParsed' }] }) });
           const j = await r.json() as { result?: { value?: { account: { data: { parsed: { info: { tokenAmount: { amount: string } } } } } }[] } };
           const accounts = j?.result?.value; if (!accounts) return null;
-          return Number(accounts.reduce((s, a) => s + BigInt(a.account.data.parsed.info.tokenAmount.amount), 0n)) / 10 ** decimals;
+          let amount = Number(accounts.reduce((s, a) => s + BigInt(a.account.data.parsed.info.tokenAmount.amount), 0n)) / 10 ** decimals;
+          // wSOL: SOL nativo também cobre o exigido — a tx de lock/depósito embrulha (SyncNative)
+          // na hora. Sem isso, quem tem SOL mas nunca embrulhou seria barrado com a ATA zerada.
+          if (contract === 'So11111111111111111111111111111111111111112') {
+            const n = await fetch(c.endpoint, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'getBalance', params: [address] }) });
+            const nj = await n.json() as { result?: { value?: number } };
+            if (typeof nj?.result?.value === 'number') amount += Math.max(0, nj.result.value / 1e9 - 0.01); // reserva ~0.01 SOL p/ gás
+          }
+          return amount;
         }
         return null; // demais famílias caem no catálogo
       } catch { return null; }
