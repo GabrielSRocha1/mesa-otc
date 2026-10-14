@@ -367,8 +367,19 @@ window.addEventListener('unhandledrejection',function(e){try{console.warn('[veru
       +'<div class="r"><span class="k">Expira em</span><span class="v">'+esc(fmtDate(o.expiresAt))+'</span></div>'
       +'<div class="r"><span class="k">Ordem de assinatura</span><span class="v" style="font-size:11px">Vendedor → PM 1 → PM 2 → Comprador</span></div>'
       +'</div></section></aside>';
+    // Liquidada com ativo embrulhado (wSOL/WETH): avisa quem recebeu que o valor chega como token
+    // 1:1 e desembrulha na carteira — sem isso a pessoa acha que recebeu "outra moeda".
+    var WRAPPED={wSOL:['SOL','Solana'],WETH:['ETH','Ethereum']};
+    var wrapNote='';
+    if(o.state==='SETTLED'){
+      [[o.assetIn,'Comprador'],[o.assetOut,'Vendedor']].forEach(function(w){
+        var m=WRAPPED[w[0]]; if(!m) return;
+        wrapNote+='<div class="note" style="border-color:var(--ok,#2e7d32)"><b>'+esc(w[1])+':</b> você recebeu '+esc(w[0])+' — é '+esc(m[0])+' embrulhado como token, na proporção exata de 1:1. Para vê-lo como '+esc(m[0])+' nativo, use "desembrulhar" (unwrap) na sua Verum Wallet. Nada de valor se perde; só muda o formato.</div>';
+      });
+    }
     document.getElementById('body').innerHTML=head
       +'<div class="op-layout"><div class="op-main">'+partsHtml+multisig+'</div>'+aside+'</div>'
+      +wrapNote
       +'<div class="note">Esta página é somente leitura — acompanha a operação em tempo real. Assinar/movimentar fundos acontece pela mesa, na Verum Wallet.</div>';
   }
 
