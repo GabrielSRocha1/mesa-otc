@@ -39,7 +39,7 @@ import { getIconMap } from '../chains/icons.js';
 import type { MesaService, AuthNetwork } from '../mesa/mesaService.js';
 import { validateChairBalances, defaultBalanceReaders, addressOn, type BalanceReaders } from '../mesa/balances.js';
 import { deriveSettlementPlan } from '../mesa/settlementPlan.js';
-import type { MesaChair, MesaRecord } from '../mesa/types.js';
+import type { MesaChair, MesaChairRole, MesaRecord } from '../mesa/types.js';
 import registryData from '../onchain/registry/registryData.js';
 import { registryChecker, verumWalletChecker, composeCheckers, validateMesaTokens } from '../mesa/antiscam.js';
 import type { PushService } from '../mesa/push.js';
@@ -512,6 +512,57 @@ export async function buildApi(deps: ApiDeps): Promise<FastifyInstance> {
     return { ...await mesaDealView(dealNow), htlcFunding, registerTx };
   };
 
+  /** Criação de deal ESCROW_DIRECT (v4): Vendedor e Comprador NA MESMA REDE, ambos com TOKEN
+   *  (ERC-20/SPL/TRC-20). Duas pernas no VerumOtcEscrow — o Vendedor deposita o ativo que vende e o
+   *  Comprador o que paga; após N/N assinaturas o contrato troca. Usa os ativos das CADEIRAS e o
+   *  endereço de cada papel NA REDE do escrow (carteira multichain). Escrow é SÓ-TOKEN: moeda nativa
+   *  (SOL/ETH/TRX) é recusada aqui com motivo claro (BTC nativo vai pelo caminho HTLC). */
+  const createMesaEscrowDirectDeal = async (mesa: MesaRecord, b: MesaDealBody, onCreated: (dealId: string) => void) => {
+    const adapters = deps.adapters;
+    if (!adapters) throw new DomainError('SETTLEMENT_NOT_ALLOWED', 'Liquidação direta indisponível: adaptadores não configurados');
+    const plan = deriveSettlementPlan(mesa.chairs);
+    if (plan?.mode !== 'ESCROW_DIRECT') throw new DomainError('INVALID_INPUT', 'Mesa não é de liquidação direta (mesma rede)');
+    const net = plan.sellerNetwork as Network;
+    if (net === 'bitcoin') throw new DomainError('SETTLEMENT_NOT_ALLOWED', 'BTC nativo usa HTLC, não o escrow direto');
+    const adapter = adapters.get(net);
+    if (!adapter) throw new DomainError('SETTLEMENT_NOT_ALLOWED', `Adaptador ${net} ausente`);
+    const chainId = adapter.chain.chainId;
+    const label = (r: MesaChairRole) => r === 'SELLER' ? 'Vendedor' : r === 'BUYER' ? 'Comprador' : r === 'PAYMASTER_2' ? 'Pay Master 2' : 'Pay Master 1';
+    const sellerChair = mesa.chairs.find(c => c.role === 'SELLER'); const buyerChair = mesa.chairs.find(c => c.role === 'BUYER');
+    if (!sellerChair || !buyerChair) throw new DomainError('INVALID_INPUT', 'Mesa sem Vendedor/Comprador');
+    const motivos: string[] = [];
+    if (!sellerChair.expectedAsset.contractOrMint) motivos.push(`Vendedor: ${sellerChair.expectedAsset.symbol} nativo não é suportado pelo escrow (use um token)`);
+    if (!buyerChair.expectedAsset.contractOrMint) motivos.push(`Comprador: ${buyerChair.expectedAsset.symbol} nativo não é suportado pelo escrow (use um token)`);
+    if (!mesa.config?.amountInBase) motivos.push('Configuração: quantidade do Vendedor não definida');
+    const roleAddr: Partial<Record<MesaChairRole, string>> = {};
+    for (const c of mesa.chairs) {
+      if (!c.wallet) continue;
+      const a = addressOn(c, net); const ok = a && (adapter.validateAddress ? adapter.validateAddress(a) : true);
+      if (!ok) motivos.push(`${label(c.role)}: carteira sem endereço ${net} válido`); else roleAddr[c.role] = a as string;
+    }
+    if (motivos.length) throw new DomainError('VERSION_CONFLICT', 'Não foi possível criar a operação', { motivos });
+    const input = {
+      assetIn: { network: net, chainId, contractOrMint: sellerChair.expectedAsset.contractOrMint },
+      assetOut: { network: net, chainId, contractOrMint: buyerChair.expectedAsset.contractOrMint },
+      amountInBase: mesa.config!.amountInBase as string, discountBps: b.discountBps, commissionBps: b.commissionBps, commissionSplitBps: b.commissionSplitBps,
+      maxSlippageBps: b.maxSlippageBps, maxPriceDriftBps: 500, expiresInSec: b.expiresInSec,
+      participants: mesa.chairs.filter(c => roleAddr[c.role]).map(c => ({ role: c.role as Role, network: net, chainId, address: roleAddr[c.role] as string })),
+    };
+    const sellerAddr = roleAddr['SELLER'] as string;
+    const created = await deps.deals.create(input, sellerAddr);
+    onCreated(created.id);
+    for (const p of input.participants) if (p.role !== 'SELLER') await deps.deals.connectWallet(created.id, p.role, p.address, p.address);
+    await deps.deals.open(created.id, sellerAddr); // → AWAITING_SIGNATURES (vez do Vendedor) + register on-chain
+    // Ambos os lados depositam o próprio token no escrow (melhor esforço; a carteira real completa via /onchain-tx).
+    try { await deps.deals.fund(created.id, 'SELLER', sellerAddr); } catch (e) { logger.warn({ dealId: created.id, err: (e as Error).message }, 'funding do vendedor pendente (carteira real completa)'); }
+    try { if (roleAddr['BUYER']) await deps.deals.fund(created.id, 'BUYER', roleAddr['BUYER']); } catch (e) { logger.warn({ dealId: created.id, err: (e as Error).message }, 'funding do comprador pendente (carteira real completa)'); }
+    await deps.audit.append({ actorType: 'user', actorId: mesa.payMasterId, category: 'portal.mesa.deal.created', dealId: created.id, payload: { mode: 'escrow-direct', network: net } });
+    const dealNow = await deps.deals.get(created.id);
+    const meta = dealNow?.onChain?.[net]?.meta as Record<string, unknown> | undefined;
+    const registerTx = meta?.registerPending && typeof meta.registerTx === 'string' ? JSON.parse(meta.registerTx) as Record<string, unknown> : null;
+    return { ...await mesaDealView(dealNow), registerTx };
+  };
+
   app.post('/v1/portal/mesa/deal', async (req, reply) => {
     const token = portalToken(req);
     const b = parse(MesaDealBodyZ, req.body ?? {});
@@ -804,8 +855,16 @@ export async function buildApi(deps: ApiDeps): Promise<FastifyInstance> {
     // nasceu de fato. Antes, markApproved rodava ANTES da criação e persistia — se a criação falhasse
     // (ex.: ASSET_NOT_CANONICAL), a mesa ficava travada em "Aprovado" SEM deal e sem nada para assinar,
     // escondendo o erro real. Agora, na falha, a mesa permanece READY_FOR_APPROVAL e o motivo sobe.
+    // HTLC_BTC → BTC nativo ↔ token (swap atômico). ESCROW_DIRECT com os DOIS lados em token na mesma
+    // rede → VerumOtcEscrow N/N real. Qualquer lado nativo (SOL/ETH/TRX) ou CROSS_CHAIN → caminho
+    // legado (dev): no sim local funciona; em produção o verify recusa nativo com motivo claro.
+    const escrowDirectTokens = plan?.mode === 'ESCROW_DIRECT'
+      && !!mesa.chairs.find(c => c.role === 'SELLER')?.expectedAsset.contractOrMint
+      && !!mesa.chairs.find(c => c.role === 'BUYER')?.expectedAsset.contractOrMint;
     const view = plan?.mode === 'HTLC_BTC'
       ? await createMesaHtlcDeal(mesa, body, id => deps.mesa.attachDeal(mesa, id))
+      : escrowDirectTokens
+      ? await createMesaEscrowDirectDeal(mesa, body, id => deps.mesa.attachDeal(mesa, id))
       : await createMesaDealForParts(mesa.chairs.filter(c => c.wallet).map(c => {
         const w = c.wallet!;
         const sol = (w.addresses ?? []).find(a => a.network === 'solana')?.address ?? (w.network === 'solana' ? w.address : null);
