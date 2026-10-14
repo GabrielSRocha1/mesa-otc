@@ -124,8 +124,19 @@ export async function createApp(config: Config, o: AppOverrides = {}): Promise<A
       }
     }
     if (solCfg) {
-      verumSolana = new VerumSolanaAdapter(solCfg, addr => demoKeyringRef?.secretKeyByAddress(addr) ?? null, dealDeps); adapters.register(verumSolana);
-      logger.info({ cluster: solCfg.chainId, programId: solCfg.programId }, 'modo SOLANA ativo: programa verum_otc real');
+      // Perna HTLC cross-chain: o papel que RECEBE o token do lock (ex.: comprador em rede EVM)
+      // precisa de endereço Solana — resolve pela carteira multichain da cadeira da mesa.
+      const solAddressOf = async (dealId: string, role: Role) => {
+        for (const m of Object.values(portalRef?.mesas() ?? {})) {
+          if (m.dealId !== dealId && !m.dealIds.includes(dealId)) continue;
+          const w = m.chairs.find(c => c.role === role)?.wallet;
+          if (!w) return null;
+          return (w.addresses ?? []).find(a => a.network === 'solana')?.address ?? (w.network === 'solana' ? w.address : null);
+        }
+        return null;
+      };
+      verumSolana = new VerumSolanaAdapter(solCfg, addr => demoKeyringRef?.secretKeyByAddress(addr) ?? null, { ...dealDeps, solAddressOf }); adapters.register(verumSolana);
+      logger.info({ cluster: solCfg.chainId, programId: solCfg.programId }, 'modo SOLANA ativo: programa verum_otc real (escrow N-de-N + perna HTLC)');
     }
     if (tronCfg) {
       tronKeyring = config.OTC_ENV === 'prod' ? undefined : new TronDevKeyring(config.identityMasterSecret);

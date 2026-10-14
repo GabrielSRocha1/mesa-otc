@@ -76,8 +76,10 @@ export function evmLegMapOf(c: DealCommitment): EvmLegMap {
   if (evm.length === 1) {
     const other = c.legs.find(l => l.escrowChain !== 'ethereum');
     const buyerLeg = evm[0] as NonNullable<typeof evm[0]>;
-    if (other?.escrowChain !== 'bitcoin' || other.from !== 'SELLER' || buyerLeg.from !== 'BUYER') {
-      throw new DomainError('SETTLEMENT_NOT_ALLOWED', 'escrow V2 só suporta perna externa de BTC nativo do VENDEDOR (comprador deposita o token nesta rede)');
+    // Perna externa = qualquer rede com hashlock (BTC nativo em P2WSH ou SPL em HTLC na Solana):
+    // o contrato só exige sellerAsset=0x0 + htlcHash — a atomicidade cruza pela preimage.
+    if (!other || other.from !== 'SELLER' || buyerLeg.from !== 'BUYER') {
+      throw new DomainError('SETTLEMENT_NOT_ALLOWED', 'escrow V2 só suporta perna externa do VENDEDOR (comprador deposita o token nesta rede)');
     }
     if (!c.htlcHash) throw new DomainError('SETTLEMENT_NOT_ALLOWED', 'perna externa exige htlcHash (rota HTLC)');
     return { sellerLegIndex: null, buyerLegIndex: buyerLeg.index, external: true };
@@ -103,7 +105,7 @@ export function buildVerumTermsV2(c: DealCommitment, chainNow: number, sellerEvm
   const legOf = (i: number | null) => (i === null ? null : c.legs.find(l => l.index === i) ?? null);
   const sellerLeg = legOf(map.sellerLegIndex);
   const buyerLeg = legOf(map.buyerLegIndex) as NonNullable<ReturnType<typeof legOf>>;
-  const btcLeg = map.external ? c.legs.find(l => l.escrowChain === 'bitcoin') : null;
+  const externalLeg = map.external ? c.legs.find(l => l.escrowChain !== 'ethereum') : null;
   const clamp = (n: number) => Math.min(Math.max(0, n), 10000);
   // Comissão ON-CHAIN: total em unidades do buyerAsset (commissionAmountOf = amountOut·c/(1−d−c))
   // repartido pelo split assinado; resto da divisão inteira fica com o PM1. Tudo explícito nos termos.
@@ -116,7 +118,7 @@ export function buildVerumTermsV2(c: DealCommitment, chainNow: number, sellerEvm
   return {
     participants: present.map(p => ({ wallet: walletOf(p), role: ROLE_TO_ONCHAIN[p.role] })),
     sellerAsset: (sellerLeg?.asset.contractOrMint ?? zeroAddress) as Hex,
-    sellerAmount: BigInt((sellerLeg ?? btcLeg)?.amountBase ?? '0'),
+    sellerAmount: BigInt((sellerLeg ?? externalLeg)?.amountBase ?? '0'),
     buyerAsset: buyerLeg.asset.contractOrMint as Hex,
     buyerAmount: BigInt(buyerLeg.amountBase),
     platformFeeBps: c.feeBps, commissionBps: clamp(c.terms.pricing.commissionBps), discountBps: clamp(c.terms.pricing.discountBps), slippageBps: clamp(c.terms.pricing.maxSlippageBps),

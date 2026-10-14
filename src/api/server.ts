@@ -512,6 +512,62 @@ export async function buildApi(deps: ApiDeps): Promise<FastifyInstance> {
     return { ...await mesaDealView(dealNow), htlcFunding, registerTx };
   };
 
+  /**
+   * Criação da Deal CROSS-CHAIN ATÔMICA (ADR-v5): vendedor com TOKEN na Solana (ex.: wSOL em
+   * HTLC hashlock) e comprador com TOKEN na perna EVM (escrow V2 com o MESMO sha256). O settleV2
+   * da EVM revela a preimage; o claim do HTLC Solana a consome — atomicidade sem ponte.
+   * Espelha createMesaHtlcDeal trocando a perna externa: bitcoin→solana (token, não nativo).
+   */
+  const createMesaXchainHtlcDeal = async (mesa: MesaRecord, b: MesaDealBody, onCreated: (dealId: string) => void) => {
+    const adapters = deps.adapters;
+    if (!adapters) throw new DomainError('SETTLEMENT_NOT_ALLOWED', 'Operação cross-chain indisponível: adaptadores de rede não configurados');
+    const plan = deriveSettlementPlan(mesa.chairs);
+    if (plan?.mode !== 'CROSS_CHAIN' || !plan.htlc) throw new DomainError('INVALID_INPUT', 'Mesa não é de swap atômico cross-chain');
+    const sellerChair = mesa.chairs.find(c => c.role === 'SELLER') as MesaChair;
+    const buyerChair = mesa.chairs.find(c => c.role === 'BUYER') as MesaChair;
+    const pm1Chair = mesa.chairs.find(c => c.role === 'PAYMASTER_1');
+    if (!pm1Chair?.wallet) throw new DomainError('SETTLEMENT_NOT_ALLOWED', 'Operação cross-chain pela mesa exige a cadeira Pay Master 1 conectada');
+    const solAdapter = adapters.get('solana'); const evmAdapter = adapters.get('ethereum');
+    if (!solAdapter || !evmAdapter) throw new DomainError('SETTLEMENT_NOT_ALLOWED', 'Adaptadores solana/ethereum ausentes');
+    const motivos: string[] = [];
+    const sellerSol = addressOn(sellerChair, 'solana'); if (!sellerSol || !solAdapter.validateAddress(sellerSol)) motivos.push('Vendedor: carteira sem endereço Solana válido');
+    const buyerEvm = addressOn(buyerChair, 'ethereum'); if (!buyerEvm || !evmAdapter.validateAddress(buyerEvm)) motivos.push('Comprador: carteira sem endereço Ethereum válido');
+    const buyerSol = addressOn(buyerChair, 'solana'); if (!buyerSol || !solAdapter.validateAddress(buyerSol)) motivos.push('Comprador: carteira sem endereço Solana (recebe o token do HTLC)');
+    const pm1Evm = addressOn(pm1Chair, 'ethereum'); if (!pm1Evm || !evmAdapter.validateAddress(pm1Evm)) motivos.push('Pay Master 1: carteira sem endereço Ethereum válido');
+    if (!mesa.config?.amountInBase) motivos.push('Configuração: quantidade do Vendedor não definida');
+    if (motivos.length) throw new DomainError('VERSION_CONFLICT', 'Não foi possível criar a operação cross-chain', { motivos });
+    const input = {
+      assetIn: { network: 'solana', chainId: solAdapter.chain.chainId, contractOrMint: sellerChair.expectedAsset.contractOrMint },
+      assetOut: { network: 'ethereum', chainId: evmAdapter.chain.chainId, contractOrMint: buyerChair.expectedAsset.contractOrMint },
+      amountInBase: mesa.config!.amountInBase as string, discountBps: b.discountBps, commissionBps: b.commissionBps, commissionSplitBps: b.commissionSplitBps,
+      maxSlippageBps: b.maxSlippageBps, maxPriceDriftBps: 500, expiresInSec: b.expiresInSec,
+      participants: [
+        { role: 'SELLER', network: 'solana', chainId: solAdapter.chain.chainId, address: sellerSol },
+        { role: 'PAYMASTER_1', network: 'ethereum', chainId: evmAdapter.chain.chainId, address: pm1Evm },
+        { role: 'BUYER', network: 'ethereum', chainId: evmAdapter.chain.chainId, address: buyerEvm },
+      ],
+    };
+    const created = await deps.deals.create(input, sellerSol as string);
+    onCreated(created.id); // linka ANTES do open: registro resolve endereços (EVM do vendedor, Solana do comprador) pela mesa
+    for (const p of input.participants) if (p.role !== 'SELLER') await deps.deals.connectWallet(created.id, p.role as Role, p.address as string, p.address as string);
+    await deps.deals.open(created.id, sellerSol as string); // registra: createTradeV2 (EVM, perna externa) + derivação do HTLC (Solana)
+    // Funding: comprador (approve ERC-20, melhor esforço) e vendedor (lock no HTLC — dev keyring
+    // assina sozinho; carteira real recebe a tx base64 em htlcFunding).
+    let htlcFunding: Record<string, unknown> | null = null;
+    try { await deps.deals.fund(created.id, 'BUYER', buyerEvm as string); } catch (e) { logger.warn({ dealId: created.id, err: (e as Error).message }, 'funding do comprador pendente (carteira real completa via /onchain-tx)'); }
+    try { await deps.deals.fund(created.id, 'SELLER', sellerSol as string); }
+    catch (e) {
+      const err = e as DomainError;
+      if (err.code === 'FUNDING_REQUIRED' && err.details?.transactionBase64) htlcFunding = { ...err.details };
+      else logger.warn({ dealId: created.id, err: err.message }, 'lock HTLC do vendedor pendente');
+    }
+    await deps.audit.append({ actorType: 'user', actorId: mesa.payMasterId, category: 'portal.mesa.deal.created', dealId: created.id, payload: { mode: 'htlc-xchain-solana', htlc: htlcFunding ? 'pendente' : 'ok' } });
+    const dealNow = await deps.deals.get(created.id);
+    const evmMeta = dealNow?.onChain?.ethereum?.meta as Record<string, unknown> | undefined;
+    const registerTx = evmMeta?.registerPending && typeof evmMeta.registerTx === 'string' ? JSON.parse(evmMeta.registerTx) as Record<string, unknown> : null;
+    return { ...await mesaDealView(dealNow), htlcFunding, registerTx };
+  };
+
   /** Criação de deal ESCROW_DIRECT (v4): Vendedor e Comprador NA MESMA REDE, ambos com TOKEN
    *  (ERC-20/SPL/TRC-20). Duas pernas no VerumOtcEscrow — o Vendedor deposita o ativo que vende e o
    *  Comprador o que paga; após N/N assinaturas o contrato troca. Usa os ativos das CADEIRAS e o
@@ -855,14 +911,18 @@ export async function buildApi(deps: ApiDeps): Promise<FastifyInstance> {
     // nasceu de fato. Antes, markApproved rodava ANTES da criação e persistia — se a criação falhasse
     // (ex.: ASSET_NOT_CANONICAL), a mesa ficava travada em "Aprovado" SEM deal e sem nada para assinar,
     // escondendo o erro real. Agora, na falha, a mesa permanece READY_FOR_APPROVAL e o motivo sobe.
-    // HTLC_BTC → BTC nativo ↔ token (swap atômico). ESCROW_DIRECT com os DOIS lados em token na mesma
-    // rede → VerumOtcEscrow N/N real. Qualquer lado nativo (SOL/ETH/TRX) ou CROSS_CHAIN → caminho
-    // legado (dev): no sim local funciona; em produção o verify recusa nativo com motivo claro.
+    // HTLC_BTC → BTC nativo ↔ token (swap atômico). CROSS_CHAIN com plan.htlc → swap atômico
+    // token(Solana)↔token(EVM) pela MESMA preimage (ADR-v5). ESCROW_DIRECT com os DOIS lados em
+    // token na mesma rede → VerumOtcEscrow N/N real. Qualquer lado nativo (SOL/ETH/TRX) ou
+    // CROSS_CHAIN sem hashlock → caminho legado (dev): no sim local funciona; em produção o
+    // verify recusa nativo com motivo claro.
     const escrowDirectTokens = plan?.mode === 'ESCROW_DIRECT'
       && !!mesa.chairs.find(c => c.role === 'SELLER')?.expectedAsset.contractOrMint
       && !!mesa.chairs.find(c => c.role === 'BUYER')?.expectedAsset.contractOrMint;
     const view = plan?.mode === 'HTLC_BTC'
       ? await createMesaHtlcDeal(mesa, body, id => deps.mesa.attachDeal(mesa, id))
+      : plan?.mode === 'CROSS_CHAIN' && plan.htlc
+      ? await createMesaXchainHtlcDeal(mesa, body, id => deps.mesa.attachDeal(mesa, id))
       : escrowDirectTokens
       ? await createMesaEscrowDirectDeal(mesa, body, id => deps.mesa.attachDeal(mesa, id))
       : await createMesaDealForParts(mesa.chairs.filter(c => c.wallet).map(c => {

@@ -22,6 +22,14 @@ describe('settlementPlan — derivação determinística', () => {
   });
   it('BTC nativo em um lado → HTLC_BTC com timelocks assimétricos', () => {
     const p = deriveSettlementPlan([chair('SELLER', 'bitcoin', null, 'BTC', 8), chair('BUYER', 'tron', 'TR7NHqjeKQxGTCi8q8ZY4pL8otSzgjLj6t', 'USDT')]);
+    void p;
+    const atom = deriveSettlementPlan([chair('SELLER', 'solana', 'So11111111111111111111111111111111111111112', 'wSOL', 9), chair('BUYER', 'ethereum', USDT_ETH, 'USDT')]);
+    expect(atom?.mode).toBe('CROSS_CHAIN');
+    expect(atom?.htlc).toEqual({ hashAlgo: 'sha256', btcSide: 'SELLER', btcLockBlocks: 0, tokenLockSeconds: 2400 });
+    expect(atom?.bridge).toBeUndefined(); // atômico por hashlock, não por ponte
+    // direção inversa (vendedor EVM) ainda não tem hashlock no lado vendedor → segue CCIP pendente
+    const inverse = deriveSettlementPlan([chair('SELLER', 'ethereum', USDT_ETH, 'USDT'), chair('BUYER', 'solana', 'So11111111111111111111111111111111111111112', 'wSOL', 9)]);
+    expect(inverse?.bridge).toBe('CCIP');
     expect(p?.mode).toBe('HTLC_BTC');
     expect(p?.htlc?.btcSide).toBe('SELLER');
     // BTC trancado MUITO mais tempo que a janela do escrow — quem revela a preimage nunca fica sem claim.

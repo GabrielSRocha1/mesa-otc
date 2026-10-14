@@ -16,10 +16,17 @@ export class RouterEngine {
     const chains: Network[] = [p.assetIn.network, p.assetOut.network]; const schemes = new Set(p.participants.map(x => x.keyScheme));
     const routes: Route[] = []; const notes: string[] = [];
     const legPlans: RouteLegPlan[] = []; let viable = true; let est = 0; let cost = 0; let kind: Route['kind'] = 'ESCROW_NN';
+    // Cross-chain token↔token ATÔMICO (ADR-v5): redes diferentes, a do VENDEDOR tem perna HTLC
+    // (hashlock) e a do COMPRADOR tem escrow de contrato → a leg do vendedor vira HTLC e o swap
+    // cruza as redes pela preimage (mesmo desenho do BTC nativo), sem ponte/coordenador.
+    const crossHtlc = chains.length === 2 && chains[0] !== chains[1]
+      && !!this.adapters.get(chains[0] as Network)?.capabilities().htlc
+      && !!this.adapters.get(chains[0] as Network)?.capabilities().escrowNN
+      && !!this.adapters.get(chains[1] as Network)?.capabilities().escrowNN;
     for (const [i, net] of chains.entries()) {
       const a = this.adapters.get(net); if (!a) { viable = false; notes.push(`sem adaptador para ${net}`); continue; }
       const caps = a.capabilities();
-      if (caps.htlc && !caps.escrowNN) { kind = 'HTLC'; legPlans.push({ escrowChain: net, escrowContract: a.escrowAddress(), mode: 'HTLC', fundingOrder: 2, timelockSec: Math.max(60, p.expiresInSec - this.cfg.htlcTimelockMarginSec) }); est += caps.finalityConfirmations * 600; }
+      if (caps.htlc && (!caps.escrowNN || (crossHtlc && i === 0))) { kind = 'HTLC'; legPlans.push({ escrowChain: net, escrowContract: a.escrowAddress(), mode: 'HTLC', fundingOrder: 2, timelockSec: Math.max(60, p.expiresInSec - this.cfg.htlcTimelockMarginSec) }); est += caps.finalityConfirmations * 600; }
       else { legPlans.push({ escrowChain: net, escrowContract: a.escrowAddress(), mode: 'ESCROW_NN', fundingOrder: 1, timelockSec: p.expiresInSec }); est += caps.finalityConfirmations * (net === 'ethereum' ? 400 : 20);
         for (const s of schemes) if (!caps.verifiableSigSchemes.includes(s)) { viable = false; notes.push(`escrow em ${net} não verifica assinaturas ${s} on-chain (todos os participantes precisam de chave verificável)`); } }
       cost += Number(await a.estimateCostUsd('settle')) + Number(await a.estimateCostUsd('deposit'));

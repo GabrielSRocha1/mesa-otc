@@ -23,7 +23,7 @@ export const TOKEN_PROGRAM_ID = new PublicKey("TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9
 export const TOKEN_2022_PROGRAM_ID = new PublicKey("TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb");
 export const ASSOCIATED_TOKEN_PROGRAM_ID = new PublicKey("ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL");
 
-const SEEDS = { config: "config", token: "token", trade: "trade", nonce: "nonce", attest: "attest" } as const;
+const SEEDS = { config: "config", token: "token", trade: "trade", nonce: "nonce", attest: "attest", htlc: "htlc" } as const;
 
 /** Layout borsh do `Trade` (Rust): 8 disc | trade_id 32 | terms 244 | terms_hash 32 | state u8 | 3×bool | fee u64 | settled i64 | expired i64 | 2×pubkey | bump */
 export const TERMS_LEN = 32 * 4 + 32 + 8 + 32 + 8 + 2 * 4 + 8 + 8 + 4 + 8; // 244
@@ -278,6 +278,80 @@ export class SolanaChainAdapter implements ChainAdapter {
       meta(sellerProgram, false), meta(buyerProgram, false),
     ];
     return this.toUnsigned("ANY", this.ix("refund", keys, new Uint8Array()), "refund (devolve principais às origens)");
+  }
+
+  // ----------------------------------------------------------------- perna HTLC cross-chain (ADR-v5)
+  htlcPda(htlcIdHex: string): PublicKey { return findPda(this.programId, [SEEDS.htlc, fromHex(htlcIdHex)])[0]; }
+
+  /** Tranca `amount` do mint sob hashlock sha256 — assinada pelo funder (vendedor) na Verum Wallet.
+   *  Contas na ORDEM EXATA de `HtlcLockIx` (Rust); dados borsh: htlc_id | hash | recipient | amount | expires_at. */
+  async buildHtlcLock(p: { htlcId: string; hash: string; funder: string; recipient: string; mint: string; amount: bigint; expiresAt: number }): Promise<UnsignedTx> {
+    const program = await this.tokenProgramFor(p.mint);
+    const mint = pk(p.mint); const funder = pk(p.funder);
+    const htlc = this.htlcPda(p.htlcId);
+    const keys = [
+      meta(this.configPda, false), meta(funder, true, true), meta(htlc, true),
+      meta(this.tokenPda(p.mint), false), meta(mint, false),
+      meta(associatedTokenAddress(funder, mint, program), true),
+      meta(associatedTokenAddress(htlc, mint, program), true),
+      meta(program, false), meta(ASSOCIATED_TOKEN_PROGRAM_ID, false), meta(SystemProgram.programId, false),
+    ];
+    const data = concat(fromHex(p.htlcId), fromHex(p.hash), pk(p.recipient).toBytes(), u64le(p.amount), i64le(p.expiresAt));
+    return this.toUnsigned(p.funder, this.ix("htlc_lock", keys, data), "htlc_lock (tranca o token sob hashlock)");
+  }
+
+  /** Claim com a preimage revelada na outra rede — qualquer executor; destino fixo (recipient). */
+  async buildHtlcClaim(htlcIdHex: string, preimageHex: string): Promise<UnsignedTx> {
+    const h = await this.getHtlc(htlcIdHex);
+    if (!h) throw new Error("HtlcNotFound");
+    const program = pk(h.tokenProgram); const mint = pk(h.mint); const htlc = this.htlcPda(htlcIdHex);
+    const exec = this.executor?.publicKey ?? pk(h.recipient);
+    const keys = [
+      meta(htlc, true), meta(exec, true, true), meta(mint, false),
+      meta(associatedTokenAddress(htlc, mint, program), true),
+      meta(pk(h.recipient), true), meta(associatedTokenAddress(pk(h.recipient), mint, program), true),
+      meta(pk(h.funder), true),
+      meta(program, false), meta(ASSOCIATED_TOKEN_PROGRAM_ID, false), meta(SystemProgram.programId, false),
+    ];
+    const preimage = fromHex(preimageHex);
+    const len = new Uint8Array(4); new DataView(len.buffer).setUint32(0, preimage.length, true);
+    return this.toUnsigned("ANY", this.ix("htlc_claim", keys, concat(len, preimage)), "htlc_claim (entrega ao recipient com a preimage)");
+  }
+
+  /** Refund pós-timeout — qualquer executor; devolve ao funder. */
+  async buildHtlcRefund(htlcIdHex: string): Promise<UnsignedTx> {
+    const h = await this.getHtlc(htlcIdHex);
+    if (!h) throw new Error("HtlcNotFound");
+    const program = pk(h.tokenProgram); const mint = pk(h.mint); const htlc = this.htlcPda(htlcIdHex);
+    const exec = this.executor?.publicKey ?? pk(h.funder);
+    const keys = [
+      meta(htlc, true), meta(exec, true, true), meta(mint, false),
+      meta(associatedTokenAddress(htlc, mint, program), true),
+      meta(pk(h.funder), true), meta(associatedTokenAddress(pk(h.funder), mint, program), true),
+      meta(program, false), meta(ASSOCIATED_TOKEN_PROGRAM_ID, false), meta(SystemProgram.programId, false),
+    ];
+    return this.toUnsigned("ANY", this.ix("htlc_refund", keys, new Uint8Array()), "htlc_refund (devolve ao funder após timeout)");
+  }
+
+  /** Lê o estado da perna HTLC — layout borsh de `HtlcLock` (Rust). `revealedPreimage` vazia antes do claim. */
+  async getHtlc(htlcIdHex: string): Promise<{ htlcId: string; funder: string; recipient: string; mint: string; tokenProgram: string; amount: bigint; hash: string; expiresAt: number; state: "LOCKED" | "CLAIMED" | "REFUNDED"; createdAt: number; revealedPreimage: string | null } | null> {
+    const info = await this.conn.getAccountInfo(this.htlcPda(htlcIdHex), this.commitment);
+    if (!info) return null;
+    const d = info.data; let o = 8;
+    const htlcId = toHex(d.subarray(o, o + 32)); o += 32;
+    const funder = new PublicKey(d.subarray(o, o + 32)).toBase58(); o += 32;
+    const recipient = new PublicKey(d.subarray(o, o + 32)).toBase58(); o += 32;
+    const mint = new PublicKey(d.subarray(o, o + 32)).toBase58(); o += 32;
+    const tokenProgram = new PublicKey(d.subarray(o, o + 32)).toBase58(); o += 32;
+    const amount = d.readBigUInt64LE(o); o += 8;
+    const hash = toHex(d.subarray(o, o + 32)); o += 32;
+    const expiresAt = Number(d.readBigInt64LE(o)); o += 8;
+    const stateByte = d[o]; o += 1;
+    const createdAt = Number(d.readBigInt64LE(o)); o += 8;
+    const preLen = d.readUInt32LE(o); o += 4;
+    const revealedPreimage = preLen > 0 ? toHex(d.subarray(o, o + preLen)) : null;
+    const state = stateByte === 2 ? "CLAIMED" as const : stateByte === 3 ? "REFUNDED" as const : "LOCKED" as const;
+    return { htlcId, funder, recipient, mint, tokenProgram, amount, hash, expiresAt, state, createdAt, revealedPreimage };
   }
 
   // ----------------------------------------------------------------- submissão / leitura

@@ -48,9 +48,19 @@ export function deriveSettlementPlan(chairs: MesaChair[]): SettlementPlan | null
     };
   }
   if (sellerNetwork !== buyerNetwork) {
+    // Swap atômico cross-chain SEM ponte (ADR-v5): vendedor com TOKEN na Solana (ex.: wSOL) e
+    // comprador com TOKEN na rede EVM → perna Solana trancada em HTLC (hashlock sha256) e perna
+    // EVM no escrow V2 com o MESMO hash; o settleV2 revela a preimage e destrava a Solana.
+    if (sellerNetwork === 'solana' && buyerNetwork === 'ethereum' && seller.expectedAsset.contractOrMint && buyer.expectedAsset.contractOrMint) {
+      return {
+        mode: 'CROSS_CHAIN', sellerNetwork, buyerNetwork,
+        htlc: { hashAlgo: 'sha256', btcSide: 'SELLER', btcLockBlocks: 0, tokenLockSeconds: 2400 },
+        summary: `Swap atômico ${seller.expectedAsset.symbol} (Solana, HTLC) ↔ ${buyer.expectedAsset.symbol} (Ethereum, escrow V2) — mesma preimage destrava as duas pernas`,
+      };
+    }
     return {
       mode: 'CROSS_CHAIN', sellerNetwork, buyerNetwork, bridge: 'CCIP',
-      summary: `Pernas em redes diferentes (${sellerNetwork} ↔ ${buyerNetwork}) — escrow em cada rede + liberação atômica via Chainlink CCIP`,
+      summary: `Pernas em redes diferentes (${sellerNetwork} ↔ ${buyerNetwork}) — escrow em cada rede + liberação atômica via Chainlink CCIP (pendente)`,
     };
   }
   return { mode: 'ESCROW_DIRECT', sellerNetwork, buyerNetwork, summary: `Liquidação direta no VerumOtcEscrow (${sellerNetwork})` };

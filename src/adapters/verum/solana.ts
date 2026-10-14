@@ -8,7 +8,7 @@
  * atestados são PDAs criados pelo attestor (ensureAttested, idempotente via init_if_needed).
  */
 import { Connection, Keypair, PublicKey, SystemProgram, Transaction, TransactionInstruction } from '@solana/web3.js';
-import type { CanonicalAsset, ChainRef, Role } from '../../domain/types.js';
+import { sha256Hex, type CanonicalAsset, type ChainRef, type Role } from '../../domain/types.js';
 import { DomainError } from '../../domain/errors.js';
 import { TradeState, Role as OnchainRole, type ChainId, type Terms as VerumTerms, type Signature as VerumSignature } from '../../onchain/types.js';
 import { computeFee } from '../../onchain/core/index.js';
@@ -27,6 +27,14 @@ export function parseKeypair(raw: string): Keypair {
   return Keypair.fromSecretKey(Uint8Array.from(Buffer.from(trimmed, 'base64')));
 }
 
+/** Deps do adapter Solana: além do Deal, resolve o endereço SOLANA de um papel pela carteira
+ *  multichain da cadeira (ex.: comprador em rede EVM que RECEBE wSOL no claim do HTLC). */
+export type VerumSolanaDeps = VerumAdapterDeps & { solAddressOf?: (dealId: string, role: Role) => Promise<string | null> };
+
+/** Meta persistida da perna HTLC (deal.onChain.solana.meta) — `tradeId` carrega o htlcId. */
+interface HtlcMeta { tradeId: string; termsHash: string; onChainCreatedAt: number; onChainExpiresAt: number; htlcKind: 1; htlcHash: string; htlcMint: string; htlcAmount: string; htlcFunder: string; htlcRecipient: string; htlcVault: string }
+const isHtlcMeta = (m: { tradeId: string } & Record<string, unknown>): m is HtlcMeta & Record<string, unknown> => (m as { htlcKind?: number }).htlcKind === 1;
+
 export class VerumSolanaAdapter implements SettlementAdapter, ParticipantStepProvider {
   readonly chain: ChainRef;
   private readonly inner: SolanaChainAdapter;
@@ -37,7 +45,7 @@ export class VerumSolanaAdapter implements SettlementAdapter, ParticipantStepPro
     private readonly cfg: SolanaSettings,
     /** Keypair ed25519 do participante dev/demo (null = carteira real; tx volta ao frontend). */
     private readonly signerFor: (address: string) => Uint8Array | null,
-    private readonly deps: VerumAdapterDeps,
+    private readonly deps: VerumSolanaDeps,
   ) {
     this.chain = { network: 'solana', chainId: SOLANA_CLUSTER[cfg.chainId] ?? cfg.chainId };
     this.executor = parseKeypair(cfg.executorKeypair);
@@ -100,7 +108,9 @@ export class VerumSolanaAdapter implements SettlementAdapter, ParticipantStepPro
     return buildVerumTerms(commitment, Number(this.cfg.chainId) as ChainId, this.cfg.programId, meta.onChainCreatedAt);
   }
 
-  capabilities(): AdapterCapabilities { return { escrowNN: true, htlc: false, verifiableSigSchemes: ['ed25519'], finalityConfirmations: this.cfg.confirmations, nativeCode: 'SOL' }; }
+  // htlc:true + escrowNN:true — o router liga a perna HTLC SÓ em rota cross-chain (vendedor aqui,
+  // contrato em outra rede); na mesma rede continua o escrow N-de-N normal.
+  capabilities(): AdapterCapabilities { return { escrowNN: true, htlc: true, verifiableSigSchemes: ['ed25519'], finalityConfirmations: this.cfg.confirmations, nativeCode: 'SOL' }; }
   escrowAddress(): string { return this.cfg.programId; }
   validateAddress(address: string): boolean { try { new PublicKey(address); return /^[1-9A-HJ-NP-Za-km-z]{32,44}$/.test(address); } catch { return false; } }
   async estimateCostUsd(_op: 'deposit' | 'register' | 'settle' | 'refund'): Promise<string> { return '0.02'; }
@@ -149,7 +159,36 @@ export class VerumSolanaAdapter implements SettlementAdapter, ParticipantStepPro
     }
   }
 
+  /** Perna HTLC cross-chain (ADR-v5): a leg Solana do commitment com mode='HTLC' — o vendedor
+   *  tranca o token (ex.: wSOL) sob o MESMO sha256 do escrow V2 da outra rede. */
+  private htlcLegOf(c: DealCommitment): DealCommitment['legs'][number] | null {
+    return c.legs.find(l => l.escrowChain === 'solana' && l.mode === 'HTLC') ?? null;
+  }
+
+  /** Registro da perna HTLC: derivação determinística (sem tx) — o lock acontece no funding. */
+  private async registerHtlc(c: DealCommitment, leg: DealCommitment['legs'][number]): Promise<RegisterResult> {
+    if (!c.htlcHash) throw new DomainError('SETTLEMENT_NOT_ALLOWED', 'perna HTLC exige htlcHash (rota HTLC)');
+    if (!leg.asset.contractOrMint) throw new DomainError('SETTLEMENT_NOT_ALLOWED', 'perna HTLC Solana é só-token (SOL nativo: use wSOL)');
+    const funder = c.participants.find(p => p.role === leg.from)?.address;
+    if (!funder || !this.validateAddress(funder)) throw new DomainError('SETTLEMENT_NOT_ALLOWED', 'vendedor sem endereço Solana válido');
+    // Quem RECEBE no claim é a contraparte (comprador), que vive na rede do contrato — o endereço
+    // Solana dele vem da carteira multichain da cadeira da mesa.
+    const recipient = await this.deps.solAddressOf?.(c.dealId, leg.to as Role) ?? null;
+    if (!recipient || !this.validateAddress(recipient)) throw new DomainError('SETTLEMENT_NOT_ALLOWED', `${leg.to} sem endereço Solana na carteira multichain (necessário para receber o token do HTLC)`);
+    const now = await this.inner.now();
+    // Timeout LONGO (4 h ≫ 40 min do escrow V2): o vendedor tranca primeiro e nunca fica sem
+    // janela de claim depois que a preimage é revelada na outra rede.
+    const expiresAt = now + 4 * 3600;
+    const htlcId = sha256Hex(`VERUM_HTLC_SOL|${c.dealHash}|${c.revision}`);
+    const program = await this.inner.tokenProgramFor(leg.asset.contractOrMint);
+    const vault = associatedTokenAddress(this.inner.htlcPda(htlcId), new PublicKey(leg.asset.contractOrMint), program).toBase58();
+    const meta: HtlcMeta = { tradeId: htlcId, termsHash: c.htlcHash, onChainCreatedAt: now, onChainExpiresAt: expiresAt, htlcKind: 1, htlcHash: c.htlcHash, htlcMint: leg.asset.contractOrMint, htlcAmount: leg.amountBase, htlcFunder: funder, htlcRecipient: recipient, htlcVault: vault };
+    return { ...this.ref('htlc-derived'), meta: meta as unknown as VerumMeta };
+  }
+
   async registerDeal(c: DealCommitment): Promise<RegisterResult> {
+    const htlcLeg = this.htlcLegOf(c);
+    if (htlcLeg) return this.registerHtlc(c, htlcLeg).catch(e => { if (e instanceof DomainError) throw e; this.fail('register', e); });
     const existing = await bindingOf(this.deps, c.dealId, 'solana');
     if (existing) {
       const t = await this.inner.getTrade(existing.meta.tradeId).catch(() => null);
@@ -173,9 +212,31 @@ export class VerumSolanaAdapter implements SettlementAdapter, ParticipantStepPro
     } catch (e) { this.fail('register', e); }
   }
 
+  /** Funding da perna HTLC: detecta o lock on-chain; sem lock, assina com o keyring dev (quando
+   *  disponível) ou devolve FUNDING_REQUIRED com a tx base64 p/ a Verum Wallet do vendedor. */
+  private async depositHtlc(meta: HtlcMeta, from: string): Promise<TxRef> {
+    const h = await this.inner.getHtlc(meta.tradeId);
+    if (h) {
+      if (h.state !== 'LOCKED') throw new DomainError('SETTLEMENT_NOT_ALLOWED', `HTLC em estado ${h.state}`);
+      if (h.hash !== meta.htlcHash || h.amount < BigInt(meta.htlcAmount) || h.recipient !== meta.htlcRecipient) throw new DomainError('SETTLEMENT_NOT_ALLOWED', 'lock HTLC divergente dos termos (hash/quantia/destino)');
+      return this.ref('htlc-locked');
+    }
+    const unsigned = await this.inner.buildHtlcLock({ htlcId: meta.tradeId, hash: meta.htlcHash, funder: meta.htlcFunder, recipient: meta.htlcRecipient, mint: meta.htlcMint, amount: BigInt(meta.htlcAmount), expiresAt: meta.onChainExpiresAt });
+    const sk = this.signerFor(from);
+    if (!sk) {
+      const p = unsigned.payload as { transactionBase64: string };
+      throw new DomainError('FUNDING_REQUIRED', 'Tranque o token no HTLC Solana pela sua carteira', { kind: 'solana-htlc', htlcId: meta.tradeId, vault: meta.htlcVault, requiredBase: meta.htlcAmount, transactionBase64: p.transactionBase64 });
+    }
+    const funder = Keypair.fromSecretKey(sk);
+    await this.ensureLamports(funder.publicKey);
+    const tx = await this.submitUnsigned(unsigned, [funder], funder.publicKey);
+    return this.ref(tx);
+  }
+
   /** Solana não tem approve: o depósito mesa é checagem de saldo (custódia real em seller_sign/buyer_sign). */
   async deposit(dealId: string, legIndex: number, from: string): Promise<TxRef> {
     const b = await this.binding(dealId);
+    if (isHtlcMeta(b.meta)) { try { return await this.depositHtlc(b.meta, from); } catch (e) { if (e instanceof DomainError) throw e; this.fail('deposit', e); } }
     try {
       const terms = await this.verumTermsOf(dealId, null, b.meta);
       const seller = legIndex === 0;
@@ -190,6 +251,9 @@ export class VerumSolanaAdapter implements SettlementAdapter, ParticipantStepPro
   /** A assinatura do papel é a PRÓPRIA transação (seller_sign deposita principal+fee; buyer_sign deposita e arma o settle). */
   async recordApproval(dealId: string, sig: ApprovalSignature): Promise<TxRef | null> {
     const b = await this.binding(dealId);
+    // Perna HTLC: não há trade 4-assinaturas na Solana — a ordem/assinaturas vivem no escrow da
+    // rede de contrato (signV2 na EVM); aqui o lock do vendedor é a "assinatura" (hashlock).
+    if (isHtlcMeta(b.meta)) return null;
     const role = ROLE_TO_ONCHAIN[sig.role as Role];
     try {
       const trade = await this.inner.getTrade(b.meta.tradeId);
@@ -216,8 +280,21 @@ export class VerumSolanaAdapter implements SettlementAdapter, ParticipantStepPro
     } catch (e) { if (e instanceof DomainError) throw e; this.fail(`recordApproval:${sig.role}`, e); }
   }
 
-  async settle(dealId: string, _legIndex: number, _signatures: ApprovalSignature[], _preimage?: string): Promise<TxRef> {
+  async settle(dealId: string, _legIndex: number, _signatures: ApprovalSignature[], preimage?: string): Promise<TxRef> {
     const b = await this.binding(dealId);
+    if (isHtlcMeta(b.meta)) {
+      // Claim com a preimage REVELADA pelo settleV2 da rede de contrato — atômico pelo hashlock.
+      const h = await this.inner.getHtlc(b.meta.tradeId);
+      if (h?.state === 'CLAIMED') return this.ref('htlc-claimed');
+      if (!preimage || !/^[0-9a-f]{2,128}$/i.test(preimage)) throw new DomainError('SETTLEMENT_NOT_ALLOWED', 'claim HTLC exige a preimage revelada pela perna de contrato');
+      try {
+        const unsigned = await this.inner.buildHtlcClaim(b.meta.tradeId, preimage.toLowerCase());
+        const r = await this.inner.submitAsExecutor(unsigned);
+        const conf = await this.inner.waitForConfirmation(r.txHash, 90_000);
+        if (conf.status !== 'CONFIRMED') throw new Error(`htlc_claim não confirmado (${conf.status}): ${conf.reason ?? r.txHash}`);
+        return this.ref(r.txHash);
+      } catch (e) { this.fail('settle:htlc', e); }
+    }
     const trade = await this.inner.getTrade(b.meta.tradeId);
     if (trade?.state === TradeState.SETTLED) throw new DomainError('SETTLEMENT_ALREADY_EXECUTED', 'trade já liquidada on-chain');
     try {
@@ -231,6 +308,20 @@ export class VerumSolanaAdapter implements SettlementAdapter, ParticipantStepPro
 
   async refund(dealId: string, _legIndex: number): Promise<TxRef> {
     const b = await this.binding(dealId);
+    if (isHtlcMeta(b.meta)) {
+      const h = await this.inner.getHtlc(b.meta.tradeId);
+      if (!h) return this.ref('htlc-never-locked');
+      if (h.state === 'REFUNDED') return this.ref('refunded');
+      if (h.state === 'CLAIMED') throw new DomainError('SETTLEMENT_ALREADY_EXECUTED', 'HTLC já reivindicado (preimage revelada)');
+      const now = await this.inner.now();
+      if (now < h.expiresAt) throw new DomainError('SETTLEMENT_NOT_ALLOWED', `refund do HTLC só após o timeout (${new Date(h.expiresAt * 1000).toISOString()}) — retryRefunds completa`);
+      try {
+        const r = await this.inner.submitAsExecutor(await this.inner.buildHtlcRefund(b.meta.tradeId));
+        const conf = await this.inner.waitForConfirmation(r.txHash, 90_000);
+        if (conf.status !== 'CONFIRMED') throw new Error(`htlc_refund não confirmado (${conf.status})`);
+        return this.ref(r.txHash);
+      } catch (e) { this.fail('refund:htlc', e); }
+    }
     const trade = await this.inner.getTrade(b.meta.tradeId);
     if (!trade) throw new DomainError('SETTLEMENT_NOT_ALLOWED', 'trade inexistente on-chain');
     if (trade.state === TradeState.REFUNDED) return this.ref('refunded');
@@ -255,6 +346,14 @@ export class VerumSolanaAdapter implements SettlementAdapter, ParticipantStepPro
   async getDealState(dealId: string): Promise<OnChainDealState> {
     const bound = await bindingOf(this.deps, dealId, 'solana');
     if (!bound) return { status: 'NONE', revision: 0, deposits: {}, settledLegs: {} };
+    if (isHtlcMeta(bound.meta)) {
+      const m = bound.meta;
+      const h = await this.inner.getHtlc(m.tradeId).catch(() => null);
+      const legIndex = 0; // perna do vendedor (assetIn) — único depósito nesta rede
+      if (!h) return { status: 'REGISTERED', revision: bound.revision, deposits: {}, settledLegs: {}, dealHash: bound.dealHash || undefined, expiresAt: m.onChainExpiresAt, tradeId: m.tradeId };
+      const status = h.state === 'CLAIMED' ? 'SETTLED' as const : h.state === 'REFUNDED' ? 'REFUNDED' as const : 'FUNDED' as const;
+      return { status, revision: bound.revision, deposits: h.state === 'LOCKED' ? { [legIndex]: h.amount.toString() } : {}, settledLegs: h.state === 'CLAIMED' ? { [legIndex]: 'htlc-claimed' } : {}, dealHash: bound.dealHash || undefined, expiresAt: h.expiresAt, tradeId: m.tradeId };
+    }
     try {
       const t = await this.inner.getTrade(bound.meta.tradeId);
       if (!t) return { status: 'NONE', revision: 0, deposits: {}, settledLegs: {} };
@@ -275,7 +374,13 @@ export class VerumSolanaAdapter implements SettlementAdapter, ParticipantStepPro
     if (conf.status === 'FAILED') return { ref, status: 'reverted', confirmations: conf.confirmations, error: conf.reason };
     return { ref, status: 'pending', confirmations: 0 };
   }
-  async revealedPreimage(_dealId: string): Promise<string | null> { return null; }
+  /** Preimage revelada no claim do HTLC (lida do estado on-chain) — caminho inverso do fluxo normal. */
+  async revealedPreimage(dealId: string): Promise<string | null> {
+    const b = await bindingOf(this.deps, dealId, 'solana');
+    if (!b || !isHtlcMeta(b.meta)) return null;
+    const h = await this.inner.getHtlc(b.meta.tradeId).catch(() => null);
+    return h?.revealedPreimage ?? null;
+  }
 
   private async binding(dealId: string): Promise<{ meta: VerumMeta; dealHash: string }> {
     const b = await bindingOf(this.deps, dealId, 'solana');
@@ -287,6 +392,17 @@ export class VerumSolanaAdapter implements SettlementAdapter, ParticipantStepPro
   /** Na Solana o papel assina a PRÓPRIA transação: devolve a tx base64 fresca para a Verum Wallet assinar. */
   async buildParticipantStep(dealId: string, role: Role, signer: string): Promise<Record<string, unknown>> {
     const b = await this.binding(dealId);
+    if (isHtlcMeta(b.meta)) {
+      // O único passo do participante nesta rede é o LOCK do vendedor; os demais assinam na rede
+      // do contrato (signV2). Devolve a tx fresca de htlc_lock para a Verum Wallet.
+      const m = b.meta;
+      if (role !== 'SELLER' || signer !== m.htlcFunder) return { kind: 'done', tradeId: m.tradeId };
+      const h = await this.inner.getHtlc(m.tradeId);
+      if (h) return { kind: 'done', tradeId: m.tradeId, state: h.state };
+      const unsigned = await this.inner.buildHtlcLock({ htlcId: m.tradeId, hash: m.htlcHash, funder: m.htlcFunder, recipient: m.htlcRecipient, mint: m.htlcMint, amount: BigInt(m.htlcAmount), expiresAt: m.onChainExpiresAt });
+      const p = unsigned.payload as { transactionBase64: string; recentBlockhash: string; lastValidBlockHeight: number };
+      return { kind: 'solana', purpose: 'htlc_lock', tradeId: m.tradeId, vault: m.htlcVault, transactionBase64: p.transactionBase64, recentBlockhash: p.recentBlockhash, lastValidBlockHeight: p.lastValidBlockHeight };
+    }
     const onRole = ROLE_TO_ONCHAIN[role];
     const trade = await this.inner.getTrade(b.meta.tradeId);
     if (!trade) throw new DomainError('SETTLEMENT_NOT_ALLOWED', 'trade inexistente on-chain');
