@@ -107,7 +107,10 @@ export async function buildApi(deps: ApiDeps): Promise<FastifyInstance> {
     if (err instanceof DomainError) { void reply.code(HTTP_STATUS[err.code]).send({ error: err.code, message: err.message, details: err.details ?? null }); return; }
     const e = err as Error & { statusCode?: number; validation?: unknown };
     if (e.statusCode && e.statusCode < 500) { void reply.code(e.statusCode).send({ error: 'BAD_REQUEST', message: e.message }); return; }
-    logger.error({ err: e.message }, 'erro não tratado'); void reply.code(500).send({ error: 'INTERNAL', message: 'Erro interno' });
+    logger.error({ err: e.message, stack: e.stack?.split('\n').slice(0, 4).join(' | ') }, 'erro não tratado');
+    // Fora de prod, a mensagem real sobe na resposta — diagnóstico de campo sem acesso aos logs
+    // do host (o genérico "Erro interno" esconde até TypeError de dado antigo persistido).
+    void reply.code(500).send({ error: 'INTERNAL', message: deps.env !== 'prod' ? `Erro interno: ${e.message}` : 'Erro interno' });
   });
   const requireSession = (req: FastifyRequest): Session => { if (!req.session) throw new DomainError('FORBIDDEN', 'Sessão necessária'); return req.session; };
   const requireOperator = (req: FastifyRequest): Session => { const s = requireSession(req); if (s.role !== 'operator') throw new DomainError('FORBIDDEN', 'Apenas operadores'); return s; };

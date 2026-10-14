@@ -109,7 +109,7 @@ export async function createApp(config: Config, o: AppOverrides = {}): Promise<A
         // RECEBER o token do comprador: resolve pela carteira multichain da cadeira da mesa.
         const evmAddressOf = o.evmAddressOf ?? (async (dealId: string, role: Role) => {
           for (const m of Object.values(portalRef?.mesas() ?? {})) {
-            if (m.dealId !== dealId && !m.dealIds.includes(dealId)) continue;
+            if (m.dealId !== dealId && !(m.dealIds ?? []).includes(dealId)) continue;
             const w = m.chairs.find(c => c.role === role)?.wallet;
             if (!w) return null;
             return (w.addresses ?? []).find(a => /^0x[0-9a-fA-F]{40}$/.test(a.address))?.address ?? (/^0x[0-9a-fA-F]{40}$/.test(w.address) ? w.address : null);
@@ -128,7 +128,7 @@ export async function createApp(config: Config, o: AppOverrides = {}): Promise<A
       // precisa de endereço Solana — resolve pela carteira multichain da cadeira da mesa.
       const solAddressOf = async (dealId: string, role: Role) => {
         for (const m of Object.values(portalRef?.mesas() ?? {})) {
-          if (m.dealId !== dealId && !m.dealIds.includes(dealId)) continue;
+          if (m.dealId !== dealId && !(m.dealIds ?? []).includes(dealId)) continue;
           const w = m.chairs.find(c => c.role === role)?.wallet;
           if (!w) return null;
           return (w.addresses ?? []).find(a => a.network === 'solana')?.address ?? (w.network === 'solana' ? w.address : null);
@@ -151,7 +151,7 @@ export async function createApp(config: Config, o: AppOverrides = {}): Promise<A
       // — o portal sobe depois dos adapters).
       const btcAddressOf = o.btcAddressOf ?? (async (dealId: string, role: Role) => {
         for (const m of Object.values(portalRef?.mesas() ?? {})) {
-          if (m.dealId !== dealId && !m.dealIds.includes(dealId)) continue;
+          if (m.dealId !== dealId && !(m.dealIds ?? []).includes(dealId)) continue;
           const w = m.chairs.find(c => c.role === role)?.wallet;
           if (!w) return null;
           return (w.addresses ?? []).find(a => a.network === 'bitcoin')?.address ?? (w.network === 'bitcoin' ? w.address : null);
