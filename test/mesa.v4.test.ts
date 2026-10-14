@@ -27,6 +27,12 @@ describe('settlementPlan — derivação determinística', () => {
     expect(atom?.mode).toBe('CROSS_CHAIN');
     expect(atom?.htlc).toEqual({ hashAlgo: 'sha256', btcSide: 'SELLER', btcLockBlocks: 0, tokenLockSeconds: 2400 });
     expect(atom?.bridge).toBeUndefined(); // atômico por hashlock, não por ponte
+    // SOL NATIVO do vendedor também é atômico: htlc_lock_sol guarda lamports no PDA (sem wSOL)
+    const nativo = deriveSettlementPlan([chair('SELLER', 'solana', null, 'SOL', 9), chair('BUYER', 'ethereum', USDT_ETH, 'USDT')]);
+    expect(nativo?.mode).toBe('CROSS_CHAIN');
+    expect(nativo?.htlc?.hashAlgo).toBe('sha256');
+    expect(nativo?.bridge).toBeUndefined();
+    expect(nativo?.summary).toContain('HTLC nativo');
     // direção inversa (vendedor EVM) ainda não tem hashlock no lado vendedor → segue CCIP pendente
     const inverse = deriveSettlementPlan([chair('SELLER', 'ethereum', USDT_ETH, 'USDT'), chair('BUYER', 'solana', 'So11111111111111111111111111111111111111112', 'wSOL', 9)]);
     expect(inverse?.bridge).toBe('CCIP');

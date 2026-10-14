@@ -31,8 +31,9 @@ export function parseKeypair(raw: string): Keypair {
  *  multichain da cadeira (ex.: comprador em rede EVM que RECEBE wSOL no claim do HTLC). */
 export type VerumSolanaDeps = VerumAdapterDeps & { solAddressOf?: (dealId: string, role: Role) => Promise<string | null> };
 
-/** Meta persistida da perna HTLC (deal.onChain.solana.meta) — `tradeId` carrega o htlcId. */
-interface HtlcMeta { tradeId: string; termsHash: string; onChainCreatedAt: number; onChainExpiresAt: number; htlcKind: 1; htlcHash: string; htlcMint: string; htlcAmount: string; htlcFunder: string; htlcRecipient: string; htlcVault: string }
+/** Meta persistida da perna HTLC (deal.onChain.solana.meta) — `tradeId` carrega o htlcId.
+ *  `htlcMint` null = SOL NATIVO (lamports no PDA; vault = o próprio PDA). */
+interface HtlcMeta { tradeId: string; termsHash: string; onChainCreatedAt: number; onChainExpiresAt: number; htlcKind: 1; htlcHash: string; htlcMint: string | null; htlcAmount: string; htlcFunder: string; htlcRecipient: string; htlcVault: string }
 const isHtlcMeta = (m: { tradeId: string } & Record<string, unknown>): m is HtlcMeta & Record<string, unknown> => (m as { htlcKind?: number }).htlcKind === 1;
 
 export class VerumSolanaAdapter implements SettlementAdapter, ParticipantStepProvider {
@@ -119,7 +120,9 @@ export class VerumSolanaAdapter implements SettlementAdapter, ParticipantStepPro
     const checkedAt = Date.now();
     try {
       if (asset.network !== 'solana') return { ok: false, reasons: ['rede não corresponde ao adaptador'], observed: { exists: false }, checkedAt };
-      if (!asset.contractOrMint) return { ok: false, reasons: ['escrow Verum é só-token (sem SOL nativo)'], observed: { exists: false }, checkedAt };
+      // SOL nativo é suportado na perna HTLC (htlc_lock_sol guarda lamports no PDA); o escrow
+      // N-de-N direto continua só-token — essa restrição é validada na montagem dos termos.
+      if (!asset.contractOrMint) return { ok: true, reasons: [], observed: { exists: true, decimals: 9, standard: 'native' }, checkedAt };
       const info = await this.conn.getAccountInfo(new PublicKey(asset.contractOrMint), 'confirmed');
       if (!info) return { ok: false, reasons: ['mint inexistente no cluster'], observed: { exists: false }, checkedAt };
       const decimals = info.data[44] as number;
@@ -165,24 +168,27 @@ export class VerumSolanaAdapter implements SettlementAdapter, ParticipantStepPro
     return c.legs.find(l => l.escrowChain === 'solana' && l.mode === 'HTLC') ?? null;
   }
 
-  /** Registro da perna HTLC: derivação determinística (sem tx) — o lock acontece no funding. */
+  /** Registro da perna HTLC: derivação determinística (sem tx) — o lock acontece no funding.
+   *  SOL nativo (contractOrMint null) é suportado: htlc_lock_sol guarda lamports no próprio PDA. */
   private async registerHtlc(c: DealCommitment, leg: DealCommitment['legs'][number]): Promise<RegisterResult> {
     if (!c.htlcHash) throw new DomainError('SETTLEMENT_NOT_ALLOWED', 'perna HTLC exige htlcHash (rota HTLC)');
-    if (!leg.asset.contractOrMint) throw new DomainError('SETTLEMENT_NOT_ALLOWED', 'perna HTLC Solana é só-token (SOL nativo: use wSOL)');
     const funder = c.participants.find(p => p.role === leg.from)?.address;
     if (!funder || !this.validateAddress(funder)) throw new DomainError('SETTLEMENT_NOT_ALLOWED', 'vendedor sem endereço Solana válido');
     // Quem RECEBE no claim é a contraparte (comprador), que vive na rede do contrato — o endereço
     // Solana dele vem da carteira multichain da cadeira da mesa.
     const recipient = await this.deps.solAddressOf?.(c.dealId, leg.to as Role) ?? null;
-    if (!recipient || !this.validateAddress(recipient)) throw new DomainError('SETTLEMENT_NOT_ALLOWED', `${leg.to} sem endereço Solana na carteira multichain (necessário para receber o token do HTLC)`);
+    if (!recipient || !this.validateAddress(recipient)) throw new DomainError('SETTLEMENT_NOT_ALLOWED', `${leg.to} sem endereço Solana na carteira multichain (necessário para receber o ativo do HTLC)`);
     const now = await this.inner.now();
     // Timeout LONGO (4 h ≫ 40 min do escrow V2): o vendedor tranca primeiro e nunca fica sem
     // janela de claim depois que a preimage é revelada na outra rede.
     const expiresAt = now + 4 * 3600;
     const htlcId = sha256Hex(`VERUM_HTLC_SOL|${c.dealHash}|${c.revision}`);
-    const program = await this.inner.tokenProgramFor(leg.asset.contractOrMint);
-    const vault = associatedTokenAddress(this.inner.htlcPda(htlcId), new PublicKey(leg.asset.contractOrMint), program).toBase58();
-    const meta: HtlcMeta = { tradeId: htlcId, termsHash: c.htlcHash, onChainCreatedAt: now, onChainExpiresAt: expiresAt, htlcKind: 1, htlcHash: c.htlcHash, htlcMint: leg.asset.contractOrMint, htlcAmount: leg.amountBase, htlcFunder: funder, htlcRecipient: recipient, htlcVault: vault };
+    // Nativo: o "vault" é o próprio PDA do HTLC (lamports); token: ATA do PDA.
+    const mint = leg.asset.contractOrMint ?? null;
+    const vault = mint
+      ? associatedTokenAddress(this.inner.htlcPda(htlcId), new PublicKey(mint), await this.inner.tokenProgramFor(mint)).toBase58()
+      : this.inner.htlcPda(htlcId).toBase58();
+    const meta: HtlcMeta = { tradeId: htlcId, termsHash: c.htlcHash, onChainCreatedAt: now, onChainExpiresAt: expiresAt, htlcKind: 1, htlcHash: c.htlcHash, htlcMint: mint, htlcAmount: leg.amountBase, htlcFunder: funder, htlcRecipient: recipient, htlcVault: vault };
     return { ...this.ref('htlc-derived'), meta: meta as unknown as VerumMeta };
   }
 
@@ -225,7 +231,7 @@ export class VerumSolanaAdapter implements SettlementAdapter, ParticipantStepPro
     const sk = this.signerFor(from);
     if (!sk) {
       const p = unsigned.payload as { transactionBase64: string };
-      throw new DomainError('FUNDING_REQUIRED', 'Tranque o token no HTLC Solana pela sua carteira', { kind: 'solana-htlc', htlcId: meta.tradeId, vault: meta.htlcVault, requiredBase: meta.htlcAmount, transactionBase64: p.transactionBase64 });
+      throw new DomainError('FUNDING_REQUIRED', meta.htlcMint ? 'Tranque o token no HTLC Solana pela sua carteira' : 'Tranque o SOL no HTLC pela sua carteira', { kind: 'solana-htlc', htlcId: meta.tradeId, vault: meta.htlcVault, requiredBase: meta.htlcAmount, transactionBase64: p.transactionBase64 });
     }
     const funder = Keypair.fromSecretKey(sk);
     await this.ensureLamports(funder.publicKey);

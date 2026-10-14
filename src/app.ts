@@ -193,7 +193,7 @@ export async function createApp(config: Config, o: AppOverrides = {}): Promise<A
   prices[`tron:${tronChainId}/trc20:${tronUsdt}`] = 1.0001; prices[`tron:${tronChainId}/trc20:${tronTbtc}`] = 64_230.5;
   // BTC nativo na chainId REAL do adapter (testnet/mainnet via BITCOIN_*; o regtest já está em LOCAL_PRICES).
   prices[`bip122:${adapters.require('bitcoin').chain.chainId}/slip44:0`] = 64_230.5;
-  if (solCfg) { const solChainId = adapters.require('solana').chain.chainId; prices[`solana:${solChainId}/token:${solCfg.tusdtMint}`] = 1.0001; prices[`solana:${solChainId}/token:${solCfg.tbtcMint}`] = 64_230.5; prices[`solana:${solChainId}/token:${WSOL_MINT}`] = 151.2; }
+  if (solCfg) { const solChainId = adapters.require('solana').chain.chainId; prices[`solana:${solChainId}/token:${solCfg.tusdtMint}`] = 1.0001; prices[`solana:${solChainId}/token:${solCfg.tbtcMint}`] = 64_230.5; prices[`solana:${solChainId}/token:${WSOL_MINT}`] = 151.2; prices[`solana:${solChainId}/slip44:501`] = 151.2; }
   const depth: Record<string, number> = Object.fromEntries(Object.keys(prices).map(k => [k, 8_000_000]));
   const priceSources = (o.priceSources as StaticPriceSource[] | undefined) ?? [new StaticPriceSource('Pyth', 1.0, prices), new StaticPriceSource('Chainlink', 1.0, prices), new StaticPriceSource('Coinbase', 0.8, prices), new StaticPriceSource('Kraken', 0.8, prices)];
   const liquiditySources = (o.liquiditySources as StaticLiquiditySource[] | undefined) ?? [new StaticLiquiditySource('Binance', 1.0, depth), new StaticLiquiditySource('Coinbase', 0.9, depth), new StaticLiquiditySource('Jupiter', 0.7, depth)];
@@ -275,11 +275,12 @@ export async function createApp(config: Config, o: AppOverrides = {}): Promise<A
   // Propostas estruturadas de alteração de termos (§5.3/§6) — porta de entrada tipada para o amend.
   const proposals = new ProposalService({ deals, now, audit, notifier: { notify: dealId => logger.info({ dealId }, 'atualização de proposta de termos') } });
   // Mesas multi-instância (v3): cadeiras + convites por cadeira + prova de posse na conexão.
-  // Embrulho canônico por rede: SOL→wSOL com o adapter Solana real ativo (mesma condição do
-  // registro canônico do wSOL — no sim local o nativo segue o caminho legado); ETH→WETH só com o
-  // escrow V2 ativo (WETH precisa estar na allowlist on-chain via addToken). BTC fica de fora (HTLC nativo).
-  const nativeWrapOf = (network: string): { contractOrMint: string; decimals: number } | null => {
-    if (network === 'solana' && solCfg) return { contractOrMint: WSOL_MINT, decimals: 9 };
+  // Embrulho canônico por rede. SOL fica NATIVO na perna HTLC cross-chain (htlc_lock_sol guarda
+  // lamports no PDA) — só embrulha em wSOL quando a CONTRAPARTE também é Solana (escrow N-de-N
+  // direto, que é só-token). ETH→WETH sempre que o escrow V2 está ativo (contrato EVM é só-token
+  // em qualquer rota). BTC fica de fora (HTLC nativo próprio).
+  const nativeWrapOf = (network: string, counterpartyNetwork: string | null): { contractOrMint: string; decimals: number } | null => {
+    if (network === 'solana' && solCfg && counterpartyNetwork === 'solana') return { contractOrMint: WSOL_MINT, decimals: 9 };
     if (network === 'ethereum' && verumEvmCfg?.escrowV2) return { contractOrMint: WETH_SEPOLIA, decimals: 18 };
     return null;
   };

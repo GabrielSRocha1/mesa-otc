@@ -315,12 +315,19 @@ export class SolanaChainAdapter implements ChainAdapter {
     return [createAta, SystemProgram.transfer({ fromPubkey: funder, toPubkey: ata, lamports: amount - have }), syncNative];
   }
 
-  /** Tranca `amount` do mint sob hashlock sha256 — assinada pelo funder (vendedor) na Verum Wallet.
-   *  Contas na ORDEM EXATA de `HtlcLockIx` (Rust); dados borsh: htlc_id | hash | recipient | amount | expires_at. */
-  async buildHtlcLock(p: { htlcId: string; hash: string; funder: string; recipient: string; mint: string; amount: bigint; expiresAt: number }): Promise<UnsignedTx> {
-    const program = await this.tokenProgramFor(p.mint);
-    const mint = pk(p.mint); const funder = pk(p.funder);
+  /** Tranca `amount` sob hashlock sha256 — assinada pelo funder (vendedor) na Verum Wallet.
+   *  mint=null → SOL NATIVO (htlc_lock_sol: lamports guardados no próprio PDA, sem wSOL).
+   *  Contas na ORDEM EXATA do Rust; dados borsh: htlc_id | hash | recipient | amount | expires_at. */
+  async buildHtlcLock(p: { htlcId: string; hash: string; funder: string; recipient: string; mint: string | null; amount: bigint; expiresAt: number }): Promise<UnsignedTx> {
+    const funder = pk(p.funder);
     const htlc = this.htlcPda(p.htlcId);
+    const data = concat(fromHex(p.htlcId), fromHex(p.hash), pk(p.recipient).toBytes(), u64le(p.amount), i64le(p.expiresAt));
+    if (p.mint == null) {
+      const keys = [meta(this.configPda, false), meta(funder, true, true), meta(htlc, true), meta(SystemProgram.programId, false)];
+      return this.toUnsigned(p.funder, this.ix("htlc_lock_sol", keys, data), "htlc_lock_sol (tranca SOL nativo sob hashlock)");
+    }
+    const program = await this.tokenProgramFor(p.mint);
+    const mint = pk(p.mint);
     const keys = [
       meta(this.configPda, false), meta(funder, true, true), meta(htlc, true),
       meta(this.tokenPda(p.mint), false), meta(mint, false),
@@ -328,7 +335,6 @@ export class SolanaChainAdapter implements ChainAdapter {
       meta(associatedTokenAddress(htlc, mint, program), true),
       meta(program, false), meta(ASSOCIATED_TOKEN_PROGRAM_ID, false), meta(SystemProgram.programId, false),
     ];
-    const data = concat(fromHex(p.htlcId), fromHex(p.hash), pk(p.recipient).toBytes(), u64le(p.amount), i64le(p.expiresAt));
     const wrap = p.mint === WSOL_MINT ? await this.wrapSolIxs(funder, p.amount) : [];
     return this.toUnsigned(p.funder, [...wrap, this.ix("htlc_lock", keys, data)], "htlc_lock (tranca o token sob hashlock)");
   }
@@ -337,7 +343,15 @@ export class SolanaChainAdapter implements ChainAdapter {
   async buildHtlcClaim(htlcIdHex: string, preimageHex: string): Promise<UnsignedTx> {
     const h = await this.getHtlc(htlcIdHex);
     if (!h) throw new Error("HtlcNotFound");
-    const program = pk(h.tokenProgram); const mint = pk(h.mint); const htlc = this.htlcPda(htlcIdHex);
+    const htlcAcc = this.htlcPda(htlcIdHex);
+    if (h.native) {
+      const exec0 = this.executor?.publicKey ?? pk(h.recipient);
+      const keys0 = [meta(htlcAcc, true), meta(exec0, false, true), meta(pk(h.recipient), true)];
+      const preimage0 = fromHex(preimageHex);
+      const len0 = new Uint8Array(4); new DataView(len0.buffer).setUint32(0, preimage0.length, true);
+      return this.toUnsigned("ANY", this.ix("htlc_claim_sol", keys0, concat(len0, preimage0)), "htlc_claim_sol (entrega o SOL ao recipient com a preimage)");
+    }
+    const program = pk(h.tokenProgram); const mint = pk(h.mint); const htlc = htlcAcc;
     const exec = this.executor?.publicKey ?? pk(h.recipient);
     const keys = [
       meta(htlc, true), meta(exec, true, true), meta(mint, false),
@@ -355,7 +369,13 @@ export class SolanaChainAdapter implements ChainAdapter {
   async buildHtlcRefund(htlcIdHex: string): Promise<UnsignedTx> {
     const h = await this.getHtlc(htlcIdHex);
     if (!h) throw new Error("HtlcNotFound");
-    const program = pk(h.tokenProgram); const mint = pk(h.mint); const htlc = this.htlcPda(htlcIdHex);
+    const htlcAcc = this.htlcPda(htlcIdHex);
+    if (h.native) {
+      const exec0 = this.executor?.publicKey ?? pk(h.funder);
+      const keys0 = [meta(htlcAcc, true), meta(exec0, false, true), meta(pk(h.funder), true)];
+      return this.toUnsigned("ANY", this.ix("htlc_refund_sol", keys0, new Uint8Array()), "htlc_refund_sol (devolve o SOL ao funder após timeout)");
+    }
+    const program = pk(h.tokenProgram); const mint = pk(h.mint); const htlc = htlcAcc;
     const exec = this.executor?.publicKey ?? pk(h.funder);
     const keys = [
       meta(htlc, true), meta(exec, true, true), meta(mint, false),
@@ -366,8 +386,9 @@ export class SolanaChainAdapter implements ChainAdapter {
     return this.toUnsigned("ANY", this.ix("htlc_refund", keys, new Uint8Array()), "htlc_refund (devolve ao funder após timeout)");
   }
 
-  /** Lê o estado da perna HTLC — layout borsh de `HtlcLock` (Rust). `revealedPreimage` vazia antes do claim. */
-  async getHtlc(htlcIdHex: string): Promise<{ htlcId: string; funder: string; recipient: string; mint: string; tokenProgram: string; amount: bigint; hash: string; expiresAt: number; state: "LOCKED" | "CLAIMED" | "REFUNDED"; createdAt: number; revealedPreimage: string | null } | null> {
+  /** Lê o estado da perna HTLC — layout borsh de `HtlcLock` (Rust). `revealedPreimage` vazia antes
+   *  do claim; `native` = perna de SOL em lamports (mint sentinela Pubkey::default()). */
+  async getHtlc(htlcIdHex: string): Promise<{ htlcId: string; funder: string; recipient: string; mint: string; native: boolean; tokenProgram: string; amount: bigint; hash: string; expiresAt: number; state: "LOCKED" | "CLAIMED" | "REFUNDED"; createdAt: number; revealedPreimage: string | null } | null> {
     const info = await this.conn.getAccountInfo(this.htlcPda(htlcIdHex), this.commitment);
     if (!info) return null;
     const d = info.data; let o = 8;
@@ -384,7 +405,7 @@ export class SolanaChainAdapter implements ChainAdapter {
     const preLen = d.readUInt32LE(o); o += 4;
     const revealedPreimage = preLen > 0 ? toHex(d.subarray(o, o + preLen)) : null;
     const state = stateByte === 2 ? "CLAIMED" as const : stateByte === 3 ? "REFUNDED" as const : "LOCKED" as const;
-    return { htlcId, funder, recipient, mint, tokenProgram, amount, hash, expiresAt, state, createdAt, revealedPreimage };
+    return { htlcId, funder, recipient, mint, native: mint === PublicKey.default.toBase58(), tokenProgram, amount, hash, expiresAt, state, createdAt, revealedPreimage };
   }
 
   // ----------------------------------------------------------------- submissão / leitura
