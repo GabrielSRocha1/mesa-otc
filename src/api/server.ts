@@ -1035,7 +1035,13 @@ export async function buildApi(deps: ApiDeps): Promise<FastifyInstance> {
     deps.portal.requirePayMaster(token);
     const b = parse(z.object({ token: z.string().regex(/^0x[0-9a-fA-F]{40}$/), decimals: z.number().int().min(0).max(30), symbol: z.string().min(1).max(20) }), req.body);
     if (!deps.escrowAddToken) throw new DomainError('SETTLEMENT_NOT_ALLOWED', 'addToken indisponível (escrow V2/keeper não configurado)');
-    const r = await deps.escrowAddToken(b.token as `0x${string}`, b.decimals, b.symbol);
+    let r: { txHash: string };
+    try { r = await deps.escrowAddToken(b.token as `0x${string}`, b.decimals, b.symbol); }
+    catch (e) {
+      // Revert comum: keeper não é o owner do escrow (addToken é onlyOwner) → motivo claro p/ a UI.
+      const msg = String((e as Error)?.message || e).replace(/\s+/g, ' ').slice(0, 240);
+      throw new DomainError('SETTLEMENT_NOT_ALLOWED', `Não foi possível ativar o token no escrow (o keeper é o owner do contrato?): ${msg}`);
+    }
     await deps.audit.append({ actorType: 'user', actorId: 'portal', category: 'escrow.token.ativado', dealId: null, payload: { token: b.token, symbol: b.symbol } });
     return { ok: true, ...r };
   });
