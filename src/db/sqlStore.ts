@@ -102,7 +102,11 @@ export async function createPgClient(connectionString: string): Promise<SqlClien
     connectionString,
     // Supabase exige TLS; o pooler usa cert gerenciado (não verificamos a cadeia no cliente).
     ssl: { rejectUnauthorized: false },
-    max: 3,
+    // 1 conexão por instância: em serverless cada lambda quente vira um pool — com o pooler em
+    // session mode (pool_size 15 no Supabase) três por instância esgotam em ~5 lambdas e o boot
+    // falha com EMAXCONNSESSION. sqlStore só usa pool.query (sem checkout/transação), então
+    // max:1 apenas enfileira; a URL correta continua sendo a do pooler transaction (porta 6543).
+    max: 1,
     idleTimeoutMillis: 10_000,
     connectionTimeoutMillis: 10_000,
   });
