@@ -293,7 +293,14 @@ export async function buildApi(deps: ApiDeps): Promise<FastifyInstance> {
    */
   /** Adapter do passo on-chain: a primeira leg cuja rede expõe participant-steps (na rota HTLC a
    *  legs[0] é a BTC externa — o passo do participante vive na leg de CONTRATO). */
-  const stepAdapterOf = (d: Deal) => {
+  const stepAdapterOf = (d: Deal, role?: Role) => {
+    // O papel que FINANCIA uma perna HTLC age NAQUELA rede (lock) — ex.: comprador da direção
+    // inversa tranca na Solana enquanto o contrato vive na EVM. Para os demais, vale a primeira
+    // perna com participant-steps (a de contrato).
+    if (role) {
+      const htlcLeg = d.terms?.legs.find(l => l.mode === 'HTLC' && l.from === role);
+      if (htlcLeg) { const a = deps.adapters?.get(htlcLeg.escrowChain); if (a && hasParticipantSteps(a)) return a; }
+    }
     for (const leg of d.terms?.legs ?? []) { const a = deps.adapters?.get(leg.escrowChain); if (a && hasParticipantSteps(a)) return a; }
     throw new DomainError('SETTLEMENT_NOT_ALLOWED', 'rede em modo simulado — o passo on-chain é automático');
   };
@@ -303,7 +310,7 @@ export async function buildApi(deps: ApiDeps): Promise<FastifyInstance> {
     const me = d.participants.find(p => p.address.toLowerCase() === s.address.toLowerCase());
     if (!me) throw new DomainError('NOT_PARTICIPANT', 'não é participante');
     if (!d.terms?.legs.length) throw new DomainError('SETTLEMENT_NOT_ALLOWED', 'termos não congelados');
-    return stepAdapterOf(d).buildParticipantStep(id, me.role, s.address);
+    return stepAdapterOf(d, me.role).buildParticipantStep(id, me.role, s.address);
   });
   app.post('/v1/deals/:id/onchain-tx', async (req, reply) => {
     const s = requireSession(req); const { id } = req.params as { id: string };
@@ -312,7 +319,7 @@ export async function buildApi(deps: ApiDeps): Promise<FastifyInstance> {
     const me = d.participants.find(p => p.address.toLowerCase() === s.address.toLowerCase());
     if (!me) throw new DomainError('NOT_PARTICIPANT', 'não é participante');
     if (!d.terms?.legs.length) throw new DomainError('SETTLEMENT_NOT_ALLOWED', 'termos não congelados');
-    const a = stepAdapterOf(d);
+    const a = stepAdapterOf(d, me.role);
     return idempotent(req, reply, async () => a.submitParticipantStep(id, me.role, s.address, b as Record<string, unknown>));
   });
 
