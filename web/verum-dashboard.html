@@ -1196,6 +1196,21 @@ window.addEventListener('unhandledrejection',function(e){try{console.warn('[veru
     info:'<circle cx="12" cy="12" r="9"/><path d="M12 8h.01M11 12h1v4h1"/>',
     err:'<circle cx="12" cy="12" r="9"/><path d="M12 8v5M12 16h.01"/>'
   };
+  // POP-UP de turno (todas as telas): quem assina agora / quem acabou de assinar / liquidada.
+  function turnPop(title,sub,accent){
+    var old=document.getElementById('turnPop'); if(old) old.remove();
+    if(document.querySelector('#modalRoot #pRvBack')) return; // nunca por cima do modal de assinatura
+    var el=document.createElement('div'); el.id='turnPop';
+    el.style.cssText='position:fixed;inset:0;background:rgba(2,6,16,.72);z-index:88;display:grid;place-items:center;padding:16px';
+    el.innerHTML='<div style="background:var(--card);border:1px solid '+(accent||'var(--line)')+';border-radius:16px;max-width:420px;width:100%;padding:26px;text-align:center">'
+      +'<div style="font-size:40px;margin-bottom:10px">✍️</div>'
+      +'<div style="font-family:var(--f-head);font-weight:800;font-size:19px;margin-bottom:8px">'+title+'</div>'
+      +'<div style="font-size:13.5px;color:var(--ink-2)">'+sub+'</div>'
+      +'<button class="btn" style="margin-top:18px;height:42px" onclick="this.closest(\'#turnPop\').remove()">Entendi</button></div>';
+    document.body.appendChild(el);
+    el.addEventListener('click',function(e){ if(e.target===el) el.remove(); });
+    setTimeout(function(){ el.remove(); },12000);
+  }
   function toast(msg,type){
     type=type||'info';
     const el=document.createElement('div');
@@ -2442,6 +2457,7 @@ window.addEventListener('unhandledrejection',function(e){try{console.warn('[veru
   // Config sendo EDITADA pelo admin: enquanto "dirty", o polling NÃO sobrescreve os campos (evita que
   // a alteração "volte sozinha"). Zera ao abrir outra mesa e após salvar (aí o servidor já reflete o novo).
   let m3CfgDirty=false;
+  let m3TurnKey=null; // pop-up de turno do admin: detecta avanço da rodada entre refreshes
   let m3dChairToken={ SELLER:null, BUYER:null }; // cadeiras (chairId+ativo) p/ troca de token no Gerenciar
   // Reflete no botão/indicador se há alterações pendentes de salvar.
   function m3CfgDirtyUI(savedNow){
@@ -3085,6 +3101,23 @@ window.addEventListener('unhandledrejection',function(e){try{console.warn('[veru
       const cmBtn=$('#m3dCancelMesa'); if(cmBtn) cmBtn.style.display=(m.canCancel===false)?'none':'';
       const irrev=$('#m3dIrrev'); if(irrev) irrev.style.display=m.irreversible?'':'none';
       if(m.deal&&m.deal.turnRole) $('#m3dSign').textContent='Assinar a vez ('+(M3_ROLE[m.deal.turnRole]||m.deal.turnRole)+') — '+(m.deal.validSignatures||0)+'/'+(m.deal.requiredSignatures||0);
+      // POP-UP para o ADMIN: a cada avanço da rodada (inclusive logo após o approve) mostra quem
+      // assina agora; na última, avisa que está liquidando/liquidada.
+      try{
+        const dl=m.deal; const key=dl?(dl.id+'|'+(dl.turnRole||'-')+'|'+(dl.validSignatures||0)+'|'+dl.state):null;
+        // Dispara na MUDANÇA e também na primeira carga com rodada aberta (pós-approve): o PM vê
+        // imediatamente quem deve assinar. Estados finais só avisam quando houve transição real.
+        const fire=key&&m3TurnKey!==key&&(dl.state==='AWAITING_SIGNATURES'?true:m3TurnKey!==null);
+        if(fire){
+          const nm=r=>{ const c=(m.chairs||[]).find(x=>x.role===r); return (M3_ROLE[r]||r)+(c&&c.firstName?(' ('+c.firstName+')':'')); };
+          if(dl.state==='AWAITING_SIGNATURES'&&dl.turnRole){
+            const done=dl.signed||[]; const last=done.length?('✅ '+nm(done[done.length-1])+' assinou · '):'';
+            turnPop('Vez de assinar: '+nm(dl.turnRole), last+'Assinaturas '+(dl.validSignatures||0)+'/'+(dl.requiredSignatures||0)+' — avise o participante; a janela é de 5 minutos.', '#eab308');
+          } else if(dl.state==='SETTLED') turnPop('Operação liquidada ✓','Todas as assinaturas coletadas — o contrato executou a troca.','#22c55e');
+          else if(dl.state==='SETTLING'||dl.state==='SETTLEMENT_VALIDATION') turnPop('Todas assinaram — liquidando…','O contrato está executando a liquidação atômica.','#22c55e');
+        }
+        m3TurnKey=key;
+      }catch(e){}
       m3Tick();
       m3RenderBalances();
     }catch(e){ /* polling tolerante */ }
@@ -3253,7 +3286,8 @@ window.addEventListener('unhandledrejection',function(e){try{console.warn('[veru
   // operação (histórico/ativa) em vez da ativa da mesa. Somente leitura, exceto se for a vez do papel.
   const P_OP=(new URLSearchParams(location.search)).get('op')||'';
   let P_TOK='';
-  let pAutoTurnKey=null; // "ser puxado para assinar": abre a tela de assinatura 1x quando chega a vez
+  let pAutoTurnKey=null;
+  let pTurnKey=null; // pop-up de turno do participante (fora da vez) // "ser puxado para assinar": abre a tela de assinatura 1x quando chega a vez
   (function(){ try{ const m=/[#&]pt=([^&]+)/.exec(location.hash); if(m){ P_TOK=decodeURIComponent(m[1]); try{ sessionStorage.setItem('verum_mesa_pt_'+P_MESA,P_TOK); localStorage.setItem('verum_mesa_pt_'+P_MESA,P_TOK); }catch(e){} history.replaceState(null,'',location.pathname+location.search); } if(!P_TOK&&P_MESA){ try{ P_TOK=sessionStorage.getItem('verum_mesa_pt_'+P_MESA)||localStorage.getItem('verum_mesa_pt_'+P_MESA)||''; }catch(e){} } }catch(e){} })();
   const P_ON=!!(P_MESA&&P_TOK);
   async function pApi(path,opts){
@@ -3309,6 +3343,23 @@ window.addEventListener('unhandledrejection',function(e){try{console.warn('[veru
       +(m.irreversible?'<br><span style="color:var(--amber)">🔒 Operação irreversível — fundos trancados; o contrato roda até a liquidação (preimage) ou o reembolso após o timelock.</span>':'');
     const myTurn=d&&d.state==='AWAITING_SIGNATURES'&&d.turnRole===me.role&&!(d.signed||[]).includes(me.role);
     $('#pSignBtn').style.display=myTurn?'':'none';
+    // POP-UP para o PARTICIPANTE fora da vez: a cada avanço da rodada mostra quem está assinando
+    // agora / quem acabou de assinar; na liquidação, confirma. (Na SUA vez o modal de assinatura
+    // abre sozinho logo abaixo — o pop-up informativo não compete com ele.)
+    try{
+      const key=d?(d.id+'|'+(d.turnRole||'-')+'|'+(d.validSignatures||0)+'|'+d.state):null;
+      const nm=r=>{ const c=(m.chairs||[]).find(x=>x.role===r); return (M3_ROLE[r]||r)+(c&&c.firstName?(' ('+c.firstName+')':'')); };
+      const fire=key&&pTurnKey!==key&&(d.state==='AWAITING_SIGNATURES'?true:pTurnKey!==null);
+      if(fire&&!myTurn){
+        if(d.state==='AWAITING_SIGNATURES'&&d.turnRole){
+          const done=d.signed||[]; const last=done.length?('✅ '+nm(done[done.length-1])+' assinou · ':'');
+          const mine=(d.signed||[]).includes(me.role)?'Você já assinou — acompanhe. ':'';
+          turnPop('Vez de assinar: '+nm(d.turnRole), mine+last+'Assinaturas '+(d.validSignatures||0)+'/'+(d.requiredSignatures||0)+'.', '#eab308');
+        } else if(d.state==='SETTLED') turnPop('Operação liquidada ✓','Todas as assinaturas coletadas — o contrato executou a troca.','#22c55e');
+        else if(d.state==='SETTLING'||d.state==='SETTLEMENT_VALIDATION') turnPop('Todas assinaram — liquidando…','O contrato está executando a liquidação atômica.','#22c55e');
+      }
+      pTurnKey=key;
+    }catch(e){}
     // wSOL → SOL: visível em mesa Solana após o fim da operação (liquidada/reembolsada) — é
     // quando alguém fica com wSOL na mão (comprador no settle; vendedor no refund).
     const pud=$('#pUnwrapBtn'); if(pud) pud.style.display=(m.network==='solana'&&d&&['SETTLED','REFUNDED','EXPIRED'].includes(d.state))?'':'none';

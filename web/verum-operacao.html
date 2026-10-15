@@ -386,6 +386,40 @@ window.addEventListener('unhandledrejection',function(e){try{console.warn('[veru
   }
 
   function okJson(r){ return r.json().then(function(d){ return {ok:r.ok,d:d}; }); }
+  // ── POP-UP de turno: ao aprovar e a cada avanço da rodada, TODO espectador vê quem assina
+  // agora (e quem acabou de assinar). Detecta mudança por (deal, vez, nº de assinaturas).
+  var lastTurnKey=null;
+  function roleName(mesa,role){ var c=(mesa.chairs||[]).find(function(x){return x.role===role;}); var nm=c&&c.firstName?(' ('+c.firstName+')':''); return (ROLE[role]||role)+nm; }
+  function turnPopup(title,subtitle,accent){
+    var old=document.getElementById('turnPop'); if(old) old.remove();
+    var el=document.createElement('div'); el.id='turnPop';
+    el.style.cssText='position:fixed;inset:0;background:rgba(2,6,16,.72);z-index:90;display:grid;place-items:center;padding:16px';
+    el.innerHTML='<div style="background:var(--card,#0d1526);border:1px solid '+(accent||'var(--line,#243)')+';border-radius:16px;max-width:420px;width:100%;padding:26px;text-align:center">'
+      +'<div style="font-size:40px;margin-bottom:10px">✍️</div>'
+      +'<div style="font-family:var(--f-head);font-weight:800;font-size:19px;margin-bottom:8px">'+title+'</div>'
+      +'<div style="font-size:13.5px;color:var(--ink-2,#aab)">'+subtitle+'</div>'
+      +'<button id="turnPopOk" style="margin-top:18px;height:44px;padding:0 26px;border-radius:10px;border:1px solid var(--line,#243);background:transparent;color:inherit;cursor:pointer">Entendi</button></div>';
+    document.body.appendChild(el);
+    var close=function(){ el.remove(); };
+    el.addEventListener('click',function(e){ if(e.target===el) close(); });
+    document.getElementById('turnPopOk').addEventListener('click',close);
+    setTimeout(close,12000); // some sozinho — o polling traz o próximo
+  }
+  function maybeTurnPopup(mesa){
+    var d=mesa&&mesa.deal; if(!d) { lastTurnKey=null; return; }
+    var key=d.id+'|'+(d.turnRole||'-')+'|'+(d.validSignatures||0)+'|'+d.state;
+    var first=lastTurnKey===null; var changed=lastTurnKey!==null&&lastTurnKey!==key;
+    lastTurnKey=key;
+    if(first&&d.state!=='AWAITING_SIGNATURES') return; // não abre pop-up de histórico ao carregar
+    if(d.state==='AWAITING_SIGNATURES'&&d.turnRole){
+      var done=(d.signed||[]); var lastSigned=done.length?roleName(mesa,done[done.length-1]):null;
+      var sub=(lastSigned?('✅ '+lastSigned+' assinou · '):'')
+        +'Assinaturas '+(d.validSignatures||0)+'/'+(d.requiredSignatures||0)
+        +' — a janela é de 5 minutos por vez. Se essa cadeira é sua, use "Entrar para assinar".';
+      if(first||changed) turnPopup('Vez de assinar: '+roleName(mesa,d.turnRole),sub,'#eab308');
+    } else if(changed&&d.state==='SETTLED'){ turnPopup('Operação liquidada ✓','Todas as assinaturas foram coletadas e o contrato executou a troca.','#22c55e'); }
+    else if(changed&&(d.state==='SETTLING'||d.state==='SETTLEMENT_VALIDATION')){ turnPopup('Todas assinaram — liquidando…','O contrato está executando a liquidação atômica.','#22c55e'); }
+  }
   function load(){
     if(MESA_ID){
       Promise.all([
@@ -395,6 +429,7 @@ window.addEventListener('unhandledrejection',function(e){try{console.warn('[veru
         var pv=res[0]; if(!pv.ok){ stateMsg('Mesa não encontrada',(pv.d&&(pv.d.message||pv.d.error))||'Confira o link.'); return; }
         var bal={}; var bc=(res[1]&&res[1].ok&&res[1].d&&res[1].d.chairs)||[]; bc.forEach(function(c){ bal[c.role]=c; });
         renderMesa(pv.d,bal);
+        maybeTurnPopup(pv.d);
       }).catch(function(){});
       return;
     }
