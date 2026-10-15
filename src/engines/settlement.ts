@@ -170,7 +170,10 @@ export class SettlementEngine {
   /** Recuperação após queda: reconcilia Deals em SETTLEMENT_VALIDATION/SETTLING com o estado on-chain (§13.2). */
   async recover(): Promise<{ dealId: string; action: string }[]> {
     const out: { dealId: string; action: string }[] = [];
-    for (const d of await this.d.store.listDeals({ states: ['SETTLEMENT_VALIDATION', 'SETTLING'] })) {
+    // BLOCKED entra na varredura: uma deal bloqueada na validação pode ter liquidado on-chain
+    // (settle disparado fora do motor) — reconcileAlreadySettled confirma pelo estado real.
+    for (const d of await this.d.store.listDeals({ states: ['SETTLEMENT_VALIDATION', 'SETTLING', 'BLOCKED'] })) {
+      if (d.state === 'BLOCKED') { const r = await this.reconcileAlreadySettled(d, 'keeper:recovery').catch(() => null); if (r) out.push({ dealId: d.id, action: 'reconciled' }); continue; }
       if (d.state === 'SETTLEMENT_VALIDATION') {
         if (PRE_SETTLING_EXPIRABLE.has(d.state) && d.expiresAt <= this.now()) { out.push({ dealId: d.id, action: 'expired' }); continue; }
         // Registro ÓRFÃO (processo caiu entre criar o registro e EXECUTING): sem isto o settle

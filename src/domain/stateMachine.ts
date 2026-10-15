@@ -20,7 +20,9 @@ export const TRANSITIONS: Readonly<Record<DealState, readonly DealState[]>> = {
   REFUNDING: ['REFUNDED'],
   REFUNDED: [],
   CANCELLED: [],
-  BLOCKED: ['REFUNDING', 'CANCELLED']
+  // SETTLING: reconciliação de um BLOCKED que, na verdade, já liquidou on-chain (ex.: settle
+  // disparado fora do motor enquanto a validação bloqueava) — o recover confirma pelo estado real.
+  BLOCKED: ['REFUNDING', 'CANCELLED', 'SETTLING']
 };
 
 export function canTransition(from: DealState, to: DealState): boolean { return TRANSITIONS[from].includes(to); }
