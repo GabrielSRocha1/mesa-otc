@@ -25,11 +25,27 @@ process.env.OPERACAO_HTML_PATH ||= path.join(root, 'web/verum-operacao.html'); /
 process.env.PORTAL_DATA_FILE ||= '/tmp/verum-portal.json';
 
 let appPromise;
-function boot() { if (!appPromise) appPromise = createApp(loadConfig()); return appPromise; }
+let lastRecoverAt = 0;
+function boot() {
+  if (!appPromise) {
+    appPromise = createApp(loadConfig()).then(app => {
+      // Recuperação de liquidações (igual ao boot do servidor persistente): deals presas em
+      // SETTLING/SETTLEMENT_VALIDATION reconciliam com o estado on-chain — sem isto, uma
+      // instância que morreu no meio do settle deixava a operação "Liquidando" para sempre.
+      void app.settlement.recover().then(r => { if (r.length) console.log('recuperação de liquidações:', JSON.stringify(r)); }).catch(() => {});
+      lastRecoverAt = Date.now();
+      return app;
+    });
+  }
+  return appPromise;
+}
 
 export default async function handler(req, res) {
   try {
     const app = await boot();
+    // Re-dispara a recuperação periodicamente em instância quente (debounce 60s): o tráfego do
+    // próprio portal (polling das telas) vira o "cron" do keeper em serverless.
+    if (Date.now() - lastRecoverAt > 60_000) { lastRecoverAt = Date.now(); void app.settlement.recover().catch(() => {}); }
     await app.api.ready();
     app.api.server.emit('request', req, res);
   } catch (err) {
