@@ -24,6 +24,8 @@ export const TOKEN_2022_PROGRAM_ID = new PublicKey("TokenzQdBNbLqP5VEhdkAS6EPFLC
 export const ASSOCIATED_TOKEN_PROGRAM_ID = new PublicKey("ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL");
 /** Mint nativo (wSOL) — igual em todos os clusters; habilita o embrulho automático no htlc_lock. */
 export const WSOL_MINT = "So11111111111111111111111111111111111111112";
+/** Cadeira AUSENTE nos Terms (Pubkey::default) — mesas de 2–3 participantes (ADR-v4). */
+export const ABSENT_WALLET = "11111111111111111111111111111111";
 
 const SEEDS = { config: "config", token: "token", trade: "trade", nonce: "nonce", attest: "attest", htlc: "htlc" } as const;
 
@@ -129,7 +131,8 @@ export class SolanaChainAdapter implements ChainAdapter {
     for (const [asset, role] of [[t.sellerAsset, Role.SELLER], [t.buyerAsset, Role.BUYER]] as const) {
       try { await this.tokenProgramFor(asset); } catch (e) { issues.push({ code: "TOKEN_NOT_AUTHORIZED", message: (e as Error).message, role }); }
     }
-    const wallets: [string, Role][] = [[t.seller, Role.SELLER], [t.paymaster01, Role.PAYMASTER_01], [t.paymaster02, Role.PAYMASTER_02], [t.buyer, Role.BUYER]];
+    const wallets: [string, Role][] = ([[t.seller, Role.SELLER], [t.paymaster01, Role.PAYMASTER_01], [t.paymaster02, Role.PAYMASTER_02], [t.buyer, Role.BUYER]] as [string, Role][])
+      .filter(([w]) => w !== ABSENT_WALLET); // cadeira ausente (2–3 participantes) não tem gás/atestado
     for (const [w, role] of wallets) {
       const lamports = await this.conn.getBalance(pk(w), this.commitment);
       if (lamports < this.minLamports) issues.push({ code: "NO_GAS", message: `${w} possui ${lamports} lamports (< ${this.minLamports})`, role });
@@ -203,8 +206,9 @@ export class SolanaChainAdapter implements ChainAdapter {
       meta(this.tokenPda(terms.sellerAsset), false),
       meta(this.tokenPda(terms.buyerAsset), false),
       meta(this.attestPda(terms.seller), false),
-      meta(this.attestPda(terms.paymaster01), false),
-      meta(this.attestPda(terms.paymaster02), false),
+      // Pay Master ausente (Pubkey::default) → conta Option=None do Anchor = o PRÓPRIO programa.
+      meta(terms.paymaster01 === ABSENT_WALLET ? this.programId : this.attestPda(terms.paymaster01), false),
+      meta(terms.paymaster02 === ABSENT_WALLET ? this.programId : this.attestPda(terms.paymaster02), false),
       meta(this.attestPda(terms.buyer), false),
       meta(SystemProgram.programId, false),
     ];

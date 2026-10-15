@@ -24,11 +24,16 @@ export function deriveNonce(dealId: string, revision: number, dealNonce: string)
 
 export interface VerumMeta extends Record<string, string | number> { tradeId: string; termsHash: string; onChainCreatedAt: number; onChainExpiresAt: number }
 
-/** Constrói os Terms on-chain a partir do commitment congelado da mesa. */
-export function buildVerumTerms(c: DealCommitment, chainId: ChainId, escrowAddress: string, chainNow: number): VerumTerms {
+/** Constrói os Terms on-chain a partir do commitment congelado da mesa.
+ *  `absentPmPlaceholder`: sentinela de cadeira AUSENTE para contratos que aceitam 2–4
+ *  participantes (Solana: Pubkey::default). Sem ele, os 4 papéis continuam obrigatórios
+ *  (Tron/EVM v1 não têm cadeiras dinâmicas). */
+export function buildVerumTerms(c: DealCommitment, chainId: ChainId, escrowAddress: string, chainNow: number, absentPmPlaceholder?: string): VerumTerms {
   const roles = new Map(c.participants.map(p => [p.role, p]));
   const seller = roles.get('SELLER'); const buyer = roles.get('BUYER'); const pm1 = roles.get('PAYMASTER_1'); const pm2 = roles.get('PAYMASTER_2');
-  if (!seller || !buyer || !pm1 || !pm2) throw new DomainError('SETTLEMENT_NOT_ALLOWED', 'escrow Verum exige exatamente 4 participantes (Vendedor, Comprador, PM1 e PM2)');
+  if (!seller || !buyer) throw new DomainError('SETTLEMENT_NOT_ALLOWED', 'escrow Verum exige Vendedor e Comprador');
+  if ((!pm1 || !pm2) && !absentPmPlaceholder) throw new DomainError('SETTLEMENT_NOT_ALLOWED', 'escrow Verum exige exatamente 4 participantes (Vendedor, Comprador, PM1 e PM2) nesta rede');
+  if (pm2 && !pm1) throw new DomainError('SETTLEMENT_NOT_ALLOWED', 'Pay Master 2 exige a cadeira Pay Master 1');
   const legIn = c.legs[0]; const legOut = c.legs[1];
   if (!legIn || !legOut) throw new DomainError('INVALID_INPUT', 'legs incompletas');
   if (legIn.escrowChain !== legOut.escrowChain) throw new DomainError('SETTLEMENT_NOT_ALLOWED', 'escrow Verum liquida as duas legs na MESMA rede; rotas cross-chain usam o simulador/HTLC');
@@ -36,7 +41,8 @@ export function buildVerumTerms(c: DealCommitment, chainId: ChainId, escrowAddre
   const clamp = (n: number) => Math.min(Math.max(0, n), 10000);
   return {
     chainId, escrowAddress,
-    seller: seller.address, buyer: buyer.address, paymaster01: pm1.address, paymaster02: pm2.address,
+    seller: seller.address, buyer: buyer.address,
+    paymaster01: pm1?.address ?? absentPmPlaceholder as string, paymaster02: pm2?.address ?? absentPmPlaceholder as string,
     sellerAsset: legIn.asset.contractOrMint, sellerAmount: BigInt(legIn.amountBase),
     buyerAsset: legOut.asset.contractOrMint, buyerAmount: BigInt(legOut.amountBase),
     platformFeeBps: c.feeBps, commissionBps: clamp(c.terms.pricing.commissionBps), discountBps: clamp(c.terms.pricing.discountBps), slippageBps: clamp(c.terms.pricing.maxSlippageBps),

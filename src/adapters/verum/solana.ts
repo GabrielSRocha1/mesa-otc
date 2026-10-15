@@ -18,6 +18,8 @@ import { buildVerumTerms, statusFromTradeState, depositsOf, bindingOf, ROLE_TO_O
 import type { SolanaSettings } from '../../config.js';
 
 const SOLANA_CLUSTER: Record<string, string> = { '101': 'mainnet-beta', '102': 'testnet', '103': 'devnet' };
+/** Sentinela de cadeira AUSENTE nos Terms (Pubkey::default) — mesa de 2–3 participantes. */
+export const SOLANA_ABSENT_PM = '11111111111111111111111111111111';
 const MIN_LAMPORTS = 5_000_000;      // 0,005 SOL
 const TOPUP_LAMPORTS = 50_000_000;   // 0,05 SOL por recarga (executor pré-financia papéis dev)
 
@@ -101,12 +103,12 @@ export class VerumSolanaAdapter implements SettlementAdapter, ParticipantStepPro
   }
   private async verumTermsOf(dealId: string, c: DealCommitment | null, meta: VerumMeta): Promise<VerumTerms> {
     // Terms são determinísticos: commitment + createdAt persistido em meta ⇒ mesmos bytes/tradeId.
-    if (c) return buildVerumTerms(c, Number(this.cfg.chainId) as ChainId, this.cfg.programId, meta.onChainCreatedAt);
+    if (c) return buildVerumTerms(c, Number(this.cfg.chainId) as ChainId, this.cfg.programId, meta.onChainCreatedAt, SOLANA_ABSENT_PM);
     const deal = await this.deps.getDeal(dealId) as unknown as { terms: DealCommitment['terms']; hash: { dealHash: string; pricingHash: string; routeHash: string; domainHash: string }; revision: number } | null;
     if (!deal?.terms || !deal.hash) throw new DomainError('SETTLEMENT_NOT_ALLOWED', 'termos indisponíveis para reconstruir a trade Solana');
     const t = deal.terms;
     const commitment: DealCommitment = { dealId, revision: deal.revision, dealHash: deal.hash.dealHash, expiresAt: t.expiresAt, participants: t.participants, legs: t.legs, pricingHash: deal.hash.pricingHash, routeHash: deal.hash.routeHash, domainHash: deal.hash.domainHash, dealNonce: t.dealNonce, feeBps: t.pricing.platformFeeBps, treasury: '', terms: t };
-    return buildVerumTerms(commitment, Number(this.cfg.chainId) as ChainId, this.cfg.programId, meta.onChainCreatedAt);
+    return buildVerumTerms(commitment, Number(this.cfg.chainId) as ChainId, this.cfg.programId, meta.onChainCreatedAt, SOLANA_ABSENT_PM);
   }
 
   // htlc:true + escrowNN:true — o router liga a perna HTLC SÓ em rota cross-chain (vendedor aqui,
@@ -210,10 +212,10 @@ export class VerumSolanaAdapter implements SettlementAdapter, ParticipantStepPro
     }
     try {
       const now = await this.inner.now();
-      const terms = buildVerumTerms(c, Number(this.cfg.chainId) as ChainId, this.cfg.programId, now);
+      const terms = buildVerumTerms(c, Number(this.cfg.chainId) as ChainId, this.cfg.programId, now, SOLANA_ABSENT_PM);
       if (terms.sellerAmount > 0xffffffffffffffffn || terms.buyerAmount > 0xffffffffffffffffn) throw new DomainError('INVALID_INPUT', 'quantias excedem u64 (Solana)');
       const { tradeId, termsHash } = this.inner.computeIds(terms);
-      await this.ensureAttested([terms.seller, terms.paymaster01, terms.paymaster02, terms.buyer], terms.expiresAt + 3600);
+      await this.ensureAttested([terms.seller, terms.paymaster01, terms.paymaster02, terms.buyer].filter(w => w !== SOLANA_ABSENT_PM), terms.expiresAt + 3600);
       // Registrador: PM1 (dev keyring) ou o ATTESTOR quando o PM1 é carteira REAL — o backend não
       // tem a chave dele (mesma decisão da EVM: o registro não movimenta valor; termos conferidos
       // por todos via termsHash antes de assinar).
