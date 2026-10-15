@@ -206,13 +206,17 @@ export class VerumSolanaAdapter implements SettlementAdapter, ParticipantStepPro
       if (terms.sellerAmount > 0xffffffffffffffffn || terms.buyerAmount > 0xffffffffffffffffn) throw new DomainError('INVALID_INPUT', 'quantias excedem u64 (Solana)');
       const { tradeId, termsHash } = this.inner.computeIds(terms);
       await this.ensureAttested([terms.seller, terms.paymaster01, terms.paymaster02, terms.buyer], terms.expiresAt + 3600);
-      const pm1 = this.keypairOf(terms.paymaster01);
-      await this.ensureLamports(pm1.publicKey);
+      // Registrador: PM1 (dev keyring) ou o ATTESTOR quando o PM1 é carteira REAL — o backend não
+      // tem a chave dele (mesma decisão da EVM: o registro não movimenta valor; termos conferidos
+      // por todos via termsHash antes de assinar).
+      const pm1Sk = this.signerFor(terms.paymaster01);
+      const registrar = pm1Sk ? Keypair.fromSecretKey(pm1Sk) : this.attestor;
+      await this.ensureLamports(registrar.publicKey);
       const unsigned = await this.inner.buildCreateTrade(terms, [
         { wallet: terms.seller, validUntil: terms.expiresAt + 3600, signature: '' }, { wallet: terms.paymaster01, validUntil: terms.expiresAt + 3600, signature: '' },
         { wallet: terms.paymaster02, validUntil: terms.expiresAt + 3600, signature: '' }, { wallet: terms.buyer, validUntil: terms.expiresAt + 3600, signature: '' },
-      ]);
-      const tx = await this.submitUnsigned(unsigned, [pm1], pm1.publicKey);
+      ], registrar.publicKey.toBase58());
+      const tx = await this.submitUnsigned(unsigned, [registrar], registrar.publicKey);
       const meta: VerumMeta = { tradeId, termsHash, onChainCreatedAt: terms.createdAt, onChainExpiresAt: terms.expiresAt };
       return { ...this.ref(tx), meta };
     } catch (e) { this.fail('register', e); }

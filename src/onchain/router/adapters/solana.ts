@@ -189,12 +189,15 @@ export class SolanaChainAdapter implements ChainAdapter {
     };
   }
 
-  /** Atestados na Solana são PDAs já existentes; o argumento é aceito por compatibilidade de interface e verificado no preflight. */
-  async buildCreateTrade(terms: Terms, _attestations: [WalletAttestation, WalletAttestation, WalletAttestation, WalletAttestation]): Promise<UnsignedTx> {
+  /** Atestados na Solana são PDAs já existentes; o argumento é aceito por compatibilidade de interface e verificado no preflight.
+   *  `registrar` (opcional) = quem assina/paga o create_trade — PM1 (padrão) ou o ATTESTOR da
+   *  Config (carteiras reais: o backend não tem a chave do PM1; espelha a EVM). */
+  async buildCreateTrade(terms: Terms, _attestations: [WalletAttestation, WalletAttestation, WalletAttestation, WalletAttestation], registrar?: string): Promise<UnsignedTx> {
     const { tradeId } = this.computeIds(terms);
+    const signer = registrar ?? terms.paymaster01;
     const keys: AccountMeta[] = [
       meta(this.configPda, false),
-      meta(pk(terms.paymaster01), true, true),
+      meta(pk(signer), true, true),
       meta(this.tradePda(tradeId), true),
       meta(this.noncePda(terms.paymaster01, terms.nonce), true),
       meta(this.tokenPda(terms.sellerAsset), false),
@@ -206,7 +209,7 @@ export class SolanaChainAdapter implements ChainAdapter {
       meta(SystemProgram.programId, false),
     ];
     const data = concat(fromHex(tradeId), serializeTermsSolana(terms));
-    return this.toUnsigned(terms.paymaster01, this.ix("create_trade", keys, data), "create_trade (PAYMASTER_01)");
+    return this.toUnsigned(signer, this.ix("create_trade", keys, data), `create_trade (${registrar && registrar !== terms.paymaster01 ? 'ATTESTOR registrar' : 'PAYMASTER_01'})`);
   }
 
   async buildSign(terms: Terms, tradeId: string, approval: Signature): Promise<UnsignedTx> {
