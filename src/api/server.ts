@@ -1008,6 +1008,28 @@ export async function buildApi(deps: ApiDeps): Promise<FastifyInstance> {
     if (!pm1) throw new DomainError('NOT_PARTICIPANT', 'operação sem Pay Master 1');
     return { mesa, d, pm1 };
   };
+  // EXECUTAR LIQUIDAÇÃO (comando permanente do PM): dispara/retoma a liquidação da operação ativa.
+  // A liquidação é automática na última assinatura; este comando é o gatilho MANUAL idempotente —
+  // revalida tudo (saldos, estado on-chain, assinaturas) e executa/reconcilia. Nunca inventa
+  // destinos: os payouts são os termos congelados que todos assinaram.
+  app.post('/v1/portal/mesas/:mesaId/deal/settle', async (req, reply) => {
+    const { mesa, d, pm1 } = await mesaDealOf(req, (req.params as { mesaId: string }).mesaId);
+    if (d.state === 'SETTLED') return { state: 'SETTLED', alreadySettled: true };
+    // SETTLING preso (instância caiu no meio): o recover reconcilia com o estado on-chain.
+    if (d.state === 'SETTLING' || d.state === 'SETTLEMENT_VALIDATION') {
+      const r = await deps.settlement.recover();
+      const now = await deps.deals.get(d.id);
+      await deps.audit.append({ actorType: 'user', actorId: pm1.address, category: 'mesa.liquidacao.manual', dealId: d.id, payload: { mesaId: mesa.mesaId, via: 'recover', result: r } });
+      return { state: now.state, recovered: r };
+    }
+    if (d.validSignatures < d.requiredSignatures) throw new DomainError('SETTLEMENT_NOT_ALLOWED', `Liquidação exige todas as assinaturas (${d.validSignatures}/${d.requiredSignatures})`);
+    return idempotent(req, reply, async () => {
+      const rec = await deps.settlement.settle(d.id, `pm:${pm1.address}`);
+      await deps.audit.append({ actorType: 'user', actorId: pm1.address, category: 'mesa.liquidacao.manual', dealId: d.id, payload: { mesaId: mesa.mesaId, settlementId: rec.id } });
+      const now = await deps.deals.get(d.id);
+      return { state: now.state, settlementId: rec.id };
+    });
+  });
   app.get('/v1/portal/mesas/:mesaId/deal/step', async req => {
     const { d, pm1 } = await mesaDealOf(req, (req.params as { mesaId: string }).mesaId);
     return stepAdapterOf(d).buildParticipantStep(d.id, 'PAYMASTER_1', pm1.address);

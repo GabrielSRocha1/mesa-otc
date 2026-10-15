@@ -1021,8 +1021,9 @@ window.addEventListener('unhandledrejection',function(e){try{console.warn('[veru
             <div class="card-h" style="margin-bottom:6px"><div class="t" style="font-size:13.5px">Saldos e aprovação</div></div>
             <div class="kv" id="m3dBalances"><div class="r"><span class="k">Saldos</span><span class="v" style="color:var(--ink-3)">—</span></div></div>
             <div id="m3dMotivos" style="display:none;margin-top:10px;padding:10px 12px;border:1px solid var(--red);border-radius:10px;color:#fecaca;font-size:12.5px"></div>
-            <button class="btn btn-primary btn-block" id="m3dApprove" type="button" style="margin-top:10px">Aprovar operação</button>
+            <button class="btn btn-primary btn-block" id="m3dApprove" type="button" style="margin-top:10px">Aprovar e liberar assinaturas</button>
             <button class="btn btn-block" id="m3dSign" type="button" style="display:none;margin-top:8px">Assinar a vez da mesa</button>
+            <button class="btn btn-block" id="m3dSettle" type="button" style="display:none;margin-top:8px;border-color:var(--green);color:#bbf7d0">Executar liquidação</button>
             <button class="btn btn-block" id="m3dCancelMesa" type="button" style="margin-top:8px;border-color:var(--red);color:#fecaca">Cancelar mesa</button>
             <button class="btn btn-block" id="m3dDeleteMesa" type="button" style="margin-top:8px;border-color:var(--red);color:#fecaca">Excluir mesa</button>
             <div id="m3dIrrev" style="display:none;margin-top:8px;font-size:12px;color:var(--amber);border:1px solid var(--line);border-radius:10px;padding:8px 10px">🔒 Operação irreversível — fundos trancados no escrow. O contrato segue até a extração da preimage (liquidação) ou a expiração do timelock (reembolso automático).</div>
@@ -1385,6 +1386,7 @@ window.addEventListener('unhandledrejection',function(e){try{console.warn('[veru
   async function pmApi(path,opts){
     opts=opts||{}; const t=getTok(); const headers={'accept':'application/json'};
     if(opts.body!==undefined) headers['content-type']='application/json';
+    if(opts.idem) headers['idempotency-key']=opts.idem;
     if(t) headers['authorization']='Bearer '+t;
     const res=await fetch(API+path,{method:opts.method||'GET',headers,body:opts.body!==undefined?JSON.stringify(opts.body):undefined});
     let data=null; try{ data=await res.json(); }catch(e){}
@@ -3071,6 +3073,14 @@ window.addEventListener('unhandledrejection',function(e){try{console.warn('[veru
         ? '<span style="color:var(--ink-3)">🔒 Operação irreversível — configuração travada.</span>'
         : '<span style="color:var(--amber)">Operação aprovada — configuração congelada. Clique em "Reabrir para editar" para alterar (as assinaturas serão invalidadas e os participantes reassinam).</span>'; }
       $('#m3dSign').style.display=(m.deal&&m.deal.state==='AWAITING_SIGNATURES')?'':'none';
+      // EXECUTAR LIQUIDAÇÃO (comando permanente): habilita com todas as assinaturas (dispara) ou
+      // com a liquidação em andamento/travada (retoma/reconcilia). O backend revalida tudo.
+      const stBtn=$('#m3dSettle'); if(stBtn){
+        const dl=m.deal; const full=dl&&dl.requiredSignatures>0&&dl.validSignatures>=dl.requiredSignatures;
+        const inFlight=dl&&(dl.state==='SETTLING'||dl.state==='SETTLEMENT_VALIDATION');
+        stBtn.style.display=(dl&&dl.state!=='SETTLED'&&(full||inFlight))?'':'none';
+        stBtn.textContent=inFlight?'Retomar liquidação (em andamento)':'Executar liquidação — '+(dl?dl.validSignatures+'/'+dl.requiredSignatures:'');
+      }
       // Trava de irrevogabilidade (backend manda): leg de contrato financiada → sem "Cancelar mesa".
       const cmBtn=$('#m3dCancelMesa'); if(cmBtn) cmBtn.style.display=(m.canCancel===false)?'none':'';
       const irrev=$('#m3dIrrev'); if(irrev) irrev.style.display=m.irreversible?'':'none';
@@ -3221,6 +3231,14 @@ window.addEventListener('unhandledrejection',function(e){try{console.warn('[veru
       catch(e){ toast(e.message||'Não foi possível reabrir','err'); }
     });
     const ap=$('#m3dApprove'); if(ap) ap.addEventListener('click',m3Approve);
+    const stl=$('#m3dSettle'); if(stl) stl.addEventListener('click',async()=>{
+      stl.disabled=true; const prev=stl.textContent; stl.textContent='Liquidando…';
+      try{
+        const r=await pmApi('/v1/portal/mesas/'+m3Sel+'/deal/settle',{method:'POST',idem:'settle-'+m3Sel+'-'+Date.now()});
+        toast(r.state==='SETTLED'?'Operação LIQUIDADA ✓':'Liquidação: '+r.state,'ok'); m3Refresh();
+      }catch(e){ toast(e.message||'Falha na liquidação','err'); }
+      finally{ stl.disabled=false; stl.textContent=prev; }
+    });
     const sg=$('#m3dSign'); if(sg) sg.addEventListener('click',m3Sign);
     const cm=$('#m3dCancelMesa'); if(cm) cm.addEventListener('click',async()=>{ const reason=prompt('Motivo do cancelamento:'); if(reason===null) return; try{ await pmApi('/v1/portal/mesas/'+m3Sel+'/cancel',{method:'POST',body:{reason}}); toast('Mesa cancelada','ok'); m3Refresh(); m3LoadList(); }catch(e){ toast(e.message,'err'); } });
     const dm=$('#m3dDeleteMesa'); if(dm) dm.addEventListener('click',()=>m3DeleteMesa(m3Sel));
