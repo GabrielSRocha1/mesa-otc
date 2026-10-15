@@ -28,32 +28,44 @@ export interface BalanceReaders {
   tokenDirect?(network: string, contract: string, address: string, decimals: number): Promise<number | null>;
 }
 
+/** Última leitura BOA por chave (rede|endereço|contrato): RPCs públicos (ex.: devnet da Solana)
+ *  rate-limitam e uma falha transitória virava saldo zero — o painel "piscava" e o precheck
+ *  bloqueava aprovação com fundos reais na carteira. Retry com backoff; esgotado, vale a última
+ *  leitura boa recente (≤ 10 min) em vez de null/0. */
+const lastGood = new Map<string, { v: unknown; at: number }>();
+async function sticky<T>(key: string, fn: () => Promise<T | null>, tries = 3): Promise<T | null> {
+  for (let i = 0; i < tries; i++) {
+    try { const v = await fn(); if (v !== null && v !== undefined) { lastGood.set(key, { v, at: Date.now() }); return v; } } catch { /* retry */ }
+    if (i < tries - 1) await new Promise(r => setTimeout(r, 250 * (i + 1)));
+  }
+  const c = lastGood.get(key);
+  return c && Date.now() - c.at < 10 * 60_000 ? c.v as T : null;
+}
+
 export function defaultBalanceReaders(): BalanceReaders {
   return {
-    native: async (network, address) => { const r = await readNativeBalance(network, address).catch(() => null); return r && r.amount != null ? { amount: r.amount } : null; },
-    tokens: async (network, address) => (await readTokenBalances(network, address).catch(() => [])).map(t => ({ symbol: t.symbol, contract: t.contract, amount: t.amount })),
-    priceUsdOf: async network => { const chain = getChain(network); if (!chain) return null; const byId = await getPricesById().catch(() => ({} as Record<string, { usd: number | null }>)); return byId[chain.coingeckoId]?.usd ?? null; },
-    tokenDirect: async (network, contract, address, decimals) => {
+    native: (network, address) => sticky(`n|${network}|${address}`, async () => { const r = await readNativeBalance(network, address); return r && r.amount != null ? { amount: r.amount } : null; }),
+    tokens: async (network, address) => (await sticky(`t|${network}|${address}`, async () => { const l = await readTokenBalances(network, address); return l.length ? l : null; }) ?? []).map(t => ({ symbol: t.symbol, contract: t.contract, amount: t.amount })),
+    priceUsdOf: network => sticky(`p|${network}`, async () => { const chain = getChain(network); if (!chain) return null; const byId = await getPricesById(); return byId[chain.coingeckoId]?.usd ?? null; }, 2),
+    tokenDirect: (network, contract, address, decimals) => sticky(`d|${network}|${contract}|${address}`, async () => {
       const c = getChain(network); if (!c) return null;
-      try {
-        if (c.family === 'evm') {
-          const data = '0x70a08231' + address.toLowerCase().replace(/^0x/, '').padStart(64, '0');
-          const r = await fetch(c.endpoint, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'eth_call', params: [{ to: contract, data }, 'latest'] }) });
-          const j = await r.json() as { result?: string };
-          if (!j?.result || j.result === '0x') return null;
-          return Number(BigInt(j.result)) / 10 ** decimals;
-        }
-        if (c.family === 'solana') {
-          // getTokenAccountsByOwner filtrado pelo mint: cobre mints de teste/custom fora da
-          // whitelist mainnet (que descartava o saldo real e bloqueava o precheck da mesa).
-          const r = await fetch(c.endpoint, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'getTokenAccountsByOwner', params: [address, { mint: contract }, { encoding: 'jsonParsed' }] }) });
-          const j = await r.json() as { result?: { value?: { account: { data: { parsed: { info: { tokenAmount: { amount: string } } } } } }[] } };
-          const accounts = j?.result?.value; if (!accounts) return null;
-          return Number(accounts.reduce((s, a) => s + BigInt(a.account.data.parsed.info.tokenAmount.amount), 0n)) / 10 ** decimals;
-        }
-        return null; // demais famílias caem no catálogo
-      } catch { return null; }
-    },
+      if (c.family === 'evm') {
+        const data = '0x70a08231' + address.toLowerCase().replace(/^0x/, '').padStart(64, '0');
+        const r = await fetch(c.endpoint, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'eth_call', params: [{ to: contract, data }, 'latest'] }) });
+        const j = await r.json() as { result?: string };
+        if (!j?.result || j.result === '0x') return null;
+        return Number(BigInt(j.result)) / 10 ** decimals;
+      }
+      if (c.family === 'solana') {
+        // getTokenAccountsByOwner filtrado pelo mint: cobre mints de teste/custom fora da
+        // whitelist mainnet (que descartava o saldo real e bloqueava o precheck da mesa).
+        const r = await fetch(c.endpoint, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'getTokenAccountsByOwner', params: [address, { mint: contract }, { encoding: 'jsonParsed' }] }) });
+        const j = await r.json() as { result?: { value?: { account: { data: { parsed: { info: { tokenAmount: { amount: string } } } } } }[] } };
+        const accounts = j?.result?.value; if (!accounts) return null;
+        return Number(accounts.reduce((s, a) => s + BigInt(a.account.data.parsed.info.tokenAmount.amount), 0n)) / 10 ** decimals;
+      }
+      return null; // demais famílias caem no catálogo
+    }),
   };
 }
 
