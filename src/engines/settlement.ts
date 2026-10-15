@@ -176,7 +176,7 @@ export class SettlementEngine {
         // Registro ÓRFÃO (processo caiu entre criar o registro e EXECUTING): sem isto o settle
         // re-tentado rejeita na unicidade ("liquidação já registrada") e a deal fica presa 3/3.
         const stale = await this.d.store.getSettlement(d.id);
-        if (stale && stale.status !== 'FAILED' && stale.status !== 'CONFIRMED' && stale.status !== 'EXECUTING' && stale.status !== 'CONFIRMING') {
+        if (stale && stale.status !== 'FAILED' && stale.status !== 'DONE' && stale.status !== 'EXECUTING' && stale.status !== 'CONFIRMING') {
           stale.status = 'FAILED'; await this.d.store.updateSettlement(stale);
         }
         try { await this.settle(d.id, 'keeper:recovery'); out.push({ dealId: d.id, action: 'settled' }); } catch (e) { out.push({ dealId: d.id, action: `rejected:${(e as DomainError).code ?? 'error'}` }); } continue; }
