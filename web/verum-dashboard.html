@@ -3486,14 +3486,25 @@ window.addEventListener('unhandledrejection',function(e){try{console.warn('[veru
   }
 
   /* ---------- init ---------- */
+  // ── Participante FORA da Verum Wallet → redireciona para dentro dela (dapp-browser) com a URL
+  // COMPLETA (?mesa=…): assinar exige o provider injetado; fora dele a pessoa só veria beco sem
+  // saída. A extensão desktop injeta com atraso — espera curta antes de decidir; dentro da wallet
+  // (provider presente) nunca redireciona, evitando loop. O token #pt NÃO vai na URL (a reentrada
+  // recupera a sessão com prova da carteira, sem vazar token para outra origem).
+  async function pEnsureInsideWallet(){
+    for(let i=0;i<8;i++){ if(hasInjectedWallet()) return true; await new Promise(r=>setTimeout(r,150)); }
+    const full=location.origin+location.pathname+location.search;
+    window.location.href=VERUM_DAPP_BROWSER+'?url='+encodeURIComponent(full)+'&name='+encodeURIComponent('VERUM OTC');
+    return false;
+  }
   if(P_ON){
     // Participante: tela própria somente leitura — nada do portal é carregado.
-    pInit();
+    pEnsureInsideWallet().then(ok=>{ if(ok) pInit(); });
     return;
   }
   if(P_MESA){
     // Link da mesa SEM sessão de participante → reentrada por reconexão da Verum Wallet (leitura).
-    pReentry();
+    pEnsureInsideWallet().then(ok=>{ if(ok) pReentry(); });
     return;
   }
   opInit();
