@@ -6,7 +6,7 @@ const MAP = new Map([...ALPHABET].map((c, i) => [c, i]));
 
 export function base58Decode(s: string): Uint8Array {
   if (s.length === 0) return new Uint8Array();
-  const bytes: number[] = [0];
+  const bytes: number[] = []; // vazio: valor zero (ex.: Pubkey::default = 32 bytes 0x00) não ganha byte espúrio
   for (const c of s) {
     const v = MAP.get(c);
     if (v === undefined) throw new Error(`caractere base58 inválido: ${c}`);
@@ -24,7 +24,7 @@ export function base58Decode(s: string): Uint8Array {
 }
 
 export function base58Encode(bytes: Uint8Array): string {
-  const digits = [0];
+  const digits: number[] = []; // espelho do decode: zero não vira dígito extra
   for (const b of bytes) {
     let carry = b;
     for (let j = 0; j < digits.length; j++) {
