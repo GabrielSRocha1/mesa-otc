@@ -3394,6 +3394,9 @@ window.addEventListener('unhandledrejection',function(e){try{console.warn('[veru
         if(step&&step.kind==='solana'&&step.transactionBase64){
           const prov=solProvider();
           if(!prov||typeof prov.signTransaction!=='function') throw new Error('Esta versão da Verum Wallet não assina transações — atualize o app');
+          // Sessão restaurada do storage não passou pela reentrada: o provider ainda não tem
+          // connect() — sem isso o signTransaction recusa com "carteira não conectada".
+          try{ await prov.connect(); }catch(e){}
           if(btn) btn.textContent='Confirme na Verum Wallet…';
           const raw=Uint8Array.from(atob(step.transactionBase64),c=>c.charCodeAt(0));
           const signed=await prov.signTransaction(raw);
