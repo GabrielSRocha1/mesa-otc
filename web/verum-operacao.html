@@ -389,7 +389,7 @@ window.addEventListener('unhandledrejection',function(e){try{console.warn('[veru
   // ── POP-UP de turno: ao aprovar e a cada avanço da rodada, TODO espectador vê quem assina
   // agora (e quem acabou de assinar). Detecta mudança por (deal, vez, nº de assinaturas).
   var lastTurnKey=null;
-  function roleName(mesa,role){ var c=(mesa.chairs||[]).find(function(x){return x.role===role;}); var nm=c&&c.firstName?(' ('+c.firstName+')':''); return (ROLE[role]||role)+nm; }
+  function roleName(mesa,role){ var c=(mesa.chairs||[]).find(function(x){return x.role===role;}); var nm=c&&c.firstName?(' ('+c.firstName+')'):''; return (ROLE[role]||role)+nm; }
   function turnPopup(title,subtitle,accent){
     var old=document.getElementById('turnPop'); if(old) old.remove();
     var el=document.createElement('div'); el.id='turnPop';

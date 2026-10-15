@@ -3109,7 +3109,7 @@ window.addEventListener('unhandledrejection',function(e){try{console.warn('[veru
         // imediatamente quem deve assinar. Estados finais só avisam quando houve transição real.
         const fire=key&&m3TurnKey!==key&&(dl.state==='AWAITING_SIGNATURES'?true:m3TurnKey!==null);
         if(fire){
-          const nm=r=>{ const c=(m.chairs||[]).find(x=>x.role===r); return (M3_ROLE[r]||r)+(c&&c.firstName?(' ('+c.firstName+')':'')); };
+          const nm=r=>{ const c=(m.chairs||[]).find(x=>x.role===r); return (M3_ROLE[r]||r)+(c&&c.firstName?(' ('+c.firstName+')'):''); };
           if(dl.state==='AWAITING_SIGNATURES'&&dl.turnRole){
             const done=dl.signed||[]; const last=done.length?('✅ '+nm(done[done.length-1])+' assinou · '):'';
             turnPop('Vez de assinar: '+nm(dl.turnRole), last+'Assinaturas '+(dl.validSignatures||0)+'/'+(dl.requiredSignatures||0)+' — avise o participante; a janela é de 5 minutos.', '#eab308');
@@ -3348,11 +3348,11 @@ window.addEventListener('unhandledrejection',function(e){try{console.warn('[veru
     // abre sozinho logo abaixo — o pop-up informativo não compete com ele.)
     try{
       const key=d?(d.id+'|'+(d.turnRole||'-')+'|'+(d.validSignatures||0)+'|'+d.state):null;
-      const nm=r=>{ const c=(m.chairs||[]).find(x=>x.role===r); return (M3_ROLE[r]||r)+(c&&c.firstName?(' ('+c.firstName+')':'')); };
+      const nm=r=>{ const c=(m.chairs||[]).find(x=>x.role===r); return (M3_ROLE[r]||r)+(c&&c.firstName?(' ('+c.firstName+')'):''); };
       const fire=key&&pTurnKey!==key&&(d.state==='AWAITING_SIGNATURES'?true:pTurnKey!==null);
       if(fire&&!myTurn){
         if(d.state==='AWAITING_SIGNATURES'&&d.turnRole){
-          const done=d.signed||[]; const last=done.length?('✅ '+nm(done[done.length-1])+' assinou · ':'');
+          const done=d.signed||[]; const last=done.length?('✅ '+nm(done[done.length-1])+' assinou · '):'';
           const mine=(d.signed||[]).includes(me.role)?'Você já assinou — acompanhe. ':'';
           turnPop('Vez de assinar: '+nm(d.turnRole), mine+last+'Assinaturas '+(d.validSignatures||0)+'/'+(d.requiredSignatures||0)+'.', '#eab308');
         } else if(d.state==='SETTLED') turnPop('Operação liquidada ✓','Todas as assinaturas coletadas — o contrato executou a troca.','#22c55e');
