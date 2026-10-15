@@ -124,7 +124,10 @@ export function buildVerumTermsV2(c: DealCommitment, chainNow: number, externalE
   // contrato valida) — a comissão desse modo vive na perna de lá/fora do contrato.
   const commissionBps = clamp(c.terms.pricing.commissionBps);
   const buyerBase = BigInt((buyerLeg ?? externalLeg)?.amountBase ?? '0');
-  const cTotal = map.externalSide === 'BUYER' ? 0n : commissionAmountOf(buyerBase, clamp(c.terms.pricing.discountBps), commissionBps);
+  // Sem PM1 nos participantes não há comissão on-chain (o contrato reverte commissionPm>0 sem a
+  // cadeira) — zera aqui, como faz a rota Solana (common.ts), em vez de travar na criação.
+  const hasPm1 = present.some(p => p.role === 'PAYMASTER_1');
+  const cTotal = (map.externalSide === 'BUYER' || !hasPm1) ? 0n : commissionAmountOf(buyerBase, clamp(c.terms.pricing.discountBps), commissionBps);
   const split = c.terms.pricing.commissionSplitBps ?? [];
   const pm2Bps = split[1] ?? 0;
   const commissionPm2 = commissionBps > 0 ? cTotal * BigInt(clamp(pm2Bps)) / BigInt(commissionBps) : 0n;

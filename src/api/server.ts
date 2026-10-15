@@ -1015,8 +1015,9 @@ export async function buildApi(deps: ApiDeps): Promise<FastifyInstance> {
   app.post('/v1/portal/mesas/:mesaId/deal/settle', async (req, reply) => {
     const { mesa, d, pm1 } = await mesaDealOf(req, (req.params as { mesaId: string }).mesaId);
     if (d.state === 'SETTLED') return { state: 'SETTLED', alreadySettled: true };
-    // SETTLING preso (instância caiu no meio): o recover reconcilia com o estado on-chain.
-    if (d.state === 'SETTLING' || d.state === 'SETTLEMENT_VALIDATION') {
+    // SETTLING/VALIDATION preso (instância caiu no meio) ou BLOCKED que já liquidou on-chain fora
+    // do motor: o recover reconcilia com o estado real (settle manual tem a mesma paridade do keeper).
+    if (d.state === 'SETTLING' || d.state === 'SETTLEMENT_VALIDATION' || d.state === 'BLOCKED') {
       const r = await deps.settlement.recover();
       const now = await deps.deals.get(d.id);
       await deps.audit.append({ actorType: 'user', actorId: pm1.address, category: 'mesa.liquidacao.manual', dealId: d.id, payload: { mesaId: mesa.mesaId, via: 'recover', result: r } });
