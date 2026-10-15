@@ -24,9 +24,11 @@ describe('Domain Model', () => {
 describe('State Machine', () => {
   it('mapa fechado: proibidas nunca passam', () => {
     for (const from of ['SETTLED', 'REFUNDED', 'CANCELLED'] as const) expect(TRANSITIONS[from]).toEqual([]);
-    for (const from of ['EXPIRED', 'BLOCKED', 'REFUNDING', 'CANCELLED', 'REFUNDED'] as const) { expect(canTransition(from, 'SETTLING')).toBe(false); expect(canTransition(from, 'SETTLED')).toBe(false); }
+    // BLOCKED→SETTLING é PERMITIDA (reconciliação de deal já liquidada on-chain) — fica fora desta lista.
+    for (const from of ['EXPIRED', 'REFUNDING', 'CANCELLED', 'REFUNDED'] as const) { expect(canTransition(from, 'SETTLING')).toBe(false); expect(canTransition(from, 'SETTLED')).toBe(false); }
+    expect(canTransition('BLOCKED', 'SETTLED')).toBe(false); // BLOCKED nunca pula direto p/ SETTLED
     expect(canTransition('FULLY_SIGNED', 'CANCELLED')).toBe(false); expect(canTransition('AWAITING_SIGNATURES', 'SETTLING')).toBe(false); expect(canTransition('SETTLEMENT_VALIDATION', 'SETTLED')).toBe(false);
-    expect(() => assertTransition('BLOCKED', 'SETTLING')).toThrow(/não permitida/);
+    expect(() => assertTransition('BLOCKED', 'REFUNDED')).toThrow(/não permitida/);
   });
   it('SETTLING a partir de SETTLEMENT_VALIDATION ou BLOCKED (reconciliação on-chain); SETTLED só a partir de SETTLING', () => { const from = (to: string) => (Object.keys(TRANSITIONS) as (keyof typeof TRANSITIONS)[]).filter(k => (TRANSITIONS[k] as readonly string[]).includes(to)); expect(from('SETTLING')).toEqual(['SETTLEMENT_VALIDATION', 'BLOCKED']); expect(from('SETTLED')).toEqual(['SETTLING']); });
 });
