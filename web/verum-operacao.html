@@ -339,9 +339,22 @@ window.addEventListener('unhandledrejection',function(e){try{console.warn('[veru
       +'<div class="r"><span class="k">Ordem de assinatura</span><span class="v" style="font-size:11px">Vendedor → PM 1 → PM 2 → Comprador</span></div>'
       +'</div></section></aside>';
 
+    // CTA do PARTICIPANTE: o mesmo link de visualização serve para assinar — quem tem cadeira
+    // entra pela página da mesa (reentrada com prova da carteira; o modal de assinatura abre
+    // sozinho na vez da pessoa). Em vez de banner genérico, nomeia o papel da vez.
+    var mesaUrl='/mesa?mesa='+encodeURIComponent(mesa.mesaId||MESA_ID);
+    var awaitingNow=deal&&deal.state==='AWAITING_SIGNATURES';
+    var cta='<section class="card" style="margin-top:14px;display:flex;align-items:center;gap:14px;flex-wrap:wrap;justify-content:space-between">'
+      +'<div style="min-width:220px;flex:1"><div style="font-family:var(--f-head);font-weight:700;font-size:15px">'
+      +(awaitingNow?('Vez de assinar: '+esc(ROLE[deal.turnRole]||deal.turnRole||'—')):'É participante desta operação?')
+      +'</div><div style="font-size:12.5px;color:var(--ink-3)">'
+      +(awaitingNow?'Se essa cadeira é sua, entre com a Verum Wallet para revisar e assinar — a janela é de 5 minutos por vez.':'Entre com a Verum Wallet para ver sua cadeira e assinar quando chegar a sua vez.')
+      +'</div></div>'
+      +'<a class="btn btn-primary" href="'+mesaUrl+'" style="height:44px;display:inline-flex;align-items:center;padding:0 18px;text-decoration:none">Entrar para assinar</a>'
+      +'</section>';
     document.getElementById('body').innerHTML=head
-      +'<div class="op-layout"><div class="op-main">'+parts+flow+multisig+'</div>'+aside+'</div>'
-      +'<div class="note">Esta página é somente leitura — saldos e logos são lidos em tempo real das redes públicas (ex.: RPC público da Solana). Conectar carteira e assinar acontece na mesa, pela Verum Wallet.</div>';
+      +'<div class="op-layout"><div class="op-main">'+parts+flow+multisig+cta+'</div>'+aside+'</div>'
+      +'<div class="note">Página de acompanhamento em tempo real — qualquer pessoa com o link vê o andamento. Participantes assinam pelo botão acima (a carteira prova a identidade; nada se move sem a sua assinatura).</div>';
   }
 
   // Link por operação (/op/<dealId>): só temos o deal. Monta a mesma tela com os participantes do deal.
@@ -367,19 +380,8 @@ window.addEventListener('unhandledrejection',function(e){try{console.warn('[veru
       +'<div class="r"><span class="k">Expira em</span><span class="v">'+esc(fmtDate(o.expiresAt))+'</span></div>'
       +'<div class="r"><span class="k">Ordem de assinatura</span><span class="v" style="font-size:11px">Vendedor → PM 1 → PM 2 → Comprador</span></div>'
       +'</div></section></aside>';
-    // Liquidada com ativo embrulhado (wSOL/WETH): avisa quem recebeu que o valor chega como token
-    // 1:1 e desembrulha na carteira — sem isso a pessoa acha que recebeu "outra moeda".
-    var WRAPPED={wSOL:['SOL','Solana'],WETH:['ETH','Ethereum']};
-    var wrapNote='';
-    if(o.state==='SETTLED'){
-      [[o.assetIn,'Comprador'],[o.assetOut,'Vendedor']].forEach(function(w){
-        var m=WRAPPED[w[0]]; if(!m) return;
-        wrapNote+='<div class="note" style="border-color:var(--ok,#2e7d32)"><b>'+esc(w[1])+':</b> você recebeu '+esc(w[0])+' — é '+esc(m[0])+' embrulhado como token, na proporção exata de 1:1. Para vê-lo como '+esc(m[0])+' nativo, use "desembrulhar" (unwrap) na sua Verum Wallet. Nada de valor se perde; só muda o formato.</div>';
-      });
-    }
     document.getElementById('body').innerHTML=head
       +'<div class="op-layout"><div class="op-main">'+partsHtml+multisig+'</div>'+aside+'</div>'
-      +wrapNote
       +'<div class="note">Esta página é somente leitura — acompanha a operação em tempo real. Assinar/movimentar fundos acontece pela mesa, na Verum Wallet.</div>';
   }
 
