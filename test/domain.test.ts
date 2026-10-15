@@ -28,7 +28,7 @@ describe('State Machine', () => {
     expect(canTransition('FULLY_SIGNED', 'CANCELLED')).toBe(false); expect(canTransition('AWAITING_SIGNATURES', 'SETTLING')).toBe(false); expect(canTransition('SETTLEMENT_VALIDATION', 'SETTLED')).toBe(false);
     expect(() => assertTransition('BLOCKED', 'SETTLING')).toThrow(/não permitida/);
   });
-  it('SETTLING só a partir de SETTLEMENT_VALIDATION; SETTLED só a partir de SETTLING', () => { const from = (to: string) => (Object.keys(TRANSITIONS) as (keyof typeof TRANSITIONS)[]).filter(k => (TRANSITIONS[k] as readonly string[]).includes(to)); expect(from('SETTLING')).toEqual(['SETTLEMENT_VALIDATION']); expect(from('SETTLED')).toEqual(['SETTLING']); });
+  it('SETTLING a partir de SETTLEMENT_VALIDATION ou BLOCKED (reconciliação on-chain); SETTLED só a partir de SETTLING', () => { const from = (to: string) => (Object.keys(TRANSITIONS) as (keyof typeof TRANSITIONS)[]).filter(k => (TRANSITIONS[k] as readonly string[]).includes(to)); expect(from('SETTLING')).toEqual(['SETTLEMENT_VALIDATION', 'BLOCKED']); expect(from('SETTLED')).toEqual(['SETTLING']); });
 });
 describe('Audit Log', () => {
   it('cadeia de hash verificável e detecta adulteração', async () => {
