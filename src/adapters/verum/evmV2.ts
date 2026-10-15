@@ -17,7 +17,7 @@
  * Limite documentado: a perna externa do contrato é SEMPRE a do vendedor (quem entrega BTC).
  * BTC nativo do lado comprador exigiria o espelho no contrato — fora do escopo da v2.
  */
-import { createPublicClient, createWalletClient, encodeFunctionData, http, defineChain, isAddress, keccak256, zeroAddress, type Abi, type Chain, type PublicClient, type WalletClient } from 'viem';
+import { createPublicClient, createWalletClient, encodeFunctionData, hashTypedData, http, defineChain, isAddress, keccak256, zeroAddress, type Abi, type Chain, type PublicClient, type WalletClient } from 'viem';
 import { privateKeyToAccount, type PrivateKeyAccount } from 'viem/accounts';
 import type { CanonicalAsset, ChainRef, Role } from '../../domain/types.js';
 import { DomainError } from '../../domain/errors.js';
@@ -55,6 +55,12 @@ export interface TermsV2Call {
   createdAt: bigint; expiresAt: bigint; termsVersion: number; nonce: bigint; htlcHash: Hex;
   /** Comissão ON-CHAIN dos PMs (unidades do buyerAsset) — split explícito calculado aqui e assinado por todos. */
   commissionPm1: bigint; commissionPm2: bigint;
+  /** Tipo de liquidação: 0 = TRANSFER (escrow bilateral); 1 = SWAP (câmbio via router autorizado). */
+  dealType: number;
+  /** SWAP: router autorizado congelado nos termos (TRANSFER: zero address). */
+  swapRouter: Hex;
+  /** SWAP: mínimo de buyerAsset recebido do câmbio (proteção de slippage). */
+  minAmountOut: bigint;
 }
 interface RawTradeV2 {
   termsHash: Hex; state: number; nextIdx: number; sellerExternal: boolean; sellerDeposited: boolean; buyerDeposited: boolean;
@@ -126,6 +132,9 @@ export function buildVerumTermsV2(c: DealCommitment, chainNow: number, sellerEvm
     nonce: deriveNonce(c.dealId, c.revision, c.dealNonce),
     htlcHash: map.external ? ('0x' + c.htlcHash) as Hex : ZERO32,
     commissionPm1, commissionPm2,
+    // A mesa atual é sempre escrow bilateral (TRANSFER); o câmbio (SWAP) entra quando o produto
+    // ganhar a rota de liquidação via router — os campos já viajam no typehash assinado.
+    dealType: 0, swapRouter: zeroAddress as Hex, minAmountOut: 0n,
   };
 }
 
@@ -414,9 +423,13 @@ export class VerumEvmV2Adapter implements SettlementAdapter, ParticipantStepProv
       const allowance = await this.pub.readContract({ address: t.buyerAsset, abi: ERC20_ABI, functionName: 'allowance', args: [signer as Hex, this.escrowV2] }) as bigint;
       if (allowance < due) approve = { token: t.buyerAsset, spender: this.escrowV2, amount: due.toString() };
     }
+    const typedData = { domain: { ...evmDomain(this.cfg.chainId, this.escrowV2), chainId: this.cfg.chainId }, types: APPROVAL_TYPES, primaryType: 'Approval' as const, message: { tradeId: b.meta.tradeId as Hex, termsHash: b.meta.termsHash as Hex, role: onRole, deadline: BigInt(deadline) } };
     return {
       kind: 'evm', chainId: this.cfg.chainId, escrow: this.escrowV2, fn: 'signV2', deadline, approve,
-      typedData: { domain: { ...evmDomain(this.cfg.chainId, this.escrowV2), chainId: this.cfg.chainId }, types: APPROVAL_TYPES, primaryType: 'Approval', message: { tradeId: b.meta.tradeId, termsHash: b.meta.termsHash, role: onRole, deadline: String(deadline) } },
+      typedData: { ...typedData, message: { ...typedData.message, deadline: String(deadline) } },
+      // Digest EIP-712 pronto: fallback personal_sign p/ carteiras sem typed data (o contrato
+      // aceita ECDSA sobre toEthSignedMessageHash(digest)) e hash de referência p/ ERC-1271.
+      digestHex: hashTypedData(typedData as Parameters<typeof hashTypedData>[0]),
       relayable: onRole === OnchainRole.PAYMASTER_01 || onRole === OnchainRole.PAYMASTER_02,
     };
   }

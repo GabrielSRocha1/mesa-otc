@@ -3,7 +3,7 @@
  * EVM: EIP-712 (secp256k1, viem). Solana: Ed25519 sobre mensagem off-chain (tweetnacl). Bitcoin: BIP-137 (ECDSA, noble).
  * O envelope é SEMPRE reconstruído a partir dos termos persistidos — o cliente só devolve a assinatura.
  */
-import { recoverTypedDataAddress, keccak256, encodeAbiParameters, stringToHex, type TypedDataDomain } from 'viem';
+import { recoverTypedDataAddress, recoverMessageAddress, keccak256, encodeAbiParameters, stringToHex, type TypedDataDomain } from 'viem';
 import nacl from 'tweetnacl';
 import bs58 from 'bs58';
 import { secp256k1 } from '@noble/curves/secp256k1.js';
@@ -87,7 +87,18 @@ export function envelopeFor(deal: Deal, role: Role, nonce: string, env: Environm
 
 /* ---------- verificação por esquema ---------- */
 export async function verifyEvm(envelope: Envelope, signature: string, expected: string): Promise<boolean> {
-  try { if (!envelope.typedData) return false; const addr = await recoverTypedDataAddress({ domain: envelope.typedData.domain, types: envelope.typedData.types, primaryType: 'DealApproval', message: envelope.typedData.message, signature: signature as `0x${string}` }); return addr.toLowerCase() === expected.toLowerCase(); } catch { return false; }
+  // 1º typed data (eth_signTypedData_v4/v3); fallback: personal_sign da MENSAGEM legível do
+  // envelope — mesma informação, formato texto — para carteiras sem suporte a typed data.
+  try {
+    if (envelope.typedData) {
+      const addr = await recoverTypedDataAddress({ domain: envelope.typedData.domain, types: envelope.typedData.types, primaryType: 'DealApproval', message: envelope.typedData.message, signature: signature as `0x${string}` });
+      if (addr.toLowerCase() === expected.toLowerCase()) return true;
+    }
+  } catch { /* tenta o fallback */ }
+  try {
+    const addr = await recoverMessageAddress({ message: envelope.message, signature: signature as `0x${string}` });
+    return addr.toLowerCase() === expected.toLowerCase();
+  } catch { return false; }
 }
 export function verifySolana(message: string, signatureB58: string, addressB58: string): boolean {
   try { return nacl.sign.detached.verify(utf8ToBytes(message), bs58.decode(signatureB58), bs58.decode(addressB58)); } catch { return false; }

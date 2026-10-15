@@ -694,6 +694,21 @@ export default [
             "name": "commissionPm2",
             "type": "uint256",
             "internalType": "uint256"
+          },
+          {
+            "name": "dealType",
+            "type": "uint8",
+            "internalType": "uint8"
+          },
+          {
+            "name": "swapRouter",
+            "type": "address",
+            "internalType": "address"
+          },
+          {
+            "name": "minAmountOut",
+            "type": "uint256",
+            "internalType": "uint256"
           }
         ]
       },
@@ -1137,6 +1152,26 @@ export default [
             "name": "revealedPreimage",
             "type": "bytes",
             "internalType": "bytes"
+          },
+          {
+            "name": "dealType",
+            "type": "uint8",
+            "internalType": "uint8"
+          },
+          {
+            "name": "swapRouter",
+            "type": "address",
+            "internalType": "address"
+          },
+          {
+            "name": "minAmountOut",
+            "type": "uint256",
+            "internalType": "uint256"
+          },
+          {
+            "name": "commissionBps",
+            "type": "uint16",
+            "internalType": "uint16"
           }
         ]
       }
@@ -1386,6 +1421,21 @@ export default [
           },
           {
             "name": "commissionPm2",
+            "type": "uint256",
+            "internalType": "uint256"
+          },
+          {
+            "name": "dealType",
+            "type": "uint8",
+            "internalType": "uint8"
+          },
+          {
+            "name": "swapRouter",
+            "type": "address",
+            "internalType": "address"
+          },
+          {
+            "name": "minAmountOut",
             "type": "uint256",
             "internalType": "uint256"
           }
@@ -1720,6 +1770,24 @@ export default [
   },
   {
     "type": "function",
+    "name": "setSwapRouter",
+    "inputs": [
+      {
+        "name": "router",
+        "type": "address",
+        "internalType": "address"
+      },
+      {
+        "name": "authorized",
+        "type": "bool",
+        "internalType": "bool"
+      }
+    ],
+    "outputs": [],
+    "stateMutability": "nonpayable"
+  },
+  {
+    "type": "function",
     "name": "settle",
     "inputs": [
       {
@@ -1784,6 +1852,25 @@ export default [
     ],
     "outputs": [],
     "stateMutability": "nonpayable"
+  },
+  {
+    "type": "function",
+    "name": "swapRouters",
+    "inputs": [
+      {
+        "name": "",
+        "type": "address",
+        "internalType": "address"
+      }
+    ],
+    "outputs": [
+      {
+        "name": "",
+        "type": "bool",
+        "internalType": "bool"
+      }
+    ],
+    "stateMutability": "view"
   },
   {
     "type": "function",
@@ -2228,6 +2315,56 @@ export default [
   },
   {
     "type": "event",
+    "name": "SwapExecuted",
+    "inputs": [
+      {
+        "name": "tradeId",
+        "type": "bytes32",
+        "indexed": true,
+        "internalType": "bytes32"
+      },
+      {
+        "name": "router",
+        "type": "address",
+        "indexed": true,
+        "internalType": "address"
+      },
+      {
+        "name": "amountIn",
+        "type": "uint256",
+        "indexed": false,
+        "internalType": "uint256"
+      },
+      {
+        "name": "amountOut",
+        "type": "uint256",
+        "indexed": false,
+        "internalType": "uint256"
+      }
+    ],
+    "anonymous": false
+  },
+  {
+    "type": "event",
+    "name": "SwapRouterSet",
+    "inputs": [
+      {
+        "name": "router",
+        "type": "address",
+        "indexed": true,
+        "internalType": "address"
+      },
+      {
+        "name": "authorized",
+        "type": "bool",
+        "indexed": false,
+        "internalType": "bool"
+      }
+    ],
+    "anonymous": false
+  },
+  {
+    "type": "event",
     "name": "TokenAdded",
     "inputs": [
       {
@@ -2658,6 +2795,11 @@ export default [
   },
   {
     "type": "error",
+    "name": "InvalidSwapTerms",
+    "inputs": []
+  },
+  {
+    "type": "error",
     "name": "InvalidTermsVersion",
     "inputs": []
   },
@@ -2724,6 +2866,17 @@ export default [
   },
   {
     "type": "error",
+    "name": "RouterNotAuthorized",
+    "inputs": [
+      {
+        "name": "router",
+        "type": "address",
+        "internalType": "address"
+      }
+    ]
+  },
+  {
+    "type": "error",
     "name": "SafeERC20FailedOperation",
     "inputs": [
       {
@@ -2742,6 +2895,22 @@ export default [
     "type": "error",
     "name": "SellerAndBuyerRequired",
     "inputs": []
+  },
+  {
+    "type": "error",
+    "name": "SlippageExceeded",
+    "inputs": [
+      {
+        "name": "received",
+        "type": "uint256",
+        "internalType": "uint256"
+      },
+      {
+        "name": "minAmountOut",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ]
   },
   {
     "type": "error",

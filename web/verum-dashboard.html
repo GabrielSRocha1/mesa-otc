@@ -1501,6 +1501,15 @@ window.addEventListener('unhandledrejection',function(e){try{console.warn('[veru
   }
   /* ---- Passo on-chain pela CARTEIRA REAL (escrow V2): approve + signV2 assinados/enviados pela wallet ---- */
   function evmTypedPayload(td){ return JSON.stringify({ types:{ EIP712Domain:[{name:'name',type:'string'},{name:'version',type:'string'},{name:'chainId',type:'uint256'},{name:'verifyingContract',type:'address'}], ...td.types }, domain:td.domain, primaryType:td.primaryType, message:td.message }); }
+  // Cascata de assinatura EVM: v4 → v3 → personal_sign (fallbackData = digest on-chain ou a
+  // mensagem legível do envelope). Recusa do usuário (4001) NÃO cai para o próximo método.
+  async function evmSignCascade(p,from,td,fallbackData){
+    const payload=evmTypedPayload(td);
+    try{ return await p.request({method:'eth_signTypedData_v4',params:[from,payload]}); }catch(e){ if(e&&(e.code===4001||e.code==='ACTION_REJECTED')) throw e; }
+    try{ return await p.request({method:'eth_signTypedData_v3',params:[from,payload]}); }catch(e){ if(e&&(e.code===4001||e.code==='ACTION_REJECTED')) throw e; }
+    if(fallbackData) return p.request({method:'personal_sign',params:[fallbackData,from]});
+    throw new Error('A carteira não suporta assinatura tipada (v4/v3) e não há fallback disponível.');
+  }
   async function evmWaitReceipt(p,hash){ for(let i=0;i<60;i++){ const r=await p.request({method:'eth_getTransactionReceipt',params:[hash]}); if(r){ if(r.status==='0x0') throw new Error('Transação revertida on-chain'); return r; } await new Promise(z=>setTimeout(z,3000)); } throw new Error('Timeout aguardando a confirmação da transação'); }
   /** Executa o passo da vez devolvido por /onchain-tx|/deal/step: approve ERC-20 (se pendente) +
    *  assinatura EIP-712 do Approval; `submit(body)` envia ao backend — PMs são relayados pelo
@@ -1514,7 +1523,7 @@ window.addEventListener('unhandledrejection',function(e){try{console.warn('[veru
       const h=await p.request({method:'eth_sendTransaction',params:[{from,to:step.approve.token,data}]});
       await evmWaitReceipt(p,h);
     }
-    const sig=await p.request({method:'eth_signTypedData_v4',params:[from,evmTypedPayload(step.typedData)]});
+    const sig=await evmSignCascade(p,from,step.typedData,step.digestHex); // v4→v3→personal_sign(digest)
     const res=await submit({signature:sig,deadline:step.deadline});
     if(res&&res.kind==='txRequest'&&res.txRequest){ const h=await p.request({method:'eth_sendTransaction',params:[{from,to:res.txRequest.to,data:res.txRequest.data}]}); await evmWaitReceipt(p,h); }
   }
@@ -3346,8 +3355,9 @@ window.addEventListener('unhandledrejection',function(e){try{console.warn('[veru
       const p=await findVerumEthProvider(); if(!p) throw new Error('Provider EVM da Verum Wallet não foi injetado nesta aba.');
       const td=env.typedData; if(!td) throw new Error('Envelope EVM sem typedData — recarregue e tente de novo.');
       try{ await p.request({method:'eth_requestAccounts'}); }catch(e){}
-      const payload={ types:{ EIP712Domain:[{name:'name',type:'string'},{name:'version',type:'string'},{name:'chainId',type:'uint256'},{name:'verifyingContract',type:'address'}], ...td.types }, domain:td.domain, primaryType:td.primaryType, message:td.message };
-      return p.request({ method:'eth_signTypedData_v4', params:[addr, JSON.stringify(payload)] });
+      // Cascata v4→v3→personal_sign: o fallback assina a MENSAGEM LEGÍVEL do envelope (mesmos
+      // dados em texto) — o backend verifica os dois formatos.
+      return evmSignCascade(p, addr, td, env.message);
     }
     if(env.network==='bitcoin'||env.network==='tron'){
       // Superfície ÚNICA da Verum (multichain): BIP-137 (bitcoin) / TIP-191 (tron) via
