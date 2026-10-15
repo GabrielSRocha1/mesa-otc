@@ -3386,11 +3386,24 @@ window.addEventListener('unhandledrejection',function(e){try{console.warn('[veru
     const btn=$('#pRvSign'); if(btn){ btn.disabled=true; btn.textContent='Assinando na Verum Wallet…'; }
     try{
       const d=pDto.deal;
-      // 1) Passo ON-CHAIN pela própria carteira (escrow V2 real): approve + signV2. Em modo
-      //    simulado o endpoint responde 'automático' e seguimos direto para a assinatura da mesa.
+      // 1) Passo ON-CHAIN pela própria carteira (escrow real): Solana assina a PRÓPRIA transação
+      //    (seller_sign/buyer_sign/htlc_lock) e a EVM faz approve + signV2. Em modo simulado o
+      //    endpoint responde 'automático' e seguimos direto para a assinatura da mesa.
       try{
         const step=await pApi('/v1/deals/'+encodeURIComponent(d.id)+'/onchain-tx');
-        if(step&&step.kind==='evm') await evmOnchainStep(step, body=>pApi('/v1/deals/'+encodeURIComponent(d.id)+'/onchain-tx',{method:'POST',body}));
+        if(step&&step.kind==='solana'&&step.transactionBase64){
+          const prov=solProvider();
+          if(!prov||typeof prov.signTransaction!=='function') throw new Error('Esta versão da Verum Wallet não assina transações — atualize o app');
+          if(btn) btn.textContent='Confirme na Verum Wallet…';
+          const raw=Uint8Array.from(atob(step.transactionBase64),c=>c.charCodeAt(0));
+          const signed=await prov.signTransaction(raw);
+          const toB64=(x)=>{ if(typeof x==='string') return x; const u=x instanceof Uint8Array?x:(x&&typeof x.serialize==='function'?x.serialize():Uint8Array.from(x)); let s=''; for(const b of u) s+=String.fromCharCode(b); return btoa(s); };
+          if(btn) btn.textContent='Enviando à rede…';
+          const bo=await pApi('/v1/deals/'+encodeURIComponent(d.id)+'/onchain-tx',{method:'POST',idem:d.id+':'+(pDto.viewer&&pDto.viewer.role)+':onchain',body:{signedTransactionBase64:toB64(signed)}});
+          toast('Transação confirmada on-chain · '+((bo&&bo.txHash)?shortAddr(bo.txHash):''),'ok');
+        } else if(step&&step.kind==='evm'){
+          await evmOnchainStep(step, body=>pApi('/v1/deals/'+encodeURIComponent(d.id)+'/onchain-tx',{method:'POST',body}));
+        }
       }catch(e){ if(!/simulado|autom/i.test(e.message||'')) throw e; }
       // 2) Assinatura da MESA (auditoria) no esquema da rede do papel.
       const env=await pApi('/v1/deals/'+encodeURIComponent(d.id)+'/approval-envelope');
