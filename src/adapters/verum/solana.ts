@@ -12,7 +12,7 @@ import { sha256Hex, type CanonicalAsset, type ChainRef, type Role } from '../../
 import { DomainError } from '../../domain/errors.js';
 import { TradeState, Role as OnchainRole, type ChainId, type Terms as VerumTerms, type Signature as VerumSignature } from '../../onchain/types.js';
 import { computeFee } from '../../onchain/core/index.js';
-import { SolanaChainAdapter, anchorDiscriminator, findPda, associatedTokenAddress } from '../../onchain/router/adapters/solana.js';
+import { SolanaChainAdapter, anchorDiscriminator, findPda, associatedTokenAddress, WSOL_MINT } from '../../onchain/router/adapters/solana.js';
 import type { AdapterCapabilities, ApprovalSignature, AssetVerification, DealCommitment, OnChainDealState, ParticipantStepProvider, RegisterResult, SettlementAdapter, TxRef, TxStatus } from '../types.js';
 import { buildVerumTerms, statusFromTradeState, depositsOf, bindingOf, ROLE_TO_ONCHAIN, ROLE_ALREADY_ADVANCED, type VerumAdapterDeps, type VerumMeta } from './common.js';
 import type { SolanaSettings } from '../../config.js';
@@ -137,7 +137,15 @@ export class VerumSolanaAdapter implements SettlementAdapter, ParticipantStepPro
       if (!asset.contractOrMint) return BigInt(await this.conn.getBalance(new PublicKey(address), 'confirmed'));
       const program = await this.inner.tokenProgramFor(asset.contractOrMint);
       const ata = associatedTokenAddress(new PublicKey(address), new PublicKey(asset.contractOrMint), program);
-      try { return BigInt((await this.conn.getTokenAccountBalance(ata, 'confirmed')).value.amount); } catch { return 0n; }
+      let bal = 0n;
+      try { bal = BigInt((await this.conn.getTokenAccountBalance(ata, 'confirmed')).value.amount); } catch { /* ATA inexistente */ }
+      // wSOL: SOL nativo também conta (a tx de depósito embrulha o que faltar) — reserva p/ gás.
+      if (asset.contractOrMint === WSOL_MINT) {
+        const lamports = BigInt(await this.conn.getBalance(new PublicKey(address), 'confirmed'));
+        const reserve = 10_000_000n; // 0.01 SOL
+        bal += lamports > reserve ? lamports - reserve : 0n;
+      }
+      return bal;
     } catch (e) { this.fail('getBalance', e); }
   }
 
@@ -424,12 +432,16 @@ export class VerumSolanaAdapter implements SettlementAdapter, ParticipantStepPro
     const p = unsigned.payload as { transactionBase64: string; recentBlockhash: string; lastValidBlockHeight: number };
     return { kind: 'solana', tradeId: b.meta.tradeId, deadline, transactionBase64: p.transactionBase64, recentBlockhash: p.recentBlockhash, lastValidBlockHeight: p.lastValidBlockHeight };
   }
-  /** Recebe a transação assinada pela carteira e faz o broadcast + confirmação. */
+  /** Recebe a transação assinada pela carteira e faz o broadcast + confirmação. Passos RELAYED
+   *  (PMs: executor = feePayer) chegam só com a assinatura do papel — o executor co-assina aqui. */
   async submitParticipantStep(_dealId: string, _role: Role, _signer: string, body: Record<string, unknown>): Promise<Record<string, unknown>> {
     const b64 = String(body.signedTransactionBase64 ?? '');
     if (!b64) throw new DomainError('INVALID_INPUT', 'esperado { signedTransactionBase64 }');
     try {
-      const raw = Buffer.from(b64, 'base64');
+      const tx = Transaction.from(Buffer.from(b64, 'base64'));
+      const execKey = this.executor.publicKey;
+      if (tx.signatures.some(s => s.publicKey.equals(execKey) && !s.signature)) tx.partialSign(this.executor);
+      const raw = tx.serialize();
       const sig = await this.conn.sendRawTransaction(raw, { skipPreflight: false, preflightCommitment: 'confirmed' });
       const conf = await this.inner.waitForConfirmation(sig, 90_000);
       if (conf.status !== 'CONFIRMED') throw new Error(`tx não confirmada (${conf.status}): ${conf.reason ?? sig}`);
