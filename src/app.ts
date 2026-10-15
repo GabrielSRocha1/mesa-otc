@@ -275,12 +275,11 @@ export async function createApp(config: Config, o: AppOverrides = {}): Promise<A
   // Propostas estruturadas de alteração de termos (§5.3/§6) — porta de entrada tipada para o amend.
   const proposals = new ProposalService({ deals, now, audit, notifier: { notify: dealId => logger.info({ dealId }, 'atualização de proposta de termos') } });
   // Mesas multi-instância (v3): cadeiras + convites por cadeira + prova de posse na conexão.
-  // Embrulho canônico por rede. SOL fica NATIVO na perna HTLC cross-chain (htlc_lock_sol guarda
-  // lamports no PDA) — só embrulha em wSOL quando a CONTRAPARTE também é Solana (escrow N-de-N
-  // direto, que é só-token). ETH→WETH sempre que o escrow V2 está ativo (contrato EVM é só-token
-  // em qualquer rota). BTC fica de fora (HTLC nativo próprio).
-  const nativeWrapOf = (network: string, counterpartyNetwork: string | null): { contractOrMint: string; decimals: number } | null => {
-    if (network === 'solana' && solCfg && counterpartyNetwork === 'solana') return { contractOrMint: WSOL_MINT, decimals: 9 };
+  // Embrulho canônico por rede. SOL agora fica NATIVO em TODAS as rotas Solana — o escrow N-de-N
+  // ganhou perna nativa (seller_sign_sol/buyer_sign_sol: lamports no PDA; settle/refund nativos) e
+  // o HTLC cross-chain já era nativo. ETH→WETH continua (contrato EVM é só-token em qualquer rota);
+  // BTC fica de fora (HTLC nativo próprio).
+  const nativeWrapOf = (network: string, _counterpartyNetwork: string | null): { contractOrMint: string; decimals: number } | null => {
     if (network === 'ethereum' && verumEvmCfg?.escrowV2) return { contractOrMint: WETH_SEPOLIA, decimals: 18 };
     return null;
   };

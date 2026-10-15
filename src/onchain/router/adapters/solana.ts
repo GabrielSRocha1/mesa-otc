@@ -128,7 +128,7 @@ export class SolanaChainAdapter implements ChainAdapter {
     const cfg = await this.readConfig();
     const now = await this.now();
     if (cfg.platformFeeBps !== t.platformFeeBps) issues.push({ code: "FEE_MISMATCH", message: `fee on-chain ${cfg.platformFeeBps} bps ≠ termos ${t.platformFeeBps}` });
-    for (const [asset, role] of [[t.sellerAsset, Role.SELLER], [t.buyerAsset, Role.BUYER]] as const) {
+    for (const [asset, role] of ([[t.sellerAsset, Role.SELLER], [t.buyerAsset, Role.BUYER]] as const).filter(([a]) => a !== ABSENT_WALLET)) {
       try { await this.tokenProgramFor(asset); } catch (e) { issues.push({ code: "TOKEN_NOT_AUTHORIZED", message: (e as Error).message, role }); }
     }
     const wallets: [string, Role][] = ([[t.seller, Role.SELLER], [t.paymaster01, Role.PAYMASTER_01], [t.paymaster02, Role.PAYMASTER_02], [t.buyer, Role.BUYER]] as [string, Role][])
@@ -155,6 +155,7 @@ export class SolanaChainAdapter implements ChainAdapter {
   }
 
   private async tokenBalance(owner: string, mint: string): Promise<bigint> {
+    if (mint === ABSENT_WALLET) return BigInt(await this.conn.getBalance(pk(owner), this.commitment)); // perna NATIVA
     const program = await this.tokenProgramFor(mint);
     const ata = associatedTokenAddress(pk(owner), pk(mint), program);
     let bal = 0n;
@@ -204,8 +205,8 @@ export class SolanaChainAdapter implements ChainAdapter {
       meta(pk(signer), true, true),
       meta(this.tradePda(tradeId), true),
       meta(this.noncePda(terms.paymaster01, terms.nonce), true),
-      meta(this.tokenPda(terms.sellerAsset), false),
-      meta(this.tokenPda(terms.buyerAsset), false),
+      meta(terms.sellerAsset === ABSENT_WALLET ? this.programId : this.tokenPda(terms.sellerAsset), false),
+      meta(terms.buyerAsset === ABSENT_WALLET ? this.programId : this.tokenPda(terms.buyerAsset), false),
       meta(this.attestPda(terms.seller), false),
       // Pay Master ausente (Pubkey::default) → conta Option=None do Anchor = o PRÓPRIO programa.
       meta(terms.paymaster01 === ABSENT_WALLET ? this.programId : this.attestPda(terms.paymaster01), false),
@@ -220,6 +221,16 @@ export class SolanaChainAdapter implements ChainAdapter {
   async buildSign(terms: Terms, tradeId: string, approval: Signature): Promise<UnsignedTx> {
     const trade = this.tradePda(tradeId);
     const data = concat(fromHex(approval.termsHash), i64le(approval.deadline));
+    // Perna NATIVA (asset = Pubkey::default): depósito em lamports no PDA — SOL entra solto.
+    if (approval.role === Role.SELLER && terms.sellerAsset === ABSENT_WALLET) {
+      const cfg = await this.readConfig();
+      const keys = [meta(this.configPda, false), meta(trade, true), meta(pk(terms.seller), true, true), meta(pk(cfg.treasury), true), meta(SystemProgram.programId, false)];
+      return this.toUnsigned(terms.seller, this.ix("seller_sign_sol", keys, data), "seller_sign_sol (deposita SOL nativo + fee)");
+    }
+    if (approval.role === Role.BUYER && terms.buyerAsset === ABSENT_WALLET) {
+      const keys = [meta(this.configPda, false), meta(trade, true), meta(pk(terms.buyer), true, true), meta(SystemProgram.programId, false)];
+      return this.toUnsigned(terms.buyer, this.ix("buyer_sign_sol", keys, data), "buyer_sign_sol (paga em SOL nativo + comissões)");
+    }
     switch (approval.role) {
       case Role.SELLER: {
         const program = await this.tokenProgramFor(terms.sellerAsset);
@@ -268,9 +279,39 @@ export class SolanaChainAdapter implements ChainAdapter {
 
   async buildSettle(tradeId: string): Promise<UnsignedTx> {
     const { terms, sellerProgram, buyerProgram } = await this.loadTerms(tradeId);
-    const trade = this.tradePda(tradeId); const sm = pk(terms.sellerAsset); const bm = pk(terms.buyerAsset);
+    const trade = this.tradePda(tradeId);
     const seller = pk(terms.seller); const buyer = pk(terms.buyer);
     const exec = this.executor?.publicKey ?? seller;
+    // Perna NATIVA de um dos lados → settle dedicado (lamports direto do PDA, sem wSOL).
+    const pm1C = terms.commissionPm1 > 0n && terms.paymaster01 !== ABSENT_WALLET;
+    const pm2C = terms.commissionPm2 > 0n && terms.paymaster02 !== ABSENT_WALLET;
+    if (terms.sellerAsset === ABSENT_WALLET) {
+      const bm0 = pk(terms.buyerAsset);
+      const keys0 = [
+        meta(this.configPda, false), meta(trade, true), meta(exec, true, true), meta(bm0, false),
+        meta(associatedTokenAddress(trade, bm0, buyerProgram), true),
+        meta(seller, true), meta(buyer, true),
+        meta(associatedTokenAddress(seller, bm0, buyerProgram), true),
+        meta(pm1C ? pk(terms.paymaster01) : this.programId, pm1C), meta(pm1C ? associatedTokenAddress(pk(terms.paymaster01), bm0, buyerProgram) : this.programId, pm1C),
+        meta(pm2C ? pk(terms.paymaster02) : this.programId, pm2C), meta(pm2C ? associatedTokenAddress(pk(terms.paymaster02), bm0, buyerProgram) : this.programId, pm2C),
+        meta(buyerProgram, false), meta(ASSOCIATED_TOKEN_PROGRAM_ID, false), meta(SystemProgram.programId, false),
+      ];
+      return this.toUnsigned("ANY", this.ix("settle_native_seller", keys0, new Uint8Array()), "settle_native_seller (SOL → comprador; token → vendedor)");
+    }
+    if (terms.buyerAsset === ABSENT_WALLET) {
+      const sm0 = pk(terms.sellerAsset);
+      const keys0 = [
+        meta(this.configPda, false), meta(trade, true), meta(exec, true, true), meta(sm0, false),
+        meta(associatedTokenAddress(trade, sm0, sellerProgram), true),
+        meta(seller, true), meta(buyer, true),
+        meta(associatedTokenAddress(buyer, sm0, sellerProgram), true),
+        meta(pm1C ? pk(terms.paymaster01) : this.programId, pm1C),
+        meta(pm2C ? pk(terms.paymaster02) : this.programId, pm2C),
+        meta(sellerProgram, false), meta(ASSOCIATED_TOKEN_PROGRAM_ID, false), meta(SystemProgram.programId, false),
+      ];
+      return this.toUnsigned("ANY", this.ix("settle_native_buyer", keys0, new Uint8Array()), "settle_native_buyer (token → comprador; SOL → vendedor/PMs)");
+    }
+    const sm = pk(terms.sellerAsset); const bm = pk(terms.buyerAsset);
     // Comissões on-chain (termos v2): contas dos PMs e suas ATAs do buyerAsset; comissão zero ou
     // cadeira ausente → Option=None do Anchor (o PRÓPRIO programa no slot).
     const pm1On = terms.commissionPm1 > 0n && terms.paymaster01 !== ABSENT_WALLET;
@@ -296,9 +337,25 @@ export class SolanaChainAdapter implements ChainAdapter {
 
   async buildRefund(tradeId: string): Promise<UnsignedTx> {
     const { terms, sellerProgram, buyerProgram } = await this.loadTerms(tradeId);
-    const trade = this.tradePda(tradeId); const sm = pk(terms.sellerAsset); const bm = pk(terms.buyerAsset);
+    const trade = this.tradePda(tradeId);
     const seller = pk(terms.seller); const buyer = pk(terms.buyer);
     const exec = this.executor?.publicKey ?? seller;
+    // Mesa com perna NATIVA → refund dedicado (lamports do PDA + perna de token).
+    if (terms.sellerAsset === ABSENT_WALLET || terms.buyerAsset === ABSENT_WALLET) {
+      const nativeSeller = terms.sellerAsset === ABSENT_WALLET;
+      const tokenMint = pk(nativeSeller ? terms.buyerAsset : terms.sellerAsset);
+      const tokenProgram = nativeSeller ? buyerProgram : sellerProgram;
+      const depositor = nativeSeller ? buyer : seller;
+      const keys0 = [
+        meta(trade, true), meta(exec, true, true), meta(tokenMint, false),
+        meta(associatedTokenAddress(trade, tokenMint, tokenProgram), true),
+        meta(seller, true), meta(buyer, true),
+        meta(associatedTokenAddress(depositor, tokenMint, tokenProgram), true),
+        meta(tokenProgram, false), meta(ASSOCIATED_TOKEN_PROGRAM_ID, false), meta(SystemProgram.programId, false),
+      ];
+      return this.toUnsigned("ANY", this.ix("refund_native", keys0, new Uint8Array()), "refund_native (devolve SOL + token às origens)");
+    }
+    const sm = pk(terms.sellerAsset); const bm = pk(terms.buyerAsset);
     const keys = [
       meta(trade, true), meta(exec, false, true), meta(sm, false), meta(bm, false),
       meta(associatedTokenAddress(trade, sm, sellerProgram), true), meta(associatedTokenAddress(trade, bm, buyerProgram), true),

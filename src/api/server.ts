@@ -590,8 +590,11 @@ export async function buildApi(deps: ApiDeps): Promise<FastifyInstance> {
     const sellerChair = mesa.chairs.find(c => c.role === 'SELLER'); const buyerChair = mesa.chairs.find(c => c.role === 'BUYER');
     if (!sellerChair || !buyerChair) throw new DomainError('INVALID_INPUT', 'Mesa sem Vendedor/Comprador');
     const motivos: string[] = [];
-    if (!sellerChair.expectedAsset.contractOrMint) motivos.push(`Vendedor: ${sellerChair.expectedAsset.symbol} nativo não é suportado pelo escrow (use um token)`);
-    if (!buyerChair.expectedAsset.contractOrMint) motivos.push(`Comprador: ${buyerChair.expectedAsset.symbol} nativo não é suportado pelo escrow (use um token)`);
+    // Solana: UMA perna pode ser NATIVA (SOL entra e sai solto — seller_sign_sol/settle_native_*).
+    const nativeAllowed = net === 'solana';
+    if (!sellerChair.expectedAsset.contractOrMint && !nativeAllowed) motivos.push(`Vendedor: ${sellerChair.expectedAsset.symbol} nativo não é suportado pelo escrow (use um token)`);
+    if (!buyerChair.expectedAsset.contractOrMint && !nativeAllowed) motivos.push(`Comprador: ${buyerChair.expectedAsset.symbol} nativo não é suportado pelo escrow (use um token)`);
+    if (!sellerChair.expectedAsset.contractOrMint && !buyerChair.expectedAsset.contractOrMint) motivos.push('Vendedor e Comprador nativos ao mesmo tempo não fazem sentido (SOL↔SOL)');
     if (!mesa.config?.amountInBase) motivos.push('Configuração: quantidade do Vendedor não definida');
     const roleAddr: Partial<Record<MesaChairRole, string>> = {};
     for (const c of mesa.chairs) {
@@ -927,9 +930,15 @@ export async function buildApi(deps: ApiDeps): Promise<FastifyInstance> {
     // token na mesma rede → VerumOtcEscrow N/N real. Qualquer lado nativo (SOL/ETH/TRX) ou
     // CROSS_CHAIN sem hashlock → caminho legado (dev): no sim local funciona; em produção o
     // verify recusa nativo com motivo claro.
-    const escrowDirectTokens = plan?.mode === 'ESCROW_DIRECT'
-      && !!mesa.chairs.find(c => c.role === 'SELLER')?.expectedAsset.contractOrMint
-      && !!mesa.chairs.find(c => c.role === 'BUYER')?.expectedAsset.contractOrMint;
+    // Solana REAL aceita UMA perna nativa no escrow (SOL entra e sai solto); no sim local o nativo
+    // segue o caminho legado, e nas demais redes os dois lados precisam ser token (ETH vira WETH
+    // no embrulho da criação; TRX nativo não é suportado).
+    const solReal = (() => { const a = deps.adapters?.get('solana'); return !!a && hasParticipantSteps(a); })();
+    const sellerChairA = mesa.chairs.find(c => c.role === 'SELLER');
+    const buyerChairA = mesa.chairs.find(c => c.role === 'BUYER');
+    const legOk = (c?: MesaChair) => !!c && (!!c.expectedAsset.contractOrMint || (solReal && c.expectedAsset.network === 'solana'));
+    const bothNative = !sellerChairA?.expectedAsset.contractOrMint && !buyerChairA?.expectedAsset.contractOrMint;
+    const escrowDirectTokens = plan?.mode === 'ESCROW_DIRECT' && legOk(sellerChairA) && legOk(buyerChairA) && !bothNative;
     const view = plan?.mode === 'HTLC_BTC'
       ? await createMesaHtlcDeal(mesa, body, id => deps.mesa.attachDeal(mesa, id))
       : plan?.mode === 'CROSS_CHAIN' && plan.htlc

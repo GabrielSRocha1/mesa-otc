@@ -261,9 +261,10 @@ export class VerumSolanaAdapter implements SettlementAdapter, ParticipantStepPro
       const terms = await this.verumTermsOf(dealId, null, b.meta);
       const seller = legIndex === 0;
       const mint = seller ? terms.sellerAsset : terms.buyerAsset;
-      const need = seller ? terms.sellerAmount + computeFee(terms.sellerAmount, terms.platformFeeBps) : terms.buyerAmount;
-      const bal = await this.getBalance(from, { contractOrMint: mint, network: 'solana' } as CanonicalAsset);
-      if (bal < need) throw new DomainError('FUNDING_REQUIRED', `saldo insuficiente na ATA (${bal} < ${need})`);
+      const native = mint === SOLANA_ABSENT_PM; // perna NATIVA: saldo em lamports, sem ATA
+      const need = seller ? terms.sellerAmount + computeFee(terms.sellerAmount, terms.platformFeeBps) : terms.buyerAmount + terms.commissionPm1 + terms.commissionPm2;
+      const bal = await this.getBalance(from, { contractOrMint: native ? null : mint, network: 'solana' } as CanonicalAsset);
+      if (bal < need) throw new DomainError('FUNDING_REQUIRED', `saldo insuficiente ${native ? 'em SOL' : 'na ATA'} (${bal} < ${need})`);
       return this.ref('balance-verified');
     } catch (e) { if (e instanceof DomainError) throw e; this.fail('deposit', e); }
   }
