@@ -171,7 +171,15 @@ export class SettlementEngine {
   async recover(): Promise<{ dealId: string; action: string }[]> {
     const out: { dealId: string; action: string }[] = [];
     for (const d of await this.d.store.listDeals({ states: ['SETTLEMENT_VALIDATION', 'SETTLING'] })) {
-      if (d.state === 'SETTLEMENT_VALIDATION') { if (PRE_SETTLING_EXPIRABLE.has(d.state) && d.expiresAt <= this.now()) { out.push({ dealId: d.id, action: 'expired' }); continue; } try { await this.settle(d.id, 'keeper:recovery'); out.push({ dealId: d.id, action: 'settled' }); } catch (e) { out.push({ dealId: d.id, action: `rejected:${(e as DomainError).code ?? 'error'}` }); } continue; }
+      if (d.state === 'SETTLEMENT_VALIDATION') {
+        if (PRE_SETTLING_EXPIRABLE.has(d.state) && d.expiresAt <= this.now()) { out.push({ dealId: d.id, action: 'expired' }); continue; }
+        // Registro ÓRFÃO (processo caiu entre criar o registro e EXECUTING): sem isto o settle
+        // re-tentado rejeita na unicidade ("liquidação já registrada") e a deal fica presa 3/3.
+        const stale = await this.d.store.getSettlement(d.id);
+        if (stale && stale.status !== 'FAILED' && stale.status !== 'CONFIRMED' && stale.status !== 'EXECUTING' && stale.status !== 'CONFIRMING') {
+          stale.status = 'FAILED'; await this.d.store.updateSettlement(stale);
+        }
+        try { await this.settle(d.id, 'keeper:recovery'); out.push({ dealId: d.id, action: 'settled' }); } catch (e) { out.push({ dealId: d.id, action: `rejected:${(e as DomainError).code ?? 'error'}` }); } continue; }
       const rec = await this.d.store.getSettlement(d.id);
       if (rec && rec.status === 'CONFIRMING') { await this.confirm(d.id); out.push({ dealId: d.id, action: 'confirmed' }); continue; }
       if (rec && rec.status === 'EXECUTING') {
