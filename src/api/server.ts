@@ -464,50 +464,62 @@ export async function buildApi(deps: ApiDeps): Promise<FastifyInstance> {
     if (!adapters) throw new DomainError('SETTLEMENT_NOT_ALLOWED', 'Operação HTLC indisponível: adaptadores de rede não configurados');
     const plan = deriveSettlementPlan(mesa.chairs);
     if (plan?.mode !== 'HTLC_BTC') throw new DomainError('INVALID_INPUT', 'Mesa sem perna de BTC nativo');
-    if (plan.htlc?.btcSide !== 'SELLER') throw new DomainError('SETTLEMENT_NOT_ALLOWED', 'BTC nativo do lado COMPRADOR ainda não é suportado (a perna externa do escrow V2 é a do vendedor)');
     const sellerChair = mesa.chairs.find(c => c.role === 'SELLER') as MesaChair;
     const buyerChair = mesa.chairs.find(c => c.role === 'BUYER') as MesaChair;
     const pm1Chair = mesa.chairs.find(c => c.role === 'PAYMASTER_1');
     if (!pm1Chair?.wallet) throw new DomainError('SETTLEMENT_NOT_ALLOWED', 'Operação HTLC pela mesa exige a cadeira Pay Master 1 conectada (o motor pede no mínimo 3 papéis)');
-    const tokenNet = buyerChair.expectedAsset.network;
-    if (tokenNet !== 'ethereum') throw new DomainError('SETTLEMENT_NOT_ALLOWED', `Perna de contrato em ${tokenNet} ainda não é suportada no fluxo HTLC da mesa (comece por Ethereum/Sepolia)`);
+    // BTC do VENDEDOR (btcSide SELLER): comprador deposita token no escrow; perna externa = SELLER.
+    // BTC do COMPRADOR (btcSide BUYER): vendedor deposita token no escrow; perna externa = BUYER —
+    // o settleV2 entrega o token ao comprador e revela a preimage que libera o BTC ao vendedor.
+    const btcBuyer = plan.htlc?.btcSide === 'BUYER';
+    const btcChair = btcBuyer ? buyerChair : sellerChair;       // tranca BTC no HTLC P2WSH
+    const tokenChair = btcBuyer ? sellerChair : buyerChair;     // deposita token no escrow EVM
+    const tokenNet = tokenChair.expectedAsset.network;
+    if (tokenNet !== 'ethereum') throw new DomainError('SETTLEMENT_NOT_ALLOWED', `Perna de contrato em ${tokenNet} ainda não é suportada no fluxo BTC da mesa: o lado NÃO-BTC precisa de um escrow que revele a preimage; hoje só o escrow V2 (Ethereum) faz isso (Solana exigiria fluxo de dois HTLCs; Tron não tem hashlock no contrato)`);
     const btcAdapter = adapters.get('bitcoin'); const evmAdapter = adapters.get('ethereum');
     if (!btcAdapter || !evmAdapter) throw new DomainError('SETTLEMENT_NOT_ALLOWED', 'Adaptadores bitcoin/ethereum ausentes');
-    // Endereços por perna, vindos da carteira multichain de cada cadeira.
+    const btcLabel = btcBuyer ? 'Comprador' : 'Vendedor'; const tokenLabel = btcBuyer ? 'Vendedor' : 'Comprador';
     const motivos: string[] = [];
-    const sellerBtc = addressOn(sellerChair, 'bitcoin'); if (!sellerBtc || !btcAdapter.validateAddress(sellerBtc)) motivos.push('Vendedor: carteira sem endereço Bitcoin válido');
-    const buyerEvm = addressOn(buyerChair, 'ethereum'); if (!buyerEvm || !evmAdapter.validateAddress(buyerEvm)) motivos.push('Comprador: carteira sem endereço Ethereum válido');
+    const btcAddr = addressOn(btcChair, 'bitcoin'); if (!btcAddr || !btcAdapter.validateAddress(btcAddr)) motivos.push(`${btcLabel}: carteira sem endereço Bitcoin válido`);
+    const tokenEvm = addressOn(tokenChair, 'ethereum'); if (!tokenEvm || !evmAdapter.validateAddress(tokenEvm)) motivos.push(`${tokenLabel}: carteira sem endereço Ethereum válido`);
+    // A contraparte do BTC (quem faz o claim do BTC com a preimage) precisa de endereço Bitcoin.
+    const counterBtc = addressOn(tokenChair, 'bitcoin'); if (!counterBtc || !btcAdapter.validateAddress(counterBtc)) motivos.push(`${tokenLabel}: carteira sem endereço Bitcoin (recebe/reclama o BTC do HTLC)`);
     const pm1Evm = addressOn(pm1Chair, 'ethereum'); if (!pm1Evm || !evmAdapter.validateAddress(pm1Evm)) motivos.push('Pay Master 1: carteira sem endereço Ethereum válido');
-    if (!mesa.config?.amountInBase) motivos.push('Configuração: quantidade do Vendedor (sats) não definida');
+    if (!mesa.config?.amountInBase) motivos.push('Configuração: quantidade não definida');
     if (motivos.length) throw new DomainError('VERSION_CONFLICT', 'Não foi possível criar a operação HTLC', { motivos });
+    const btcAsset = { network: 'bitcoin', chainId: btcAdapter.chain.chainId, contractOrMint: null };
+    const tokenAsset = { network: 'ethereum', chainId: evmAdapter.chain.chainId, contractOrMint: tokenChair.expectedAsset.contractOrMint };
     const input = {
-      assetIn: { network: 'bitcoin', chainId: btcAdapter.chain.chainId, contractOrMint: null },
-      assetOut: { network: 'ethereum', chainId: evmAdapter.chain.chainId, contractOrMint: buyerChair.expectedAsset.contractOrMint },
+      assetIn: btcBuyer ? tokenAsset : btcAsset,
+      assetOut: btcBuyer ? btcAsset : tokenAsset,
       amountInBase: mesa.config!.amountInBase as string, discountBps: b.discountBps, commissionBps: b.commissionBps, commissionSplitBps: b.commissionSplitBps,
       maxSlippageBps: b.maxSlippageBps, maxPriceDriftBps: 500, expiresInSec: b.expiresInSec,
       participants: [
-        { role: 'SELLER', network: 'bitcoin', chainId: btcAdapter.chain.chainId, address: sellerBtc },
+        { role: 'SELLER', network: btcBuyer ? 'ethereum' : 'bitcoin', chainId: btcBuyer ? evmAdapter.chain.chainId : btcAdapter.chain.chainId, address: btcBuyer ? tokenEvm : btcAddr },
         { role: 'PAYMASTER_1', network: 'ethereum', chainId: evmAdapter.chain.chainId, address: pm1Evm },
-        { role: 'BUYER', network: 'ethereum', chainId: evmAdapter.chain.chainId, address: buyerEvm },
+        { role: 'BUYER', network: btcBuyer ? 'bitcoin' : 'ethereum', chainId: btcBuyer ? btcAdapter.chain.chainId : evmAdapter.chain.chainId, address: btcBuyer ? btcAddr : tokenEvm },
       ],
     };
-    const created = await deps.deals.create(input, sellerBtc as string);
+    const creator = (btcBuyer ? tokenEvm : btcAddr) as string;
+    const created = await deps.deals.create(input, creator);
     // Linka a deal à mesa ANTES do open: o registro on-chain (dentro do open) resolve o endereço
     // EVM do vendedor-BTC pela carteira multichain da cadeira — a busca é por mesa.dealId(s).
     onCreated(created.id);
     for (const p of input.participants) if (p.role !== 'SELLER') await deps.deals.connectWallet(created.id, p.role as Role, p.address as string, p.address as string);
-    await deps.deals.open(created.id, sellerBtc as string); // registra: createTradeV2 (EVM) + derivação do cofre (BTC)
-    // Funding: comprador (approve ERC-20 — melhor esforço: carteira real completa via /onchain-tx);
-    // vendedor é o LOCK EXTERNO — o fund devolve o endereço do cofre, que vai na resposta.
+    await deps.deals.open(created.id, creator); // registra: createTradeV2 (EVM) + derivação do cofre (BTC)
+    // Funding: a perna de TOKEN deposita no escrow (approve ERC-20 — melhor esforço; a carteira real
+    // completa via /onchain-tx); a perna BTC é o LOCK EXTERNO — o fund devolve o endereço do cofre.
+    const tokenRole: Role = btcBuyer ? 'SELLER' : 'BUYER';
+    const btcRole: Role = btcBuyer ? 'BUYER' : 'SELLER';
     let htlcFunding: { address: string; requiredSat: string } | null = null;
-    try { await deps.deals.fund(created.id, 'BUYER', buyerEvm as string); } catch (e) { logger.warn({ dealId: created.id, err: (e as Error).message }, 'funding do comprador pendente (carteira real completa via /onchain-tx)'); }
-    try { await deps.deals.fund(created.id, 'SELLER', sellerBtc as string); }
+    try { await deps.deals.fund(created.id, tokenRole, tokenEvm as string); } catch (e) { logger.warn({ dealId: created.id, err: (e as Error).message }, 'funding da perna de token pendente (carteira real completa via /onchain-tx)'); }
+    try { await deps.deals.fund(created.id, btcRole, btcAddr as string); }
     catch (e) {
       const err = e as DomainError;
       if (err.code === 'FUNDING_REQUIRED' && err.details?.address) htlcFunding = { address: String(err.details.address), requiredSat: String(err.details.requiredSat ?? mesa.config!.amountInBase) };
-      else logger.warn({ dealId: created.id, err: err.message }, 'funding do vendedor pendente');
+      else logger.warn({ dealId: created.id, err: err.message }, 'lock BTC pendente');
     }
-    await deps.audit.append({ actorType: 'user', actorId: mesa.payMasterId, category: 'portal.mesa.deal.created', dealId: created.id, payload: { mode: 'htlc-btc', vault: htlcFunding?.address ?? null } });
+    await deps.audit.append({ actorType: 'user', actorId: mesa.payMasterId, category: 'portal.mesa.deal.created', dealId: created.id, payload: { mode: btcBuyer ? 'htlc-btc-comprador' : 'htlc-btc', vault: htlcFunding?.address ?? null } });
     // Carteira real: o registro on-chain (createTradeV2) é enviado pela carteira do PM1 — o
     // txRequest vem no meta do adapter e vai na resposta para o dashboard disparar a assinatura.
     const dealNow = await deps.deals.get(created.id);

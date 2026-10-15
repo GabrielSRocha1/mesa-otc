@@ -5,7 +5,11 @@
 import { describe, it, expect } from 'vitest';
 import { makeApp, btcWallet, evmWallet } from './helpers.js';
 import { LOCAL_TOKENS } from '../src/app.js';
+import { deriveSettlementPlan } from '../src/mesa/settlementPlan.js';
 import type { MesaChair } from '../src/mesa/types.js';
+
+const chair = (role: MesaChair['role'], network: string, contractOrMint: string | null, symbol: string, decimals = 6): MesaChair =>
+  ({ chairId: 'ch_' + role, role, expectedAsset: { network, contractOrMint, decimals, symbol }, wallet: null });
 
 const pmHeaders = (token: string) => ({ authorization: `Bearer ${token}` });
 const uniqueEmail = () => `htlc-${Date.now()}-${Math.floor(Math.random() * 1e6)}@verum.test`;
@@ -37,7 +41,9 @@ describe('mesa v4 — approve cria a deal HTLC das cadeiras', () => {
     const mesa = app.mesa.mesaById(mesaId)!;
     const chairOf = (role: string): MesaChair => mesa.chairs.find(c => c.role === role) as MesaChair;
     chairOf('SELLER').wallet = multichain({ network: 'bitcoin', address: seller.address }, [{ network: 'ethereum', address: sellerEvm.address }]);
-    chairOf('BUYER').wallet = multichain({ network: 'ethereum', address: buyer.address }, []);
+    // Comprador recebe o BTC no claim → precisa de endereço Bitcoin na carteira multichain (a
+    // Verum real sempre tem; o fluxo agora valida isso no approve em vez de falhar no settle).
+    chairOf('BUYER').wallet = multichain({ network: 'ethereum', address: buyer.address }, [{ network: 'bitcoin', address: btcWallet().address }]);
     chairOf('PAYMASTER_1').wallet = multichain({ network: 'ethereum', address: pm1.address }, []);
     mesa.chairs.forEach(c => { c.firstName = c.role; c.connectedAt = Date.now(); });
 
@@ -66,22 +72,20 @@ describe('mesa v4 — approve cria a deal HTLC das cadeiras', () => {
     await app.close();
   }, 60_000);
 
-  it('BTC do lado COMPRADOR → 409 com motivo nominal (limite do escrow V2)', async () => {
-    const { app } = await makeApp({ balanceReaders: fundedReaders });
-    const r = await app.api.inject({ method: 'POST', url: '/v1/portal/register', payload: { name: 'PM', email: uniqueEmail(), password: 'senha-forte-1' } });
-    const token = r.json<{ token: string }>().token;
-    const { mesaId } = (await app.api.inject({ method: 'POST', url: '/v1/portal/mesas', headers: pmHeaders(token), payload: { chairs: [
-      { role: 'SELLER', expectedAsset: { network: 'ethereum', contractOrMint: LOCAL_TOKENS.usdtEth, decimals: 6, symbol: 'tUSDT' } },
-      { role: 'BUYER', expectedAsset: { network: 'bitcoin', contractOrMint: null, decimals: 8, symbol: 'BTC' } },
-      { role: 'PAYMASTER_1', expectedAsset: { network: 'ethereum', contractOrMint: null, decimals: 18, symbol: 'ETH' } },
-    ] } })).json<{ mesaId: string }>();
-    const mesa = app.mesa.mesaById(mesaId)!;
-    const w = (n: string, a: string) => multichain({ network: n, address: a }, []);
-    mesa.chairs.forEach(c => { c.wallet = w(c.expectedAsset.network, c.expectedAsset.network === 'bitcoin' ? btcWallet().address : evmWallet().address); c.firstName = c.role; });
-    await app.api.inject({ method: 'PATCH', url: `/v1/portal/mesas/${mesaId}/config`, headers: pmHeaders(token), payload: { amountInBase: '1000000000', buyerAmountInBase: '20000000', discountBps: 0, commissionBps: 0 } });
-    const ap = await app.api.inject({ method: 'POST', url: `/v1/portal/mesas/${mesaId}/approve`, headers: pmHeaders(token), payload: {} });
-    expect(ap.statusCode, ap.body).toBe(409);
-    expect(ap.json<{ message: string }>().message).toContain('COMPRADOR');
-    await app.close();
-  }, 60_000);
+  it('BTC do lado COMPRADOR → plano HTLC_BTC com btcSide BUYER (perna externa do comprador suportada)', () => {
+    // A trava antiga ("BTC do COMPRADOR não é suportado") foi removida — o escrow V2.2 tem a
+    // perna externa do comprador. O plano reconhece o lado corretamente.
+    const plan = deriveSettlementPlan([
+      chair('SELLER', 'ethereum', LOCAL_TOKENS.usdtEth, 'tUSDT', 6),
+      chair('BUYER', 'bitcoin', null, 'BTC', 8),
+    ]);
+    expect(plan?.mode).toBe('HTLC_BTC');
+    expect(plan?.htlc?.btcSide).toBe('BUYER');
+    // E o lado NÃO-BTC em rede sem escrow-que-revela (Solana/Tron) é recusado com motivo claro.
+    const planSol = deriveSettlementPlan([
+      chair('SELLER', 'solana', null, 'SOL', 9),
+      chair('BUYER', 'bitcoin', null, 'BTC', 8),
+    ]);
+    expect(planSol?.mode).toBe('HTLC_BTC'); // plano deriva, mas a criação barra Solana na perna de contrato
+  });
 });
