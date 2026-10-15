@@ -33,9 +33,12 @@ describe('settlementPlan — derivação determinística', () => {
     expect(nativo?.htlc?.hashAlgo).toBe('sha256');
     expect(nativo?.bridge).toBeUndefined();
     expect(nativo?.summary).toContain('HTLC nativo');
-    // direção inversa (vendedor EVM) ainda não tem hashlock no lado vendedor → segue CCIP pendente
+    // direção INVERSA (vendedor EVM → comprador Solana): perna externa do COMPRADOR no escrow V2
+    // — o comprador tranca o pagamento em HTLC na Solana e a preimage do settle o destrava.
     const inverse = deriveSettlementPlan([chair('SELLER', 'ethereum', USDT_ETH, 'USDT'), chair('BUYER', 'solana', 'So11111111111111111111111111111111111111112', 'wSOL', 9)]);
-    expect(inverse?.bridge).toBe('CCIP');
+    expect(inverse?.mode).toBe('CROSS_CHAIN');
+    expect(inverse?.bridge).toBeUndefined();
+    expect(inverse?.htlc?.btcSide).toBe('BUYER');
     expect(p?.mode).toBe('HTLC_BTC');
     expect(p?.htlc?.btcSide).toBe('SELLER');
     // BTC trancado MUITO mais tempo que a janela do escrow — quem revela a preimage nunca fica sem claim.

@@ -36,7 +36,7 @@ function commitment(opts: { htlc?: boolean; roles?: string[]; btcBuyer?: boolean
 describe('evmLegMapOf / buildVerumTermsV2', () => {
   it('deal direta (duas legs EVM): seller/buyer mapeados, sem htlcHash', () => {
     const c = commitment({});
-    expect(evmLegMapOf(c)).toEqual({ sellerLegIndex: 0, buyerLegIndex: 1, external: false });
+    expect(evmLegMapOf(c)).toEqual({ sellerLegIndex: 0, buyerLegIndex: 1, external: false, externalSide: null });
     const t = buildVerumTermsV2(c, 1_800_000_000);
     expect(t.sellerAsset).toBe(TBTC);
     expect(t.buyerAsset).toBe(TUSDT);
@@ -48,7 +48,7 @@ describe('evmLegMapOf / buildVerumTermsV2', () => {
 
   it('deal HTLC (BTC do vendedor): perna externa com sellerAsset=0, sats e htlcHash', () => {
     const c = commitment({ htlc: true });
-    expect(evmLegMapOf(c)).toEqual({ sellerLegIndex: null, buyerLegIndex: 1, external: true });
+    expect(evmLegMapOf(c)).toEqual({ sellerLegIndex: null, buyerLegIndex: 1, external: true, externalSide: 'SELLER' });
     const t = buildVerumTermsV2(c, 1_800_000_000);
     expect(t.sellerAsset).toBe('0x0000000000000000000000000000000000000000');
     expect(t.sellerAmount).toBe(75_000_000n);
@@ -56,8 +56,11 @@ describe('evmLegMapOf / buildVerumTermsV2', () => {
     expect(t.htlcHash).toBe('0x' + htlcHash);
   });
 
-  it('BTC do lado COMPRADOR → erro nominal (limite documentado da v2)', () => {
-    expect(() => evmLegMapOf(commitment({ htlc: true, btcBuyer: true }))).toThrow(/VENDEDOR/);
+  it('BTC do lado COMPRADOR → perna externa do comprador (v2.2: direção inversa suportada)', () => {
+    const m = evmLegMapOf(commitment({ htlc: true, btcBuyer: true }));
+    expect(m.external).toBe(true);
+    expect(m.externalSide).toBe('BUYER');
+    expect(m.buyerLegIndex).toBeNull();
   });
 
   it('mesa de 4 cadeiras mantém a ordem canônica dos participantes', () => {

@@ -59,6 +59,17 @@ export function deriveSettlementPlan(chairs: MesaChair[]): SettlementPlan | null
         summary: `Swap atômico ${seller.expectedAsset.symbol} (Solana, HTLC${seller.expectedAsset.contractOrMint ? '' : ' nativo'}) ↔ ${buyer.expectedAsset.symbol} (Ethereum, escrow V2) — mesma preimage destrava as duas pernas`,
       };
     }
+    // Direção INVERSA (perna externa do COMPRADOR no escrow V2): vendedor com TOKEN na EVM
+    // deposita no escrow; o comprador tranca o PAGAMENTO (SOL nativo ou SPL) em HTLC na Solana
+    // com o MESMO sha256 — o settleV2 entrega o token ao comprador e revela a preimage que
+    // destrava o pagamento para o vendedor lá.
+    if (sellerNetwork === 'ethereum' && buyerNetwork === 'solana' && seller.expectedAsset.contractOrMint) {
+      return {
+        mode: 'CROSS_CHAIN', sellerNetwork, buyerNetwork,
+        htlc: { hashAlgo: 'sha256', btcSide: 'BUYER', btcLockBlocks: 0, tokenLockSeconds: 2400 },
+        summary: `Swap atômico ${seller.expectedAsset.symbol} (Ethereum, escrow V2) ↔ ${buyer.expectedAsset.symbol} (Solana, HTLC${buyer.expectedAsset.contractOrMint ? '' : ' nativo'}) — o comprador tranca o pagamento e a preimage do settle o destrava`,
+      };
+    }
     return {
       mode: 'CROSS_CHAIN', sellerNetwork, buyerNetwork, bridge: 'CCIP',
       summary: `Pernas em redes diferentes (${sellerNetwork} ↔ ${buyerNetwork}) — escrow em cada rede + liberação atômica via Chainlink CCIP (pendente)`,

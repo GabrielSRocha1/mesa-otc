@@ -1033,6 +1033,11 @@ export default [
             "internalType": "bool"
           },
           {
+            "name": "buyerExternal",
+            "type": "bool",
+            "internalType": "bool"
+          },
+          {
             "name": "sellerDeposited",
             "type": "bool",
             "internalType": "bool"

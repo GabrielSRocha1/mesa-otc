@@ -71,24 +71,29 @@ interface RawTradeV2 {
 }
 
 /** Legs EVM do commitment: índice da leg do vendedor/comprador NESTA rede (null = perna externa). */
-export interface EvmLegMap { sellerLegIndex: number | null; buyerLegIndex: number; external: boolean }
+export interface EvmLegMap { sellerLegIndex: number | null; buyerLegIndex: number | null; external: boolean; externalSide: 'SELLER' | 'BUYER' | null }
 export function evmLegMapOf(c: DealCommitment): EvmLegMap {
   const evm = c.legs.filter(l => l.escrowChain === 'ethereum');
   if (evm.length === 2) {
     const sellerLeg = evm.find(l => l.from === 'SELLER'); const buyerLeg = evm.find(l => l.from === 'BUYER');
     if (!sellerLeg || !buyerLeg) throw new DomainError('SETTLEMENT_NOT_ALLOWED', 'escrow V2 espera uma leg do Vendedor e uma do Comprador');
-    return { sellerLegIndex: sellerLeg.index, buyerLegIndex: buyerLeg.index, external: false };
+    return { sellerLegIndex: sellerLeg.index, buyerLegIndex: buyerLeg.index, external: false, externalSide: null };
   }
   if (evm.length === 1) {
     const other = c.legs.find(l => l.escrowChain !== 'ethereum');
-    const buyerLeg = evm[0] as NonNullable<typeof evm[0]>;
-    // Perna externa = qualquer rede com hashlock (BTC nativo em P2WSH ou SPL em HTLC na Solana):
-    // o contrato só exige sellerAsset=0x0 + htlcHash — a atomicidade cruza pela preimage.
-    if (!other || other.from !== 'SELLER' || buyerLeg.from !== 'BUYER') {
-      throw new DomainError('SETTLEMENT_NOT_ALLOWED', 'escrow V2 só suporta perna externa do VENDEDOR (comprador deposita o token nesta rede)');
-    }
+    const evmLeg = evm[0] as NonNullable<typeof evm[0]>;
+    // Perna externa = qualquer rede com hashlock (BTC nativo em P2WSH ou SOL/SPL em HTLC na
+    // Solana), de QUALQUER lado: vendedor externo (comprador deposita aqui) OU comprador externo
+    // (vendedor deposita aqui; o pagamento destrava lá pela preimage do settle).
+    if (!other) throw new DomainError('SETTLEMENT_NOT_ALLOWED', 'escrow V2 com uma leg exige a perna externa da outra rede');
     if (!c.htlcHash) throw new DomainError('SETTLEMENT_NOT_ALLOWED', 'perna externa exige htlcHash (rota HTLC)');
-    return { sellerLegIndex: null, buyerLegIndex: buyerLeg.index, external: true };
+    if (other.from === 'BUYER' && evmLeg.from === 'SELLER') {
+      return { sellerLegIndex: evmLeg.index, buyerLegIndex: null, external: true, externalSide: 'BUYER' };
+    }
+    if (other.from !== 'SELLER' || evmLeg.from !== 'BUYER') {
+      throw new DomainError('SETTLEMENT_NOT_ALLOWED', 'perna externa deve ser do Vendedor OU do Comprador (a outra deposita o token nesta rede)');
+    }
+    return { sellerLegIndex: null, buyerLegIndex: evmLeg.index, external: true, externalSide: 'SELLER' };
   }
   throw new DomainError('SETTLEMENT_NOT_ALLOWED', 'deal sem leg EVM para o escrow V2');
 }
@@ -98,25 +103,28 @@ export function evmLegMapOf(c: DealCommitment): EvmLegMap {
  * `sellerEvm`: endereço EVM do VENDEDOR quando o participante está na rede bitcoin (deal HTLC) —
  * é nele que o contrato paga o token do comprador no settle.
  */
-export function buildVerumTermsV2(c: DealCommitment, chainNow: number, sellerEvm?: string | null): TermsV2Call {
+export function buildVerumTermsV2(c: DealCommitment, chainNow: number, externalEvm?: string | null): TermsV2Call {
   const map = evmLegMapOf(c);
   const order: Role[] = ['SELLER', 'PAYMASTER_1', 'PAYMASTER_2', 'BUYER'];
   const present = order.map(r => c.participants.find(p => p.role === r)).filter(Boolean) as DealCommitment['participants'];
   if (present.length < 2) throw new DomainError('SETTLEMENT_NOT_ALLOWED', 'escrow V2 exige ao menos Vendedor e Comprador');
   const walletOf = (p: DealCommitment['participants'][number]): Hex => {
     if (/^0x[0-9a-fA-F]{40}$/.test(p.address)) return p.address as Hex;
-    if (p.role === 'SELLER' && map.external && sellerEvm && /^0x[0-9a-fA-F]{40}$/.test(sellerEvm)) return sellerEvm as Hex;
+    if (map.external && p.role === map.externalSide && externalEvm && /^0x[0-9a-fA-F]{40}$/.test(externalEvm)) return externalEvm as Hex;
     throw new DomainError('SETTLEMENT_NOT_ALLOWED', `participante ${p.role} sem endereço EVM para o escrow V2 (carteira multichain sem conta Ethereum?)`);
   };
   const legOf = (i: number | null) => (i === null ? null : c.legs.find(l => l.index === i) ?? null);
   const sellerLeg = legOf(map.sellerLegIndex);
-  const buyerLeg = legOf(map.buyerLegIndex) as NonNullable<ReturnType<typeof legOf>>;
+  const buyerLeg = legOf(map.buyerLegIndex);
   const externalLeg = map.external ? c.legs.find(l => l.escrowChain !== 'ethereum') : null;
   const clamp = (n: number) => Math.min(Math.max(0, n), 10000);
   // Comissão ON-CHAIN: total em unidades do buyerAsset (commissionAmountOf = amountOut·c/(1−d−c))
-  // repartido pelo split assinado; resto da divisão inteira fica com o PM1. Tudo explícito nos termos.
+  // repartido pelo split assinado; resto da divisão inteira fica com o PM1. Tudo explícito nos
+  // termos. Com perna do COMPRADOR externa não há buyerAsset on-chain → comissões zeradas (o
+  // contrato valida) — a comissão desse modo vive na perna de lá/fora do contrato.
   const commissionBps = clamp(c.terms.pricing.commissionBps);
-  const cTotal = commissionAmountOf(BigInt(buyerLeg.amountBase), clamp(c.terms.pricing.discountBps), commissionBps);
+  const buyerBase = BigInt((buyerLeg ?? externalLeg)?.amountBase ?? '0');
+  const cTotal = map.externalSide === 'BUYER' ? 0n : commissionAmountOf(buyerBase, clamp(c.terms.pricing.discountBps), commissionBps);
   const split = c.terms.pricing.commissionSplitBps ?? [];
   const pm2Bps = split[1] ?? 0;
   const commissionPm2 = commissionBps > 0 ? cTotal * BigInt(clamp(pm2Bps)) / BigInt(commissionBps) : 0n;
@@ -125,8 +133,8 @@ export function buildVerumTermsV2(c: DealCommitment, chainNow: number, sellerEvm
     participants: present.map(p => ({ wallet: walletOf(p), role: ROLE_TO_ONCHAIN[p.role] })),
     sellerAsset: (sellerLeg?.asset.contractOrMint ?? zeroAddress) as Hex,
     sellerAmount: BigInt((sellerLeg ?? externalLeg)?.amountBase ?? '0'),
-    buyerAsset: buyerLeg.asset.contractOrMint as Hex,
-    buyerAmount: BigInt(buyerLeg.amountBase),
+    buyerAsset: (buyerLeg?.asset.contractOrMint ?? zeroAddress) as Hex,
+    buyerAmount: buyerBase,
     platformFeeBps: c.feeBps, commissionBps: clamp(c.terms.pricing.commissionBps), discountBps: clamp(c.terms.pricing.discountBps), slippageBps: clamp(c.terms.pricing.maxSlippageBps),
     createdAt: BigInt(chainNow), expiresAt: BigInt(chainNow + 2400), termsVersion: 2,
     nonce: deriveNonce(c.dealId, c.revision, c.dealNonce),
@@ -251,10 +259,13 @@ export class VerumEvmV2Adapter implements SettlementAdapter, ParticipantStepProv
     }
     try {
       const now = await this.chainNow();
-      // Vendedor em outra rede (BTC nativo): o endereço EVM de payout vem da carteira multichain.
-      const sellerPart = c.participants.find(p => p.role === 'SELLER');
-      const sellerEvm = sellerPart && /^0x[0-9a-fA-F]{40}$/.test(sellerPart.address) ? sellerPart.address : await this.deps.evmAddressOf?.(c.dealId, 'SELLER') ?? null;
-      const terms = buildVerumTermsV2(c, now, sellerEvm);
+      // Participante da perna EXTERNA (vendedor OU comprador em outra rede): resolve o endereço
+      // EVM dele pela carteira multichain — é onde o contrato paga/recebe nesta rede.
+      const mapX = evmLegMapOf(c);
+      const extRole = mapX.externalSide === 'BUYER' ? 'BUYER' as const : 'SELLER' as const;
+      const extPart = c.participants.find(pp => pp.role === extRole);
+      const externalEvm = extPart && /^0x[0-9a-fA-F]{40}$/.test(extPart.address) ? extPart.address : await this.deps.evmAddressOf?.(c.dealId, extRole) ?? null;
+      const terms = buildVerumTermsV2(c, now, externalEvm);
       const map = evmLegMapOf(c);
       // Hash pelo PRÓPRIO contrato (função pure) — zero chance de divergência de EIP-712 off-chain.
       const termsHash = await this.view<Hex>('hashTermsV2', [terms]);
