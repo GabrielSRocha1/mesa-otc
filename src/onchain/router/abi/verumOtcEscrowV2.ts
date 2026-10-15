@@ -177,33 +177,7 @@ export default [
   },
   {
     "type": "function",
-    "name": "PARTICIPANT_TYPEHASH",
-    "inputs": [],
-    "outputs": [
-      {
-        "name": "",
-        "type": "bytes32",
-        "internalType": "bytes32"
-      }
-    ],
-    "stateMutability": "view"
-  },
-  {
-    "type": "function",
     "name": "TERMS_TYPEHASH",
-    "inputs": [],
-    "outputs": [
-      {
-        "name": "",
-        "type": "bytes32",
-        "internalType": "bytes32"
-      }
-    ],
-    "stateMutability": "view"
-  },
-  {
-    "type": "function",
-    "name": "TERMS_V2_TYPEHASH",
     "inputs": [],
     "outputs": [
       {
@@ -1193,37 +1167,6 @@ export default [
   },
   {
     "type": "function",
-    "name": "hashParticipants",
-    "inputs": [
-      {
-        "name": "ps",
-        "type": "tuple[]",
-        "internalType": "struct VerumOTCEscrowV2Base.Participant[]",
-        "components": [
-          {
-            "name": "wallet",
-            "type": "address",
-            "internalType": "address"
-          },
-          {
-            "name": "role",
-            "type": "uint8",
-            "internalType": "enum VerumOTCEscrowBase.Role"
-          }
-        ]
-      }
-    ],
-    "outputs": [
-      {
-        "name": "",
-        "type": "bytes32",
-        "internalType": "bytes32"
-      }
-    ],
-    "stateMutability": "pure"
-  },
-  {
-    "type": "function",
     "name": "hashTerms",
     "inputs": [
       {
@@ -1852,25 +1795,6 @@ export default [
     ],
     "outputs": [],
     "stateMutability": "nonpayable"
-  },
-  {
-    "type": "function",
-    "name": "swapRouters",
-    "inputs": [
-      {
-        "name": "",
-        "type": "address",
-        "internalType": "address"
-      }
-    ],
-    "outputs": [
-      {
-        "name": "",
-        "type": "bool",
-        "internalType": "bool"
-      }
-    ],
-    "stateMutability": "view"
   },
   {
     "type": "function",
