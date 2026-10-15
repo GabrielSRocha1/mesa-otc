@@ -532,39 +532,50 @@ export async function buildApi(deps: ApiDeps): Promise<FastifyInstance> {
     if (!pm1Chair?.wallet) throw new DomainError('SETTLEMENT_NOT_ALLOWED', 'Operação cross-chain pela mesa exige a cadeira Pay Master 1 conectada');
     const solAdapter = adapters.get('solana'); const evmAdapter = adapters.get('ethereum');
     if (!solAdapter || !evmAdapter) throw new DomainError('SETTLEMENT_NOT_ALLOWED', 'Adaptadores solana/ethereum ausentes');
+    // Direção decidida pelo PLANO: vendedor-Solana (perna HTLC = SELLER, externa do vendedor no
+    // escrow V2) ou vendedor-EVM (perna HTLC = BUYER na Solana, perna externa do COMPRADOR no V2).
+    const inverse = plan.sellerNetwork === 'ethereum';
+    const htlcChair = inverse ? buyerChair : sellerChair;   // quem tranca no HTLC (Solana)
+    const evmDepChair = inverse ? sellerChair : buyerChair; // quem deposita token na EVM
+    const htlcRole = inverse ? 'BUYER' : 'SELLER';
+    const evmDepRole = inverse ? 'SELLER' : 'BUYER';
     const motivos: string[] = [];
-    const sellerSol = addressOn(sellerChair, 'solana'); if (!sellerSol || !solAdapter.validateAddress(sellerSol)) motivos.push('Vendedor: carteira sem endereço Solana válido');
-    const buyerEvm = addressOn(buyerChair, 'ethereum'); if (!buyerEvm || !evmAdapter.validateAddress(buyerEvm)) motivos.push('Comprador: carteira sem endereço Ethereum válido');
-    const buyerSol = addressOn(buyerChair, 'solana'); if (!buyerSol || !solAdapter.validateAddress(buyerSol)) motivos.push('Comprador: carteira sem endereço Solana (recebe o token do HTLC)');
+    const htlcSol = addressOn(htlcChair, 'solana'); if (!htlcSol || !solAdapter.validateAddress(htlcSol)) motivos.push(`${inverse ? 'Comprador' : 'Vendedor'}: carteira sem endereço Solana válido`);
+    const evmDep = addressOn(evmDepChair, 'ethereum'); if (!evmDep || !evmAdapter.validateAddress(evmDep)) motivos.push(`${inverse ? 'Vendedor' : 'Comprador'}: carteira sem endereço Ethereum válido`);
+    // A CONTRAPARTE do HTLC recebe lá (claim) e precisa de endereço Solana na carteira multichain.
+    const counterSol = addressOn(evmDepChair, 'solana'); if (!counterSol || !solAdapter.validateAddress(counterSol)) motivos.push(`${inverse ? 'Vendedor' : 'Comprador'}: carteira sem endereço Solana (recebe o ativo do HTLC)`);
     const pm1Evm = addressOn(pm1Chair, 'ethereum'); if (!pm1Evm || !evmAdapter.validateAddress(pm1Evm)) motivos.push('Pay Master 1: carteira sem endereço Ethereum válido');
     if (!mesa.config?.amountInBase) motivos.push('Configuração: quantidade do Vendedor não definida');
     if (motivos.length) throw new DomainError('VERSION_CONFLICT', 'Não foi possível criar a operação cross-chain', { motivos });
+    const solAsset = { network: 'solana', chainId: solAdapter.chain.chainId, contractOrMint: htlcChair.expectedAsset.contractOrMint };
+    const evmAsset = { network: 'ethereum', chainId: evmAdapter.chain.chainId, contractOrMint: evmDepChair.expectedAsset.contractOrMint };
     const input = {
-      assetIn: { network: 'solana', chainId: solAdapter.chain.chainId, contractOrMint: sellerChair.expectedAsset.contractOrMint },
-      assetOut: { network: 'ethereum', chainId: evmAdapter.chain.chainId, contractOrMint: buyerChair.expectedAsset.contractOrMint },
+      assetIn: inverse ? evmAsset : solAsset,
+      assetOut: inverse ? solAsset : evmAsset,
       amountInBase: mesa.config!.amountInBase as string, discountBps: b.discountBps, commissionBps: b.commissionBps, commissionSplitBps: b.commissionSplitBps,
       maxSlippageBps: b.maxSlippageBps, maxPriceDriftBps: 500, expiresInSec: b.expiresInSec,
       participants: [
-        { role: 'SELLER', network: 'solana', chainId: solAdapter.chain.chainId, address: sellerSol },
+        { role: 'SELLER', network: inverse ? 'ethereum' : 'solana', chainId: inverse ? evmAdapter.chain.chainId : solAdapter.chain.chainId, address: inverse ? evmDep : htlcSol },
         { role: 'PAYMASTER_1', network: 'ethereum', chainId: evmAdapter.chain.chainId, address: pm1Evm },
-        { role: 'BUYER', network: 'ethereum', chainId: evmAdapter.chain.chainId, address: buyerEvm },
+        { role: 'BUYER', network: inverse ? 'solana' : 'ethereum', chainId: inverse ? solAdapter.chain.chainId : evmAdapter.chain.chainId, address: inverse ? htlcSol : evmDep },
       ],
     };
-    const created = await deps.deals.create(input, sellerSol as string);
-    onCreated(created.id); // linka ANTES do open: registro resolve endereços (EVM do vendedor, Solana do comprador) pela mesa
+    const sellerAddr = (inverse ? evmDep : htlcSol) as string;
+    const created = await deps.deals.create(input, sellerAddr);
+    onCreated(created.id); // linka ANTES do open: registro resolve endereços das contrapartes pela mesa
     for (const p of input.participants) if (p.role !== 'SELLER') await deps.deals.connectWallet(created.id, p.role as Role, p.address as string, p.address as string);
-    await deps.deals.open(created.id, sellerSol as string); // registra: createTradeV2 (EVM, perna externa) + derivação do HTLC (Solana)
-    // Funding: comprador (approve ERC-20, melhor esforço) e vendedor (lock no HTLC — dev keyring
+    await deps.deals.open(created.id, sellerAddr); // registra: createTradeV2 (EVM) + derivação do HTLC (Solana)
+    // Funding: depositante EVM (approve ERC-20, melhor esforço) e quem tranca no HTLC (dev keyring
     // assina sozinho; carteira real recebe a tx base64 em htlcFunding).
     let htlcFunding: Record<string, unknown> | null = null;
-    try { await deps.deals.fund(created.id, 'BUYER', buyerEvm as string); } catch (e) { logger.warn({ dealId: created.id, err: (e as Error).message }, 'funding do comprador pendente (carteira real completa via /onchain-tx)'); }
-    try { await deps.deals.fund(created.id, 'SELLER', sellerSol as string); }
+    try { await deps.deals.fund(created.id, evmDepRole as Role, evmDep as string); } catch (e) { logger.warn({ dealId: created.id, err: (e as Error).message }, 'funding EVM pendente (carteira real completa via /onchain-tx)'); }
+    try { await deps.deals.fund(created.id, htlcRole as Role, htlcSol as string); }
     catch (e) {
       const err = e as DomainError;
       if (err.code === 'FUNDING_REQUIRED' && err.details?.transactionBase64) htlcFunding = { ...err.details };
-      else logger.warn({ dealId: created.id, err: err.message }, 'lock HTLC do vendedor pendente');
+      else logger.warn({ dealId: created.id, err: err.message }, 'lock HTLC pendente');
     }
-    await deps.audit.append({ actorType: 'user', actorId: mesa.payMasterId, category: 'portal.mesa.deal.created', dealId: created.id, payload: { mode: 'htlc-xchain-solana', htlc: htlcFunding ? 'pendente' : 'ok' } });
+    await deps.audit.append({ actorType: 'user', actorId: mesa.payMasterId, category: 'portal.mesa.deal.created', dealId: created.id, payload: { mode: inverse ? 'htlc-xchain-solana-inversa' : 'htlc-xchain-solana', htlc: htlcFunding ? 'pendente' : 'ok' } });
     const dealNow = await deps.deals.get(created.id);
     const evmMeta = dealNow?.onChain?.ethereum?.meta as Record<string, unknown> | undefined;
     const registerTx = evmMeta?.registerPending && typeof evmMeta.registerTx === 'string' ? JSON.parse(evmMeta.registerTx) as Record<string, unknown> : null;
