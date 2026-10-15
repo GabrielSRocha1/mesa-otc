@@ -12,7 +12,7 @@ import { sha256Hex, type CanonicalAsset, type ChainRef, type Role } from '../../
 import { DomainError } from '../../domain/errors.js';
 import { TradeState, Role as OnchainRole, type ChainId, type Terms as VerumTerms, type Signature as VerumSignature } from '../../onchain/types.js';
 import { computeFee } from '../../onchain/core/index.js';
-import { SolanaChainAdapter, anchorDiscriminator, findPda, associatedTokenAddress, WSOL_MINT } from '../../onchain/router/adapters/solana.js';
+import { SolanaChainAdapter, anchorDiscriminator, findPda, associatedTokenAddress, WSOL_MINT, TOKEN_PROGRAM_ID } from '../../onchain/router/adapters/solana.js';
 import type { AdapterCapabilities, ApprovalSignature, AssetVerification, DealCommitment, OnChainDealState, ParticipantStepProvider, RegisterResult, SettlementAdapter, TxRef, TxStatus } from '../types.js';
 import { buildVerumTerms, statusFromTradeState, depositsOf, bindingOf, ROLE_TO_ONCHAIN, ROLE_ALREADY_ADVANCED, type VerumAdapterDeps, type VerumMeta } from './common.js';
 import type { SolanaSettings } from '../../config.js';
@@ -409,6 +409,37 @@ export class VerumSolanaAdapter implements SettlementAdapter, ParticipantStepPro
   }
 
   /* ---------- fluxo de carteira real (/v1/deals/:id/onchain-tx) ---------- */
+  /** Desembrulho de wSOL → SOL nativo: fecha a conta de wSOL do dono (CloseAccount credita TODOS
+   *  os lamports — valor embrulhado + rent — de volta à carteira). A tx é assinada pela própria
+   *  carteira; null = nada a desembrulhar. O embrulho de ida já é automático no depósito. */
+  async buildUnwrapWsol(owner: string): Promise<Record<string, unknown> | null> {
+    if (!this.validateAddress(owner)) throw new DomainError('INVALID_INPUT', 'endereço Solana inválido');
+    const ownerPk = new PublicKey(owner);
+    const ata = associatedTokenAddress(ownerPk, new PublicKey(WSOL_MINT), TOKEN_PROGRAM_ID);
+    const bal = await this.conn.getTokenAccountBalance(ata, 'confirmed').catch(() => null);
+    if (!bal || BigInt(bal.value.amount) === 0n) return null;
+    // CloseAccount (ix 9 do Token Program): [conta wSOL, destino dos lamports, dono].
+    const ix = new TransactionInstruction({ programId: TOKEN_PROGRAM_ID, keys: [
+      { pubkey: ata, isSigner: false, isWritable: true },
+      { pubkey: ownerPk, isSigner: false, isWritable: true },
+      { pubkey: ownerPk, isSigner: true, isWritable: false },
+    ], data: Buffer.from([9]) });
+    const tx = new Transaction().add(ix);
+    tx.feePayer = ownerPk;
+    const { blockhash, lastValidBlockHeight } = await this.conn.getLatestBlockhash('confirmed');
+    tx.recentBlockhash = blockhash;
+    return { kind: 'solana', purpose: 'wsol_unwrap', amountBase: bal.value.amount, transactionBase64: tx.serialize({ requireAllSignatures: false, verifySignatures: false }).toString('base64'), recentBlockhash: blockhash, lastValidBlockHeight };
+  }
+  /** Broadcast da tx de desembrulho assinada pela carteira. */
+  async submitUnwrapWsol(signedTransactionBase64: string): Promise<{ txHash: string }> {
+    try {
+      const sig = await this.conn.sendRawTransaction(Buffer.from(signedTransactionBase64, 'base64'), { skipPreflight: false, preflightCommitment: 'confirmed' });
+      const conf = await this.inner.waitForConfirmation(sig, 90_000);
+      if (conf.status !== 'CONFIRMED') throw new Error(`unwrap não confirmado (${conf.status}): ${conf.reason ?? sig}`);
+      return { txHash: sig };
+    } catch (e) { this.fail('wsolUnwrap', e); }
+  }
+
   /** Na Solana o papel assina a PRÓPRIA transação: devolve a tx base64 fresca para a Verum Wallet assinar. */
   async buildParticipantStep(dealId: string, role: Role, signer: string): Promise<Record<string, unknown>> {
     const b = await this.binding(dealId);

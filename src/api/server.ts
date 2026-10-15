@@ -1128,6 +1128,40 @@ export async function buildApi(deps: ApiDeps): Promise<FastifyInstance> {
     const { mesa } = adminMesa(req, mesaId, false);
     return mesaBalances(mesa);
   });
+  // Desembrulho de wSOL → SOL nativo (pós-liquidação/refund): a carteira do participante (ou do
+  // admin) assina o CloseAccount; o backend só monta a tx e faz o broadcast — nunca toca a chave.
+  const unwrapAddrOf = (req: FastifyRequest, mesaId: string): string => {
+    const mesaClaim = req.session?.mesa;
+    if (mesaClaim && mesaClaim.mesaId === mesaId) {
+      const mesa = deps.mesa.mesaById(mesaId); if (!mesa) throw new DomainError('INVALID_INPUT', 'Mesa não encontrada');
+      const chair = mesa.chairs.find(c => c.chairId === mesaClaim.chairId);
+      const addr = chair ? addressOn(chair, 'solana') : null;
+      if (!addr) throw new DomainError('INVALID_INPUT', 'Sua cadeira não tem endereço Solana');
+      return addr;
+    }
+    const { pm } = adminMesa(req, mesaId, false);
+    const addr = (pm.wallet?.addresses ?? []).find(a => a.network === 'solana')?.address ?? (pm.wallet?.network === 'solana' ? pm.wallet.address : null);
+    if (!addr) throw new DomainError('INVALID_INPUT', 'Sua carteira não tem endereço Solana');
+    return addr;
+  };
+  const solAdapterOf = () => {
+    const a = deps.adapters?.get('solana') as unknown as { buildUnwrapWsol?: (o: string) => Promise<Record<string, unknown> | null>; submitUnwrapWsol?: (b64: string) => Promise<{ txHash: string }> } | undefined;
+    if (!a?.buildUnwrapWsol || !a.submitUnwrapWsol) throw new DomainError('SETTLEMENT_NOT_ALLOWED', 'Desembrulho indisponível (adapter Solana real ausente)');
+    return a as { buildUnwrapWsol: (o: string) => Promise<Record<string, unknown> | null>; submitUnwrapWsol: (b64: string) => Promise<{ txHash: string }> };
+  };
+  app.get('/v1/mesas/:mesaId/wsol-unwrap', async req => {
+    const { mesaId } = req.params as { mesaId: string };
+    const step = await solAdapterOf().buildUnwrapWsol(unwrapAddrOf(req, mesaId));
+    return step ?? { kind: 'none', message: 'Nenhum wSOL para desembrulhar nesta carteira.' };
+  });
+  app.post('/v1/mesas/:mesaId/wsol-unwrap', async req => {
+    const { mesaId } = req.params as { mesaId: string };
+    const b = parse(z.object({ signedTransactionBase64: z.string().min(40) }), req.body);
+    unwrapAddrOf(req, mesaId); // autorização: participante desta mesa ou admin dono
+    const r = await solAdapterOf().submitUnwrapWsol(b.signedTransactionBase64);
+    await deps.audit.append({ actorType: 'user', actorId: req.session?.address ?? 'portal', category: 'mesa.wsol.unwrap', dealId: null, payload: { mesaId, tx: r.txHash } });
+    return r;
+  });
   // balancePreCheck para TODOS na mesa: saldos das duas pernas + trava de irrevogabilidade.
   app.get('/v1/mesas/:mesaId/precheck', async req => {
     const { mesaId } = req.params as { mesaId: string };

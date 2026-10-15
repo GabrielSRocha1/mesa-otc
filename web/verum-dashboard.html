@@ -1172,6 +1172,7 @@ window.addEventListener('unhandledrejection',function(e){try{console.warn('[veru
       <div class="card-h"><div class="t">Assinaturas</div><span class="badge info" id="pSigCount">0/0</span></div>
       <div id="pSigns" style="font-size:13px;color:var(--ink-2)"></div>
       <button class="btn btn-primary btn-block" id="pSignBtn" type="button" style="display:none;margin-top:12px;height:50px">Revisar e assinar</button>
+      <button class="btn btn-block" id="pUnwrapBtn" type="button" style="display:none;margin-top:8px;height:44px">Desembrulhar wSOL → SOL</button>
     </section>
   </div>
 </div>
@@ -3290,6 +3291,9 @@ window.addEventListener('unhandledrejection',function(e){try{console.warn('[veru
       +(m.irreversible?'<br><span style="color:var(--amber)">🔒 Operação irreversível — fundos trancados; o contrato roda até a liquidação (preimage) ou o reembolso após o timelock.</span>':'');
     const myTurn=d&&d.state==='AWAITING_SIGNATURES'&&d.turnRole===me.role&&!(d.signed||[]).includes(me.role);
     $('#pSignBtn').style.display=myTurn?'':'none';
+    // wSOL → SOL: visível em mesa Solana após o fim da operação (liquidada/reembolsada) — é
+    // quando alguém fica com wSOL na mão (comprador no settle; vendedor no refund).
+    const pud=$('#pUnwrapBtn'); if(pud) pud.style.display=(m.network==='solana'&&d&&['SETTLED','REFUNDED','EXPIRED'].includes(d.state))?'':'none';
     // "SER PUXADO PARA ASSINAR": na SUA vez, com a Verum Wallet presente, abre automaticamente a tela
     // de revisão/assinatura — a pessoa só confirma (desliza) na carteira. Dispara 1x por turno
     // (pAutoTurnKey) e nunca por cima de outro modal já aberto. Fora da vez, reseta a trava.
@@ -3436,7 +3440,26 @@ window.addEventListener('unhandledrejection',function(e){try{console.warn('[veru
       pPushDone=true;
     }catch(e){}
   }
-  function pStart(){ if(pStarted) return; pStarted=true; const sb=$('#pSignBtn'); if(sb) sb.addEventListener('click',pReview); pRefresh(); setInterval(pRefresh,5000); setInterval(pTick,1000);
+  // Desembrulho de wSOL → SOL (pós-liquidação/refund): a carteira assina o CloseAccount — todos
+  // os lamports (valor + rent da conta) voltam "soltos". GET sem saldo responde kind:none.
+  async function pUnwrap(){
+    const btn=$('#pUnwrapBtn'); if(btn){ btn.disabled=true; btn.textContent='Verificando wSOL…'; }
+    try{
+      const step=await pApi('/v1/mesas/'+encodeURIComponent(P_MESA)+'/wsol-unwrap');
+      if(!step||step.kind!=='solana'){ toast((step&&step.message)||'Nenhum wSOL para desembrulhar.','ok'); return; }
+      const prov=solProvider();
+      if(!prov||typeof prov.signTransaction!=='function') throw new Error('Esta versão da Verum Wallet não assina transações — atualize o app');
+      try{ await prov.connect(); }catch(e){}
+      if(btn) btn.textContent='Confirme na Verum Wallet…';
+      const raw=Uint8Array.from(atob(step.transactionBase64),c=>c.charCodeAt(0));
+      const signed=await prov.signTransaction(raw);
+      const toB64=(x)=>{ if(typeof x==='string') return x; const u=x instanceof Uint8Array?x:(x&&typeof x.serialize==='function'?x.serialize():Uint8Array.from(x)); let s=''; for(const b of u) s+=String.fromCharCode(b); return btoa(s); };
+      const r=await pApi('/v1/mesas/'+encodeURIComponent(P_MESA)+'/wsol-unwrap',{method:'POST',body:{signedTransactionBase64:toB64(signed)}});
+      toast('wSOL desembrulhado ✓ '+((r&&r.txHash)?shortAddr(r.txHash):''),'ok'); pRefresh();
+    }catch(e){ toast(e.message||'Falha ao desembrulhar','err'); }
+    finally{ if(btn){ btn.disabled=false; btn.textContent='Desembrulhar wSOL → SOL'; } }
+  }
+  function pStart(){ if(pStarted) return; pStarted=true; const sb=$('#pSignBtn'); if(sb) sb.addEventListener('click',pReview); const ub=$('#pUnwrapBtn'); if(ub) ub.addEventListener('click',pUnwrap); pRefresh(); setInterval(pRefresh,5000); setInterval(pTick,1000);
     // tenta ativar avisos já; e também no 1º toque (browsers que exigem gesto p/ permissão).
     pEnablePush(); window.addEventListener('pointerdown',pEnablePush,{once:true}); }
   function pInit(){
