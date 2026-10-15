@@ -772,9 +772,17 @@ export async function buildApi(deps: ApiDeps): Promise<FastifyInstance> {
     const connected = mesa.chairs.filter(c => c.wallet);
     return connected.length > 0 && connected.every(c => demo.addresses.has(c.wallet!.address));
   };
-  const mesaBalances = async (mesa: Parameters<typeof requiredOfChair>[0] & { chairs: MesaChair[] }) => {
+  const mesaBalances = async (mesa: Parameters<typeof requiredOfChair>[0] & { chairs: MesaChair[]; dealId?: string | null }) => {
     if (isDemoMesa(mesa)) return { ok: true as const, checkedAt: deps.mesa.nowMs(), chairs: [], failures: [] as string[], demo: true };
-    return validateChairBalances(mesa as Parameters<typeof validateChairBalances>[0], readers, deps.mesa.nowMs(), requiredOfChair(mesa));
+    // Papel que JÁ assinou a operação ativa depositou no escrow — o saldo saiu da carteira dele
+    // de propósito; manter a exigência viraria falso "insuficiente" logo após a assinatura.
+    const signed = new Set<string>();
+    if (mesa.dealId) {
+      const d = await deps.deals.get(mesa.dealId).catch(() => null);
+      for (const s of d?.signatures ?? []) if (s.revision === d!.revision && s.status === 'valid') signed.add(s.role);
+    }
+    const req = requiredOfChair(mesa);
+    return validateChairBalances(mesa as Parameters<typeof validateChairBalances>[0], readers, deps.mesa.nowMs(), chair => signed.has(chair.role) ? null : req(chair));
   };
   /**
    * balancePreCheck — gate ÚNICO antes de sacramentar a operação: todos na mesa veem os saldos das
