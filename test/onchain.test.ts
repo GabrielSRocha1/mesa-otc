@@ -31,7 +31,7 @@ function makeTerms(over: Partial<Terms> = {}): Terms {
     sellerAsset: USDT, sellerAmount: 1_000_000_000_000n,
     buyerAsset: USDC, buyerAmount: 999_000_000_000n,
     platformFeeBps: 3, commissionBps: 200, discountBps: 300, slippageBps: 50,
-    createdAt: START, expiresAt: START + TRADE_DURATION_SECONDS, termsVersion: 1, nonce: 1n,
+    createdAt: START, expiresAt: START + TRADE_DURATION_SECONDS, termsVersion: 1, nonce: 1n, commissionPm1: 0n, commissionPm2: 0n,
     ...over,
   };
 }
@@ -138,7 +138,7 @@ describe('onchain/crypto solana — layout borsh determinístico', () => {
     paymaster01: '4Nd1mBQtrMJVYVfKf2PJy9NZUZdTAsp7D4xWLs4gDB4T', paymaster02: 'GkVvdvAvo3g4VxKyGThLByzePKktuMAAN9vhNyQXuo4z',
     sellerAsset: 'Es9vMFrzaCERmJfrF4H2FYD4KCoNkY11McCe8BenwNYB', buyerAsset: SOL,
   });
-  it('serialização tem 244 bytes (Terms::SERIALIZED_LEN em Rust)', () => expect(serializeTermsSolana(t).length).toBe(244));
+  it('serialização tem 260 bytes (Terms::SERIALIZED_LEN em Rust — v2: +commissionPm1/Pm2)', () => expect(serializeTermsSolana(t).length).toBe(260));
   it('campos little-endian nas posições esperadas', () => {
     const b = serializeTermsSolana(t);
     const dv = new DataView(b.buffer, b.byteOffset, b.byteLength);

@@ -29,8 +29,8 @@ export const ABSENT_WALLET = "11111111111111111111111111111111";
 
 const SEEDS = { config: "config", token: "token", trade: "trade", nonce: "nonce", attest: "attest", htlc: "htlc" } as const;
 
-/** Layout borsh do `Trade` (Rust): 8 disc | trade_id 32 | terms 244 | terms_hash 32 | state u8 | 3×bool | fee u64 | settled i64 | expired i64 | 2×pubkey | bump */
-export const TERMS_LEN = 32 * 4 + 32 + 8 + 32 + 8 + 2 * 4 + 8 + 8 + 4 + 8; // 244
+/** Layout borsh do `Trade` (Rust): 8 disc | trade_id 32 | terms 260 | terms_hash 32 | state u8 | 3×bool | fee u64 | settled i64 | expired i64 | 2×pubkey | bump */
+export const TERMS_LEN = 32 * 4 + 32 + 8 + 32 + 8 + 2 * 4 + 8 + 8 + 4 + 8 + 8 + 8; // 260 (termos v2: +commissionPm1/Pm2)
 const TRADE_LAYOUT = { discriminator: 8, tradeId: 32, terms: TERMS_LEN, termsHash: 32 } as const;
 
 export function anchorDiscriminator(kind: "global" | "account" | "event", name: string): Uint8Array {
@@ -148,7 +148,8 @@ export class SolanaChainAdapter implements ChainAdapter {
       const sb = await this.tokenBalance(t.seller, t.sellerAsset);
       if (sb < need) issues.push({ code: "SELLER_BALANCE", message: `seller precisa de ${need} (principal + fee), tem ${sb}`, role: Role.SELLER });
       const bb = await this.tokenBalance(t.buyer, t.buyerAsset);
-      if (bb < t.buyerAmount) issues.push({ code: "BUYER_BALANCE", message: `buyer precisa de ${t.buyerAmount}, tem ${bb}`, role: Role.BUYER });
+      const buyerTotal = t.buyerAmount + t.commissionPm1 + t.commissionPm2; // principal + comissões on-chain
+      if (bb < buyerTotal) issues.push({ code: "BUYER_BALANCE", message: `buyer precisa de ${buyerTotal} (principal + comissões), tem ${bb}`, role: Role.BUYER });
     }
     return { ok: issues.length === 0, issues, chainNow: now, paused: cfg.paused, onChainFeeBps: cfg.platformFeeBps };
   }
@@ -252,7 +253,7 @@ export class SolanaChainAdapter implements ChainAdapter {
           meta(associatedTokenAddress(trade, mint, program), true),
           meta(program, false), meta(ASSOCIATED_TOKEN_PROGRAM_ID, false), meta(SystemProgram.programId, false),
         ];
-        const buyerWrap = terms.buyerAsset === WSOL_MINT ? await this.wrapSolIxs(buyer, terms.buyerAmount) : [];
+        const buyerWrap = terms.buyerAsset === WSOL_MINT ? await this.wrapSolIxs(buyer, terms.buyerAmount + terms.commissionPm1 + terms.commissionPm2) : [];
         return this.toUnsigned(terms.buyer, [...buyerWrap, this.ix("buyer_sign", keys, data)], "buyer_sign (deposita principal)");
       }
       default: throw new Error(`role inválida ${approval.role}`);
@@ -270,11 +271,17 @@ export class SolanaChainAdapter implements ChainAdapter {
     const trade = this.tradePda(tradeId); const sm = pk(terms.sellerAsset); const bm = pk(terms.buyerAsset);
     const seller = pk(terms.seller); const buyer = pk(terms.buyer);
     const exec = this.executor?.publicKey ?? seller;
+    // Comissões on-chain (termos v2): contas dos PMs e suas ATAs do buyerAsset; comissão zero ou
+    // cadeira ausente → Option=None do Anchor (o PRÓPRIO programa no slot).
+    const pm1On = terms.commissionPm1 > 0n && terms.paymaster01 !== ABSENT_WALLET;
+    const pm2On = terms.commissionPm2 > 0n && terms.paymaster02 !== ABSENT_WALLET;
     const keys = [
       meta(this.configPda, false), meta(trade, true), meta(exec, true, true), meta(sm, false), meta(bm, false),
       meta(associatedTokenAddress(trade, sm, sellerProgram), true), meta(associatedTokenAddress(trade, bm, buyerProgram), true),
       meta(seller, true), meta(buyer, true),
       meta(associatedTokenAddress(buyer, sm, sellerProgram), true), meta(associatedTokenAddress(seller, bm, buyerProgram), true),
+      meta(pm1On ? pk(terms.paymaster01) : this.programId, pm1On), meta(pm1On ? associatedTokenAddress(pk(terms.paymaster01), bm, buyerProgram) : this.programId, pm1On),
+      meta(pm2On ? pk(terms.paymaster02) : this.programId, pm2On), meta(pm2On ? associatedTokenAddress(pk(terms.paymaster02), bm, buyerProgram) : this.programId, pm2On),
       meta(sellerProgram, false), meta(buyerProgram, false), meta(ASSOCIATED_TOKEN_PROGRAM_ID, false), meta(SystemProgram.programId, false),
     ];
     return this.toUnsigned("ANY", this.ix("settle", keys, new Uint8Array()), "settle");
@@ -503,8 +510,11 @@ export function decodeTerms(b: Uint8Array, chain: ChainDescriptor, programId: Pu
   const platformFeeBps = d.readUInt16LE(o); o += 2; const commissionBps = d.readUInt16LE(o); o += 2;
   const discountBps = d.readUInt16LE(o); o += 2; const slippageBps = d.readUInt16LE(o); o += 2;
   const createdAt = Number(d.readBigInt64LE(o)); o += 8; const expiresAt = Number(d.readBigInt64LE(o)); o += 8;
-  const termsVersion = d.readUInt32LE(o); o += 4; const nonce = d.readBigUInt64LE(o);
-  return { chainId: chain.chainId, escrowAddress: programId.toBase58(), seller, buyer, paymaster01, paymaster02, sellerAsset, sellerAmount, buyerAsset, buyerAmount, platformFeeBps, commissionBps, discountBps, slippageBps, createdAt, expiresAt, termsVersion, nonce };
+  const termsVersion = d.readUInt32LE(o); o += 4; const nonce = d.readBigUInt64LE(o); o += 8;
+  // Termos v2: comissões on-chain dos PMs (pagas no settle; comprador deposita junto).
+  const commissionPm1 = d.readBigUInt64LE(o); o += 8;
+  const commissionPm2 = d.readBigUInt64LE(o);
+  return { chainId: chain.chainId, escrowAddress: programId.toBase58(), seller, buyer, paymaster01, paymaster02, sellerAsset, sellerAmount, buyerAsset, buyerAmount, platformFeeBps, commissionBps, discountBps, slippageBps, createdAt, expiresAt, termsVersion, nonce, commissionPm1, commissionPm2 };
 }
 
 type EventSpec = { name: TradeEvent["name"]; fields: [string, "pubkey" | "u64" | "i64" | "u16" | "u32" | "u8" | "bytes32" | "string"][] };

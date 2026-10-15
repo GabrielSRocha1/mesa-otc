@@ -39,7 +39,7 @@ function makeTerms(over: Partial<Terms> = {}): Terms {
     sellerAsset: USDT, sellerAmount: 1_000_000_000_000n,
     buyerAsset: USDC, buyerAmount: 999_000_000_000n,
     platformFeeBps: 3, commissionBps: 200, discountBps: 300, slippageBps: 50,
-    createdAt: START, expiresAt: START + TRADE_DURATION_SECONDS, termsVersion: 1, nonce: 1n,
+    createdAt: START, expiresAt: START + TRADE_DURATION_SECONDS, termsVersion: 1, nonce: 1n, commissionPm1: 0n, commissionPm2: 0n,
     ...over,
   };
 }
@@ -116,7 +116,7 @@ describe('Contrato on-chain · superfície segura do ABI e layout determinístic
     }
   });
 
-  it('Solana: serialização borsh dos termos é determinística e de tamanho fixo (244 bytes)', () => {
+  it('Solana: serialização borsh dos termos é determinística e de tamanho fixo (260 bytes — termos v2)', () => {
     // serializeTermsSolana exige pubkeys base58 (não endereços EVM 0x…).
     const t = makeTerms({
       chainId: 103, escrowAddress: 'ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL',
@@ -125,7 +125,7 @@ describe('Contrato on-chain · superfície segura do ABI e layout determinístic
       sellerAsset: 'Es9vMFrzaCERmJfrF4H2FYD4KCoNkY11McCe8BenwNYB', buyerAsset: 'So11111111111111111111111111111111111111112',
     });
     const a = serializeTermsSolana(t); const b = serializeTermsSolana(t);
-    expect(a.length).toBe(244);
+    expect(a.length).toBe(260);
     expect(Buffer.from(a).equals(Buffer.from(b))).toBe(true); // determinístico
     const id1 = computeTradeIdSolana('So11111111111111111111111111111111111111112', hashTermsSolana(t));
     const id2 = computeTradeIdSolana('TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA', hashTermsSolana(t));

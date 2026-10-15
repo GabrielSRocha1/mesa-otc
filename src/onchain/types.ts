@@ -97,8 +97,12 @@ export interface Terms {
   slippageBps: number; // slippage (informativo)
   createdAt: number; // unix seconds
   expiresAt: number; // createdAt + 2400
-  termsVersion: number; // 1
+  termsVersion: number; // Solana: 2 (comissões on-chain); Tron/EVM v1: 1
   nonce: bigint;
+  /** Comissão ON-CHAIN dos Pay Masters (unidades do buyerAsset) — split explícito assinado por
+   *  todos; o comprador deposita junto e o settle paga atomicamente (Solana termos v2). */
+  commissionPm1: bigint;
+  commissionPm2: bigint;
 }
 
 export interface FeeBreakdown {

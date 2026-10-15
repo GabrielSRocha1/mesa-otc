@@ -9,6 +9,7 @@ import { utf8ToBytes } from '@noble/hashes/utils.js';
 import { TradeState, Role as OnchainRole, type ChainId, type Terms as VerumTerms } from '../../onchain/types.js';
 import { TRADE_DURATION_SECONDS } from '../../onchain/core/index.js';
 import { DomainError } from '../../domain/errors.js';
+import { commissionAmountOf } from '../../engines/signature.js';
 import type { Role } from '../../domain/types.js';
 import type { DealCommitment, OnChainDealStatus } from '../types.js';
 
@@ -39,14 +40,26 @@ export function buildVerumTerms(c: DealCommitment, chainId: ChainId, escrowAddre
   if (legIn.escrowChain !== legOut.escrowChain) throw new DomainError('SETTLEMENT_NOT_ALLOWED', 'escrow Verum liquida as duas legs na MESMA rede; rotas cross-chain usam o simulador/HTLC');
   if (!legIn.asset.contractOrMint || !legOut.asset.contractOrMint) throw new DomainError('SETTLEMENT_NOT_ALLOWED', 'escrow Verum é só-token (ERC20/TRC20/SPL) — sem moeda nativa');
   const clamp = (n: number) => Math.min(Math.max(0, n), 10000);
+  // Comissão ON-CHAIN (termos v2, Solana): total em unidades do buyerAsset repartido pelo split
+  // assinado; resto da divisão inteira fica com o PM1 (mesma regra do escrow EVM V2). Cadeira de
+  // PM ausente → comissão 0 naquele slot (o contrato valida).
+  const commissionBps = clamp(c.terms.pricing.commissionBps);
+  const cTotal = pm1 ? commissionAmountOf(BigInt(legOut.amountBase), clamp(c.terms.pricing.discountBps), commissionBps) : 0n;
+  const split = c.terms.pricing.commissionSplitBps ?? [];
+  const pm2Bps = split[1] ?? 0;
+  const commissionPm2 = pm2 && commissionBps > 0 ? cTotal * BigInt(clamp(pm2Bps)) / BigInt(commissionBps) : 0n;
+  const commissionPm1 = cTotal - commissionPm2;
   return {
     chainId, escrowAddress,
     seller: seller.address, buyer: buyer.address,
     paymaster01: pm1?.address ?? absentPmPlaceholder as string, paymaster02: pm2?.address ?? absentPmPlaceholder as string,
     sellerAsset: legIn.asset.contractOrMint, sellerAmount: BigInt(legIn.amountBase),
     buyerAsset: legOut.asset.contractOrMint, buyerAmount: BigInt(legOut.amountBase),
-    platformFeeBps: c.feeBps, commissionBps: clamp(c.terms.pricing.commissionBps), discountBps: clamp(c.terms.pricing.discountBps), slippageBps: clamp(c.terms.pricing.maxSlippageBps),
-    createdAt: chainNow, expiresAt: chainNow + TRADE_DURATION_SECONDS, termsVersion: 1, nonce: deriveNonce(c.dealId, c.revision, c.dealNonce),
+    platformFeeBps: c.feeBps, commissionBps, discountBps: clamp(c.terms.pricing.discountBps), slippageBps: clamp(c.terms.pricing.maxSlippageBps),
+    // Termos v2 (comissões on-chain) valem para a rota Solana (a única que usa o placeholder de
+    // cadeira ausente); Tron/EVM v1 permanecem na v1 — o serializer de cada chain decide os bytes.
+    createdAt: chainNow, expiresAt: chainNow + TRADE_DURATION_SECONDS, termsVersion: absentPmPlaceholder ? 2 : 1, nonce: deriveNonce(c.dealId, c.revision, c.dealNonce),
+    commissionPm1, commissionPm2,
   };
 }
 

@@ -35,6 +35,8 @@ export function serializeTermsSolana(t: Terms): Uint8Array {
     pubkey(t.sellerAsset), u64(t.sellerAmount), pubkey(t.buyerAsset), u64(t.buyerAmount),
     u16(t.platformFeeBps), u16(t.commissionBps), u16(t.discountBps), u16(t.slippageBps),
     i64(t.createdAt), i64(t.expiresAt), u32(t.termsVersion), u64(t.nonce),
+    // Termos v2: comissões ON-CHAIN dos Pay Masters (pagas no settle; comprador deposita junto).
+    u64(t.commissionPm1), u64(t.commissionPm2),
   );
 }
 
