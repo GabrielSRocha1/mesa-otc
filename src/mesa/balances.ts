@@ -71,8 +71,15 @@ export function defaultBalanceReaders(): BalanceReaders {
 
 const fmt = (n: number): string => n.toLocaleString('pt-BR', { maximumFractionDigits: 6 });
 
-/** Mint nativo embrulhado (wSOL) — igual em todos os clusters. */
+/** Nativos EMBRULHADOS: a tx de depósito/lock embrulha o que faltar na ponta (wSOL via SyncNative;
+ *  WETH via deposit()). O saldo NATIVO cobre o exigido — sem este crédito o depositante que tem
+ *  SOL/ETH mas nunca embrulhou aparece ZERADO no precheck. wSOL = mint base58 (case-sensitive);
+ *  WETH = contrato hex (case-insensitive, guardado em minúsculas). */
 const WSOL_MINT = 'So11111111111111111111111111111111111111112';
+const WETH_SEPOLIA = '0xfff9976782d46cc05630d1f6ebab18b2324d6b14';
+function isWrappedNative(contractOrMint: string | null): boolean {
+  return contractOrMint === WSOL_MINT || contractOrMint?.toLowerCase() === WETH_SEPOLIA;
+}
 
 /**
  * Revalida on-chain o saldo do ativo exigido e o gás de cada cadeira conectada.
@@ -111,9 +118,10 @@ export async function validateChairBalances(mesa: MesaRecord, readers: BalanceRe
         if (direct != null) assetAmount = direct;
         else { const toks = await readers.tokens(net, address); const hit = toks.find(t => t.contract?.toLowerCase() === chair.expectedAsset.contractOrMint?.toLowerCase() || t.symbol === chair.expectedAsset.symbol); assetAmount = hit?.amount ?? 0; }
       }
-      // wSOL: SOL nativo também cobre o exigido (a tx de lock/depósito embrulha o que faltar via
-      // SyncNative) — sem isso quem tem SOL mas nunca embrulhou é barrado com a ATA zerada.
-      if (chair.expectedAsset.contractOrMint === WSOL_MINT && native != null) assetAmount = (assetAmount ?? 0) + Math.max(0, native.amount - 0.01);
+      // Nativo embrulhado (wSOL/WETH): o nativo também cobre o exigido porque a tx de depósito/lock
+      // embrulha o que faltar na ponta — sem isso o comprador com ETH (ou SOL) nunca embrulhado é
+      // barrado com a ATA/ERC-20 zerada e o saldo "some" a cada leitura.
+      if (isWrappedNative(chair.expectedAsset.contractOrMint) && native != null) assetAmount = (assetAmount ?? 0) + Math.max(0, native.amount - 0.01);
       if (assetAmount == null) { assetOk = false; failures.push(`${who}: não foi possível ler o saldo de ${chair.expectedAsset.symbol}`); }
       else { assetOk = assetAmount >= required; if (!assetOk) failures.push(`${who}: saldo de ${chair.expectedAsset.symbol} insuficiente (faltam ${fmt(required - assetAmount)})`); }
     }

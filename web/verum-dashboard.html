@@ -1057,8 +1057,8 @@ window.addEventListener('unhandledrejection',function(e){try{console.warn('[veru
           <div style="display:flex;align-items:center;gap:7px"><input class="inp" id="opFeeDesc" type="number" min="0" max="100" step="0.1" value="3" inputmode="decimal" style="min-width:96px;text-align:right"><span style="color:var(--ink-3);font-weight:700">%</span></div>
         </div>
         <div class="form-row">
-          <div><div class="fl">Ativo de desconto</div><div class="fh">De qual ativo o deságio será deduzido</div></div>
-          <select class="op-sel" id="opFeeDiscFrom" style="max-width:230px"><option value="deliver">Ativo do comprador</option><option value="receive">Ativo do vendedor</option></select>
+          <div><div class="fl">Ativo de desconto</div><div class="fh">O deságio sai sempre do ativo do VENDEDOR</div></div>
+          <div style="font-size:12.5px;color:var(--ink-2);font-weight:600;max-width:230px;text-align:right">Ativo do vendedor <span style="color:var(--ink-3);font-weight:400">(fixo)</span></div>
         </div>
         <div class="form-row" style="border-bottom:none">
           <div><div class="fl">Quem paga a comissão</div><div class="fh">Se os dois estiverem ativos, divide 50/50</div></div>
@@ -1846,7 +1846,9 @@ window.addEventListener('unhandledrejection',function(e){try{console.warn('[veru
   // ── Configuração de Taxas (card em Operações) ───────────────────────────
   // commissionPct/discountPct em %; discountFrom = de qual ativo o deságio sai;
   // payer = quem paga a comissão (se os dois → 50/50).
-  const opFees={ commissionPct:2, discountPct:3, discountFrom:'deliver', payer:{seller:true, buyer:false}, maxSlippagePct:0.5 };
+  // discountFrom FIXO em 'receive': o deságio sai SEMPRE do ativo do VENDEDOR (ex.: vendedor BTC
+  // ↔ comprador ETH → o deságio é descontado do BTC). Não há mais escolha de operador.
+  const opFees={ commissionPct:2, discountPct:3, discountFrom:'receive', payer:{seller:true, buyer:false}, maxSlippagePct:0.5 };
   // Divisão da comissão conforme os toggles Vendedor/Comprador.
   function opCommissionSplit(){
     const s=opFees.payer.seller, b=opFees.payer.buyer;

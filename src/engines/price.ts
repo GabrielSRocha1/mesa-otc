@@ -52,20 +52,23 @@ export class PriceEngine {
   }
 
   /** Economia da operação (RF-033). Inteiros em unidades base; USD como decimal string. */
-  computeEconomics(p: { assetIn: CanonicalAsset; assetOut: CanonicalAsset; amountInBase: string; snapshot: PriceSnapshot; discountBps: number; commissionBps?: number; commissionSplitBps?: number[]; platformFeeBps: number; paymasterShareBps: number; maxSlippageBps: number; maxPriceDriftBps: number; networkCostUsd: { in: string; out: string } }): { pricing: Pricing; amountOutBase: string; feeBase: string } {
+  computeEconomics(p: { assetIn: CanonicalAsset; assetOut: CanonicalAsset; amountInBase: string; snapshot: PriceSnapshot; discountBps: number; commissionBps?: number; commissionSplitBps?: number[]; platformFeeBps: number; paymasterShareBps: number; maxSlippageBps: number; maxPriceDriftBps: number; networkCostUsd: { in: string; out: string } }): { pricing: Pricing; amountOutBase: string; amountInEffectiveBase: string; feeBase: string } {
     const pIn = p.snapshot.reference[p.assetIn.assetId]; const pOut = p.snapshot.reference[p.assetOut.assetId];
     if (!pIn || !pOut) throw new DomainError('PRICE_UNAVAILABLE', 'snapshot não cobre os ativos');
-    // usdIn = amountIn * pIn ; amountOut = usdIn*(1-disc)/pOut — feito com inteiros escalados para evitar erro de ponto flutuante.
+    // usdIn = amountIn * pIn ; amountOut = usdIn*(1-comm)/pOut — feito com inteiros escalados para evitar erro de ponto flutuante.
     const pInS = BigInt(Math.round(pIn * 1e12)); const pOutS = BigInt(Math.round(pOut * 1e12));
     const amountIn = BigInt(p.amountInBase); const decIn = 10n ** BigInt(p.assetIn.decimals); const decOut = 10n ** BigInt(p.assetOut.decimals);
     const usdInS = amountIn * pInS / decIn; // USD * 1e12
     const commissionBps = p.commissionBps ?? 0; if (p.discountBps + commissionBps > 10000) throw new DomainError('INVALID_INPUT', 'Deságio + comissão não podem ultrapassar 100%');
-    // netValue = gross − discount − commission (regra central; a divisão entre Pay Masters é distribuição da comissão, não desconto adicional)
-    const usdOutS = usdInS * BigInt(10000 - p.discountBps - commissionBps) / 10000n; const usdCommissionS = usdInS * BigInt(commissionBps) / 10000n;
+    // DESÁGIO pago pelo VENDEDOR: o desconto sai da PERNA DO VENDEDOR (amountIn), não do que o
+    // comprador paga. O comprador paga o valor cheio menos só a comissão; o vendedor ENTREGA
+    // amountIn × (1 − deságio). Antes o deságio reduzia amountOut — invertia quem o arcava.
+    const usdOutS = usdInS * BigInt(10000 - commissionBps) / 10000n; const usdCommissionS = usdInS * BigInt(commissionBps) / 10000n;
     const amountOut = usdOutS * decOut / pOutS;
+    const amountInEffective = amountIn * BigInt(10000 - p.discountBps) / 10000n; // perna do vendedor já com o deságio
     const fee = amountOut * BigInt(p.platformFeeBps) / 10000n; const net = amountOut - fee;
     const usd = (s: bigint) => (Number(s) / 1e12).toFixed(2);
-    return { amountOutBase: amountOut.toString(), feeBase: fee.toString(), pricing: {
+    return { amountOutBase: amountOut.toString(), amountInEffectiveBase: amountInEffective.toString(), feeBase: fee.toString(), pricing: {
       referencePriceInUsd: toDec(pIn), referencePriceOutUsd: toDec(pOut), quoteTimestamp: p.snapshot.takenAt, priceValidUntil: p.snapshot.validUntil,
       usdValueIn: usd(usdInS), usdValueOut: usd(usdOutS), discountBps: p.discountBps, commissionBps, commissionSplitBps: p.commissionSplitBps ?? [], usdCommission: usd(usdCommissionS), platformFeeBps: p.platformFeeBps, paymasterShareBps: p.paymasterShareBps, maxSlippageBps: p.maxSlippageBps, maxPriceDriftBps: p.maxPriceDriftBps,
       networkCostEstimateUsd: p.networkCostUsd, netAmountSellerBase: net.toString(), priceSnapshotId: p.snapshot.id } };

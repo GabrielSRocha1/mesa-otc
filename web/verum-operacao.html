@@ -306,9 +306,9 @@ window.addEventListener('unhandledrejection',function(e){try{console.warn('[veru
     var parts='<div class="op-parts" style="grid-template-columns:repeat('+Math.max(1,Math.min(4,chairs.length))+',1fr)">'+partsHtml+'</div>';
 
     var flow='<div class="op-flow">'
-      +sideBox('deliver','Você Entrega','Ativo negociado',buyer,delAmt)
+      +sideBox('deliver','COMPRADOR','Ativo negociado',buyer,delAmt)
       +'<div class="op-swap"><svg viewBox="0 0 24 24"><path d="M7 10l-3 3 3 3M4 13h11M17 14l3-3-3-3M20 11H9"/></svg></div>'
-      +sideBox('receive','Você Recebe','Ativo negociado',seller,recvAmt)
+      +sideBox('receive','VENDEDOR','Ativo negociado',seller,recvAmt)
       +'</div>';
 
     var multisig='<section class="card"><div class="op-ms-head">'

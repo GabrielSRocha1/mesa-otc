@@ -162,7 +162,7 @@ export class DealEngine {
       const routes = await this.d.router.plan({ assetIn: dr.assetIn, assetOut: dr.assetOut, participants: dr.participants, expiresInSec: Math.max(60, Math.floor((deal.expiresAt - this.now()) / 1000)) }); const route = this.d.router.select(routes);
       const escrowFor = (n: Network) => route.legs.find(l => l.escrowChain === n) as Terms['route']['legs'][number];
       const legs: Leg[] = [
-        { index: 0, asset: dr.assetIn, amountBase: dr.amountInBase, from: 'SELLER', to: 'BUYER', escrowChain: dr.assetIn.network, escrowContract: escrowFor(dr.assetIn.network).escrowContract, mode: escrowFor(dr.assetIn.network).mode },
+        { index: 0, asset: dr.assetIn, amountBase: econ.amountInEffectiveBase, from: 'SELLER', to: 'BUYER', escrowChain: dr.assetIn.network, escrowContract: escrowFor(dr.assetIn.network).escrowContract, mode: escrowFor(dr.assetIn.network).mode },
         { index: 1, asset: dr.assetOut, amountBase: econ.amountOutBase, from: 'BUYER', to: 'SELLER', escrowChain: dr.assetOut.network, escrowContract: escrowFor(dr.assetOut.network).escrowContract, mode: escrowFor(dr.assetOut.network).mode }
       ];
       // segredo gerado para o Vendedor (leg BTC); exposto só a ele via API. Override fixo APENAS no

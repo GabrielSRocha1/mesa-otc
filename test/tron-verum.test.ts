@@ -64,7 +64,7 @@ describe('ponte verum/common', () => {
     const commitment = { dealId: d.id, revision: d.revision, dealHash: h.dealHash, expiresAt: t.expiresAt, participants: t.participants, legs: t.legs, pricingHash: h.pricingHash, routeHash: h.routeHash, domainHash: h.domainHash, dealNonce: t.dealNonce, feeBps: 3, treasury: 'T', terms: t };
     const vt = buildVerumTerms(commitment, 3448148188, 'TEscrow', 1_790_000_000);
     expect(vt.expiresAt - vt.createdAt).toBe(2400);
-    expect(vt.sellerAmount).toBe(50000000000n);
+    expect(vt.sellerAmount).toBe(49250000000n); // perna do vendedor já com o deságio (50e9 × (1 − 150bps))
     const tri = { ...commitment, participants: t.participants.slice(0, 3) };
     expect(() => buildVerumTerms(tri, 3448148188, 'TEscrow', 1_790_000_000)).toThrow(DomainError);
     await app.close();
