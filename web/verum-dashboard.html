@@ -2814,8 +2814,12 @@ window.addEventListener('unhandledrejection',function(e){try{console.warn('[veru
     const buyerHuman=(cfg.buyerAmountInBase&&buyer)?baseToHuman(cfg.buyerAmountInBase,buyer.expectedAsset.decimals):null;
     const sellerHuman=(cfg.amountInBase&&seller)?baseToHuman(cfg.amountInBase,seller.expectedAsset.decimals):null;
     if(buyerHuman!=null&&$('#opDelAmt')) $('#opDelAmt').value=buyerHuman;
-    // Deal espelhado (summary + participantes das cadeiras) p/ a esteira/status.
-    opDeal = m.deal ? { ...m.deal, participants: chairs.map(c=>({ role:c.role, address:c.wallet?c.wallet.address:'' })), demo:false, settlementMode:'local', escrowContract:null } : null;
+    // Deal espelhado (summary + esteira/status). Os PARTICIPANTES vêm do deal REAL do backend
+    // (role/address/network por rede) — assinar exige o endereço da REDE do papel (ex.: Vendedor
+    // BTC assina com o endereço bitcoin, não com o Solana da auth). Reconstruir a partir das
+    // cadeiras perdia o network e usava o endereço primário → "não é participante" no backend.
+    // Fallback às cadeiras (agora COM network) só se o deal não trouxer participantes.
+    opDeal = m.deal ? { ...m.deal, participants: (m.deal.participants&&m.deal.participants.length)?m.deal.participants:chairs.map(c=>({ role:c.role, address:c.wallet?c.wallet.address:'', network:(c.expectedAsset&&c.expectedAsset.network)||m.network })), demo:false, settlementMode:'local', escrowContract:null } : null;
     try{ opRenderParticipants(); }catch(e){}
     try{ opRecalc(); }catch(e){}
     if(opDeal){ try{ renderEsteira(opDeal); }catch(e){} }
