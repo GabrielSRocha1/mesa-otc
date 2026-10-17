@@ -409,10 +409,17 @@ export class MesaService {
     // mesa" (ex.: Vendedor BTC assina na rede bitcoin, embora o escrow/mesa seja EVM/Solana) — usar a
     // rede da mesa + endereço primário da cadeira dava NOT_PARTICIPANT. Usa o participante REAL do deal
     // ativo quando houver; sem deal (reentrada só-leitura antes da operação), cai no endereço primário.
-    const deal = mesa.dealId ? await this.d.getDeal(mesa.dealId) : null;
+    const dealId = mesa.dealId ?? (mesa.dealIds && mesa.dealIds.length ? mesa.dealIds[mesa.dealIds.length - 1] : null);
+    const deal = dealId ? await this.d.getDeal(dealId).catch(() => null) : null;
     const dp = deal?.participants.find(p => (p.role as string) === (chair.role as string));
-    const network = authNetworkFor((dp?.network as string | undefined) ?? mesa.network);
-    const address = dp?.address ?? chair.wallet.address;
+    // SEM o participante do deal (deal ausente/não linkado), usa a REDE DO ATIVO da cadeira (ex.:
+    // Vendedor BTC → bitcoin) e o endereço da carteira NAQUELA rede — NUNCA o primário (Solana), que
+    // fazia a reentrada assinar na chave ERRADA (ed25519 Solana) e cair em NOT_PARTICIPANT em loop.
+    // A rede da mesa fica só como último recurso (reentrada só-leitura antes de existir operação).
+    const legNet = chair.expectedAsset.network;
+    const legAddr = (chair.wallet.addresses ?? []).find(a => a.network === legNet)?.address;
+    const network = authNetworkFor((dp?.network as string | undefined) ?? legNet ?? mesa.network);
+    const address = dp?.address ?? legAddr ?? chair.wallet.address;
     const t = this.now();
     const nonce = randomBytes(16).toString('hex');
     const expiresAt = t + CHALLENGE_TTL_MS;
