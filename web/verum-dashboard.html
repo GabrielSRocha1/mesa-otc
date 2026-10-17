@@ -3502,7 +3502,18 @@ window.addEventListener('unhandledrejection',function(e){try{console.warn('[veru
       const signature=await pSignEnvelope(env);
       await pApi('/v1/deals/'+encodeURIComponent(d.id)+'/approvals',{method:'POST',idem:'mesa-sign-'+d.id+'-'+(pDto.viewer&&pDto.viewer.role),body:{ role:pDto.viewer.role, signature, nonce:env.payload.nonce }});
       closeModal(); toast('Assinatura registrada ✓','ok'); pRefresh();
-    }catch(e){ toast(e.message||'Falha ao assinar','err'); if(btn){ btn.disabled=false; btn.textContent='Assinar e continuar'; } }
+    }catch(e){
+      // Sessão STALE: token de reentrada emitido para outra rede/config do papel (ex.: a cadeira era
+      // Solana e virou BTC) ⇒ o endereço autenticado não casa com o participante do deal. Descarta o
+      // token e força nova reentrada — que renasce no endereço certo do papel e passa a assinar.
+      if(e&&e.code==='NOT_PARTICIPANT'){
+        try{ sessionStorage.removeItem('verum_mesa_pt_'+P_MESA); localStorage.removeItem('verum_mesa_pt_'+P_MESA); }catch(x){}
+        P_TOK=''; closeModal();
+        pReentry('Sua sessão não corresponde ao seu papel nesta operação (a rede/carteira mudou). Reconecte a Verum Wallet para assinar.');
+        return;
+      }
+      toast(e.message||'Falha ao assinar','err'); if(btn){ btn.disabled=false; btn.textContent='Assinar e continuar'; }
+    }
   }
   let pReentering=false, pStarted=false;
   // Web Push "é sua vez de assinar": inscreve a carteira deste participante (best-effort; se o
