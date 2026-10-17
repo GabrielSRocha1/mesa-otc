@@ -114,6 +114,14 @@ export async function buildApi(deps: ApiDeps): Promise<FastifyInstance> {
   });
   const requireSession = (req: FastifyRequest): Session => { if (!req.session) throw new DomainError('FORBIDDEN', 'Sessão necessária'); return req.session; };
   const requireOperator = (req: FastifyRequest): Session => { const s = requireSession(req); if (s.role !== 'operator') throw new DomainError('FORBIDDEN', 'Apenas operadores'); return s; };
+  /** Casa a carteira autenticada com um participante do deal (mesma rede/endereço). Erro DIAGNÓSTICO:
+   *  expõe o endereço autenticado vs. os esperados — o 'não é participante' costuma ser a sessão num
+   *  endereço de rede diferente do papel (ex.: auth Solana contra participante BTC/EVM). */
+  const requireParticipant = (d: Deal, s: Session) => {
+    const me = d.participants.find(p => p.address.toLowerCase() === s.address.toLowerCase());
+    if (!me) throw new DomainError('NOT_PARTICIPANT', `não é participante: a carteira autenticada (${s.network}:${s.address}) não corresponde a nenhum papel desta operação`, { signer: { network: s.network, address: s.address }, participants: d.participants.map(p => ({ role: p.role, network: p.network, address: p.address })) });
+    return me;
+  };
   /** Idempotência: mesma chave + mesmo corpo ⇒ resposta original; corpo diferente ⇒ 409. */
   const idempotent = async <T>(req: FastifyRequest, reply: FastifyReply, fn: () => Promise<T>): Promise<T | undefined> => {
     const key = req.headers['idempotency-key']; const actor = req.session?.sub ?? req.ip;
@@ -283,7 +291,7 @@ export async function buildApi(deps: ApiDeps): Promise<FastifyInstance> {
   app.post('/v1/deals/:id/proposals/:pid/apply', async (req, reply) => { const s = requireSession(req); const { id, pid } = req.params as { id: string; pid: string }; return idempotent(req, reply, async () => deps.deals.view(await deps.proposals.apply(id, pid, s.address), s.address)); });
   app.post('/v1/deals/:id/proposals/:pid/withdraw', async req => { const s = requireSession(req); const { id, pid } = req.params as { id: string; pid: string }; return deps.proposals.withdraw(id, pid, s.address); });
   app.post('/v1/deals/:id/proposals/:pid/reject', async req => { const s = requireSession(req); const { id, pid } = req.params as { id: string; pid: string }; return deps.proposals.reject(id, pid, s.address); });
-  app.get('/v1/deals/:id/approval-envelope', async req => { const s = requireSession(req); const { id } = req.params as { id: string }; const d = await deps.deals.get(id); const me = d.participants.find(p => p.address.toLowerCase() === s.address.toLowerCase()); if (!me) throw new DomainError('NOT_PARTICIPANT', 'não é participante'); const env = await deps.deals.envelope(id, me.role, s.address); return { scheme: env.scheme, network: env.network, payload: env.payload, message: env.message, typedData: env.typedData ? { ...env.typedData, message: Object.fromEntries(Object.entries(env.typedData.message).map(([k, v]) => [k, typeof v === 'bigint' ? v.toString() : v])) } : undefined }; });
+  app.get('/v1/deals/:id/approval-envelope', async req => { const s = requireSession(req); const { id } = req.params as { id: string }; const d = await deps.deals.get(id); const me = requireParticipant(d, s); const env = await deps.deals.envelope(id, me.role, s.address); return { scheme: env.scheme, network: env.network, payload: env.payload, message: env.message, typedData: env.typedData ? { ...env.typedData, message: Object.fromEntries(Object.entries(env.typedData.message).map(([k, v]) => [k, typeof v === 'bigint' ? v.toString() : v])) } : undefined }; });
   app.post('/v1/deals/:id/approvals', async (req, reply) => { const s = requireSession(req); const { id } = req.params as { id: string }; const b = parse(z.object({ role: RoleZ, signature: z.string().min(20), nonce: z.string().min(8) }), req.body); return idempotent(req, reply, async () => { const r = await deps.deals.submitSignature(id, { role: b.role, signer: s.address, scheme: s.keyScheme, signature: b.signature, nonce: b.nonce }, s.address); return { count: r.count, required: r.deal.requiredSignatures, state: r.deal.state }; }); });
   /**
    * Fluxo de CARTEIRA REAL (escrow canônico Verum): o passo on-chain da vez do participante.
@@ -307,8 +315,7 @@ export async function buildApi(deps: ApiDeps): Promise<FastifyInstance> {
   app.get('/v1/deals/:id/onchain-tx', async req => {
     const s = requireSession(req); const { id } = req.params as { id: string };
     const d = await deps.deals.get(id);
-    const me = d.participants.find(p => p.address.toLowerCase() === s.address.toLowerCase());
-    if (!me) throw new DomainError('NOT_PARTICIPANT', 'não é participante');
+    const me = requireParticipant(d, s);
     if (!d.terms?.legs.length) throw new DomainError('SETTLEMENT_NOT_ALLOWED', 'termos não congelados');
     return stepAdapterOf(d, me.role).buildParticipantStep(id, me.role, s.address);
   });
@@ -316,8 +323,7 @@ export async function buildApi(deps: ApiDeps): Promise<FastifyInstance> {
     const s = requireSession(req); const { id } = req.params as { id: string };
     const b = parse(z.object({ signature: z.string().optional(), deadline: z.number().int().optional(), signedTransactionBase64: z.string().optional() }), req.body);
     const d = await deps.deals.get(id);
-    const me = d.participants.find(p => p.address.toLowerCase() === s.address.toLowerCase());
-    if (!me) throw new DomainError('NOT_PARTICIPANT', 'não é participante');
+    const me = requireParticipant(d, s);
     if (!d.terms?.legs.length) throw new DomainError('SETTLEMENT_NOT_ALLOWED', 'termos não congelados');
     const a = stepAdapterOf(d, me.role);
     return idempotent(req, reply, async () => a.submitParticipantStep(id, me.role, s.address, b as Record<string, unknown>));

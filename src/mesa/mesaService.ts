@@ -403,10 +403,16 @@ export class MesaService {
     const candidates = [input.address, ...((input.addresses ?? []).map(a => a.address))].filter(Boolean);
     let chair: MesaChair | undefined; for (const a of candidates) { chair = this.chairByWallet(mesa, a); if (chair) break; }
     if (!chair || !chair.wallet) throw new DomainError('FORBIDDEN', 'Esta carteira não está conectada a nenhuma cadeira desta mesa.');
-    // A prova de posse usa a FAMÍLIA da rede da mesa e o endereço PRIMÁRIO da cadeira — o MESMO que
-    // assina as deals. Assim a sessão reentrante consegue assinar (signer === participante da deal).
-    const network = authNetworkFor(mesa.network);
-    const address = chair.wallet.address;
+    // A prova de posse PRECISA casar com o PARTICIPANTE do deal (mesma rede/endereço) — o backend
+    // identifica o signatário PELO ENDEREÇO, então a sessão reentrante tem de nascer no mesmo endereço
+    // do papel no deal. Em pernas cross-chain esse endereço pode estar numa rede DIFERENTE da "rede da
+    // mesa" (ex.: Vendedor BTC assina na rede bitcoin, embora o escrow/mesa seja EVM/Solana) — usar a
+    // rede da mesa + endereço primário da cadeira dava NOT_PARTICIPANT. Usa o participante REAL do deal
+    // ativo quando houver; sem deal (reentrada só-leitura antes da operação), cai no endereço primário.
+    const deal = mesa.dealId ? await this.d.getDeal(mesa.dealId) : null;
+    const dp = deal?.participants.find(p => (p.role as string) === (chair.role as string));
+    const network = authNetworkFor((dp?.network as string | undefined) ?? mesa.network);
+    const address = dp?.address ?? chair.wallet.address;
     const t = this.now();
     const nonce = randomBytes(16).toString('hex');
     const expiresAt = t + CHALLENGE_TTL_MS;
