@@ -3622,7 +3622,10 @@ window.addEventListener('unhandledrejection',function(e){try{console.warn('[veru
         const chR=await fetch(API+'/v1/mesas/'+encodeURIComponent(P_MESA)+'/reenter/challenge',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({network:'solana',address:solAddr,addresses})});
         const ch=await chR.json(); if(!chR.ok) throw new Error(ch.message||'Esta carteira não pertence a esta mesa.');
         const net=ch.network||'solana'; const signAddr=ch.address||solAddr;
-        btn.textContent='Deslize para assinar…';
+        // DIAGNÓSTICO visível: mostra em QUAL rede/endereço a reentrada vai assinar. Se aparecer
+        // "(solana …)" para um Vendedor BTC, o reenterChallenge está devolvendo a rede errada; se
+        // "(bitcoin tb1…)" a rede está certa e o problema é na assinatura da carteira.
+        btn.textContent='Deslize para assinar ('+net+(signAddr?(' '+String(signAddr).slice(0,8)+'…'):'')+')…';
         const signature=await pReenterSign(net,signAddr,ch.message);
         btn.textContent='Entrando…';
         const reR=await fetch(API+'/v1/mesas/'+encodeURIComponent(P_MESA)+'/reenter',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({network:net,address:signAddr,nonce:ch.nonce,signature})});
