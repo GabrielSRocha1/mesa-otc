@@ -526,7 +526,7 @@
     // Assina MENSAGEM no padrão da rede pedida (EIP-191, TIP-191, BIP-137,
     // SEP-53). message: string UTF-8, hex 0x (bytes) ou array de bytes.
     // Resolve { signature, address, chainKey }. A aprovação é do usuário.
-    signPersonalMessage: function (chainKey, message) {
+    signPersonalMessage: function (chainKey, message, address) {
       if (!window.verum.connected) return Promise.reject(new WalletError('NOT_CONNECTED'));
       log('SIGNATURE', 'signPersonalMessage()', chainKey);
       return new Promise(function (resolve, reject) {
@@ -550,6 +550,7 @@
             id: id,
             chainKey: String(chainKey),
             message: payload,
+            address: address ? String(address) : null,
             origin: window.location.origin,
           });
         } catch (e) {
@@ -724,7 +725,7 @@
         case 'signAndSendTransaction': return window.verum.signAndSendTransaction(req.params.transaction, req.params.options);
         case 'signAllTransactions': return window.verum.signAllTransactions(req.params.transactions);
         case 'signMessage': return window.verum.signMessage(req.params.message);
-        case 'signPersonalMessage': return window.verum.signPersonalMessage(req.params.chainKey, req.params.message);
+        case 'signPersonalMessage': return window.verum.signPersonalMessage(req.params.chainKey, req.params.message, req.params.address);
         case 'transfer': return window.verum.transfer(req.params && req.params.intent ? req.params.intent : req.params);
         case 'multiTransfer': return window.verum.multiTransfer(req.params && req.params.intent ? req.params.intent : req.params);
         case 'signAndSendPayment': return window.verum.signAndSendPayment(req.params && req.params.request ? req.params.request : req.params);

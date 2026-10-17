@@ -3456,7 +3456,10 @@ window.addEventListener('unhandledrejection',function(e){try{console.warn('[veru
       const prov=solProvider(); if(!prov) throw new Error('Abra esta mesa dentro da Verum Wallet para assinar.');
       if(typeof prov.signPersonalMessage!=='function') throw new Error('Esta Verum Wallet não expõe assinatura '+(env.network==='bitcoin'?'Bitcoin (BIP-137)':'Tron (TIP-191)')+'. Atualize a carteira.');
       try{ await prov.connect(); }catch(e){}
-      const r=await prov.signPersonalMessage(chainKey,env.message);
+      // Passa o endereço-ALVO (signer do envelope): a Verum deriva a chave BTC pelo TIPO do endereço
+      // (tb1→testnet, bc1→mainnet) em vez do toggle global — sem isso, dApp testnet assinado com a
+      // chave mainnet gerava assinatura inválida contra o tb1q… do deal.
+      const r=await prov.signPersonalMessage(chainKey,env.message,addr);
       const sig=(r&&r.signature!==undefined)?r.signature:r;
       if(!sig) throw new Error('A Verum Wallet não devolveu a assinatura '+chainKey+'.');
       return sig;
@@ -3468,7 +3471,7 @@ window.addEventListener('unhandledrejection',function(e){try{console.warn('[veru
   async function pReenterSign(net,address,message){
     if(net==='solana'){ const p=solProvider(); if(!p) throw new Error('Verum Wallet não detectada.'); return solSignMessage(p,message); }
     if(net==='ethereum'){ const p=await findVerumEthProvider(); if(!p) throw new Error('Provider EVM da Verum Wallet não injetado nesta aba.'); try{ await p.request({method:'eth_requestAccounts'}); }catch(e){} return p.request({method:'personal_sign',params:[message,address]}); }
-    if(net==='bitcoin'||net==='tron'){ const p=solProvider(); if(!p||typeof p.signPersonalMessage!=='function') throw new Error('Esta Verum Wallet não expõe assinatura '+net+'. Atualize a carteira.'); try{ await p.connect(); }catch(e){} const rr=await p.signPersonalMessage(net,message); const sig=(rr&&rr.signature!==undefined)?rr.signature:rr; if(!sig) throw new Error('A Verum Wallet não devolveu a assinatura '+net+'.'); return sig; }
+    if(net==='bitcoin'||net==='tron'){ const p=solProvider(); if(!p||typeof p.signPersonalMessage!=='function') throw new Error('Esta Verum Wallet não expõe assinatura '+net+'. Atualize a carteira.'); try{ await p.connect(); }catch(e){} /* endereço-alvo → Verum deriva a chave BTC pelo tipo do endereço (tb1=testnet/bc1=mainnet), não pelo toggle global */ const rr=await p.signPersonalMessage(net,message,address); const sig=(rr&&rr.signature!==undefined)?rr.signature:rr; if(!sig) throw new Error('A Verum Wallet não devolveu a assinatura '+net+'.'); return sig; }
     throw new Error('Rede de reentrada não suportada: '+net);
   }
   async function pSign(){
