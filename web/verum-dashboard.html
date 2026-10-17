@@ -1197,17 +1197,22 @@ window.addEventListener('unhandledrejection',function(e){try{console.warn('[veru
     err:'<circle cx="12" cy="12" r="9"/><path d="M12 8v5M12 16h.01"/>'
   };
   // POP-UP de turno (todas as telas): quem assina agora / quem acabou de assinar / liquidada.
-  function turnPop(title,sub,accent){
+  // `action` (opcional) = { label, fn }: quando a vez é assinável AQUI, o pop-up ganha um botão que
+  // dispara a assinatura (clique do usuário — nunca auto, p/ não abrir a carteira sozinho no polling).
+  function turnPop(title,sub,accent,action){
     var old=document.getElementById('turnPop'); if(old) old.remove();
     if(document.querySelector('#modalRoot #pRvBack')) return; // nunca por cima do modal de assinatura
     var el=document.createElement('div'); el.id='turnPop';
     el.style.cssText='position:fixed;inset:0;background:rgba(2,6,16,.72);z-index:88;display:grid;place-items:center;padding:16px';
+    var actBtn=action?('<button class="btn btn-primary" id="turnPopAct" style="margin-top:18px;height:46px;width:100%">'+action.label+'</button>'):'';
     el.innerHTML='<div style="background:var(--card);border:1px solid '+(accent||'var(--line)')+';border-radius:16px;max-width:420px;width:100%;padding:26px;text-align:center">'
       +'<div style="font-size:40px;margin-bottom:10px">✍️</div>'
       +'<div style="font-family:var(--f-head);font-weight:800;font-size:19px;margin-bottom:8px">'+title+'</div>'
       +'<div style="font-size:13.5px;color:var(--ink-2)">'+sub+'</div>'
-      +'<button class="btn" style="margin-top:18px;height:42px" onclick="this.closest(\'#turnPop\').remove()">Entendi</button></div>';
+      +actBtn
+      +'<button class="btn" style="margin-top:'+(action?'8px':'18px')+';height:42px" onclick="this.closest(\'#turnPop\').remove()">'+(action?'Agora não':'Entendi')+'</button></div>';
     document.body.appendChild(el);
+    if(action){ var ab=document.getElementById('turnPopAct'); if(ab) ab.addEventListener('click',function(){ el.remove(); try{ action.fn(); }catch(e){} }); }
     el.addEventListener('click',function(e){ if(e.target===el) el.remove(); });
     setTimeout(function(){ el.remove(); },12000);
   }
@@ -3118,7 +3123,9 @@ window.addEventListener('unhandledrejection',function(e){try{console.warn('[veru
           const nm=r=>{ const c=(m.chairs||[]).find(x=>x.role===r); return (M3_ROLE[r]||r)+(c&&c.firstName?(' ('+c.firstName+')'):''); };
           if(dl.state==='AWAITING_SIGNATURES'&&dl.turnRole){
             const done=dl.signed||[]; const last=done.length?('✅ '+nm(done[done.length-1])+' assinou · '):'';
-            turnPop('Vez de assinar: '+nm(dl.turnRole), last+'Assinaturas '+(dl.validSignatures||0)+'/'+(dl.requiredSignatures||0)+' — avise o participante; a janela é de 5 minutos.', '#eab308');
+            // Pop-up ACIONÁVEL: se esta cadeira é sua, assina direto pelo botão (mesmo fluxo do
+            // "Assinar a vez" da tela); senão, é só avisar o participante. A janela é de 5 minutos.
+            turnPop('Vez de assinar: '+nm(dl.turnRole), last+'Assinaturas '+(dl.validSignatures||0)+'/'+(dl.requiredSignatures||0)+' — se esta cadeira é sua, assine agora (janela de 5 minutos).', '#eab308', {label:'Assinar a vez ('+nm(dl.turnRole)+')', fn:m3Sign});
           } else if(dl.state==='SETTLED') turnPop('Operação liquidada ✓','Todas as assinaturas coletadas — o contrato executou a troca.','#22c55e');
           else if(dl.state==='SETTLING'||dl.state==='SETTLEMENT_VALIDATION') turnPop('Todas assinaram — liquidando…','O contrato está executando a liquidação atômica.','#22c55e');
         }
@@ -3369,13 +3376,16 @@ window.addEventListener('unhandledrejection',function(e){try{console.warn('[veru
     // wSOL → SOL: visível em mesa Solana após o fim da operação (liquidada/reembolsada) — é
     // quando alguém fica com wSOL na mão (comprador no settle; vendedor no refund).
     const pud=$('#pUnwrapBtn'); if(pud) pud.style.display=(m.network==='solana'&&d&&['SETTLED','REFUNDED','EXPIRED'].includes(d.state))?'':'none';
-    // "SER PUXADO PARA ASSINAR": na SUA vez, com a Verum Wallet presente, abre automaticamente a tela
-    // de revisão/assinatura — a pessoa só confirma (desliza) na carteira. Dispara 1x por turno
-    // (pAutoTurnKey) e nunca por cima de outro modal já aberto. Fora da vez, reseta a trava.
+    // "SER PUXADO PARA ASSINAR": na SUA vez (QUALQUER papel — Vendedor/PM/Comprador — em QUALQUER
+    // rede), abre automaticamente a tela de revisão/assinatura em vez de só o aviso de turno. O modal
+    // é apenas revisão; a carteira só é acionada no clique "Assinar e continuar" (pSign cobre
+    // solana/ethereum/bitcoin/tron). Dispara 1x por turno (pAutoTurnKey) e nunca por cima de outro
+    // modal já aberto. Fora da vez, reseta a trava. (Antes travava em solProvider() ⇒ só abria em
+    // turno Solana; PM/outros papéis em EVM/BTC ficavam só com o pop-up informativo.)
     try{
       if(myTurn){
         const key=d.id+':'+me.role;
-        if(pAutoTurnKey!==key && solProvider() && !document.querySelector('#modalRoot #pRvBack')){
+        if(pAutoTurnKey!==key && !document.querySelector('#modalRoot #pRvBack')){
           pAutoTurnKey=key; pReview();
         }
       } else if(!d || d.turnRole!==me.role){ pAutoTurnKey=null; }
