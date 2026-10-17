@@ -81,11 +81,13 @@ describe('mesa v4 — approve cria a deal HTLC das cadeiras', () => {
     ]);
     expect(plan?.mode).toBe('HTLC_BTC');
     expect(plan?.htlc?.btcSide).toBe('BUYER');
-    // E o lado NÃO-BTC em rede sem escrow-que-revela (Solana/Tron) é recusado com motivo claro.
+    // BTC↔Solana agora é suportado (escrow N-de-N Solana COM hashlock = settle_xchain, ADR-v5): o
+    // plano deriva HTLC_BTC e a criação usa o fluxo createMesaBtcSolanaDeal (token SPL na Solana).
     const planSol = deriveSettlementPlan([
-      chair('SELLER', 'solana', null, 'SOL', 9),
+      chair('SELLER', 'solana', 'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v', 'tUSDC', 6),
       chair('BUYER', 'bitcoin', null, 'BTC', 8),
     ]);
-    expect(planSol?.mode).toBe('HTLC_BTC'); // plano deriva, mas a criação barra Solana na perna de contrato
+    expect(planSol?.mode).toBe('HTLC_BTC');
+    expect(planSol?.htlc?.btcSide).toBe('BUYER');
   });
 });

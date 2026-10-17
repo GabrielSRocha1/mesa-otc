@@ -26,11 +26,14 @@ export const ASSOCIATED_TOKEN_PROGRAM_ID = new PublicKey("ATokenGPvbdGVxr1b2hvZb
 export const WSOL_MINT = "So11111111111111111111111111111111111111112";
 /** Cadeira AUSENTE nos Terms (Pubkey::default) — mesas de 2–3 participantes (ADR-v4). */
 export const ABSENT_WALLET = "11111111111111111111111111111111";
+/** Sentinela de PERNA EXTERNA (ativo fora da Solana, ex.: BTC): 32 bytes 0xFF (base58). Distinta da
+ *  nativa (ABSENT_WALLET/0x00) — marca o lado cross-chain que NÃO deposita nem é pago na Solana. */
+export const EXTERNAL_ASSET = new PublicKey(new Uint8Array(32).fill(0xff)).toBase58();
 
 const SEEDS = { config: "config", token: "token", trade: "trade", nonce: "nonce", attest: "attest", htlc: "htlc" } as const;
 
-/** Layout borsh do `Trade` (Rust): 8 disc | trade_id 32 | terms 260 | terms_hash 32 | state u8 | 3×bool | fee u64 | settled i64 | expired i64 | 2×pubkey | bump */
-export const TERMS_LEN = 32 * 4 + 32 + 8 + 32 + 8 + 2 * 4 + 8 + 8 + 4 + 8 + 8 + 8; // 260 (termos v2: +commissionPm1/Pm2)
+/** Layout borsh do `Trade` (Rust): 8 disc | trade_id 32 | terms 292 | terms_hash 32 | state u8 | 3×bool | fee u64 | settled i64 | expired i64 | 2×pubkey | bump */
+export const TERMS_LEN = 32 * 4 + 32 + 8 + 32 + 8 + 2 * 4 + 8 + 8 + 4 + 8 + 8 + 8 + 32; // 292 (termos v3: +htlcHash)
 const TRADE_LAYOUT = { discriminator: 8, tradeId: 32, terms: TERMS_LEN, termsHash: 32 } as const;
 
 export function anchorDiscriminator(kind: "global" | "account" | "event", name: string): Uint8Array {
@@ -205,8 +208,9 @@ export class SolanaChainAdapter implements ChainAdapter {
       meta(pk(signer), true, true),
       meta(this.tradePda(tradeId), true),
       meta(this.noncePda(terms.paymaster01, terms.nonce), true),
-      meta(terms.sellerAsset === ABSENT_WALLET ? this.programId : this.tokenPda(terms.sellerAsset), false),
-      meta(terms.buyerAsset === ABSENT_WALLET ? this.programId : this.tokenPda(terms.buyerAsset), false),
+      // Perna AUSENTE/NATIVA (ABSENT_WALLET) ou EXTERNA (EXTERNAL_ASSET) não tem registry → Option=None.
+      meta(terms.sellerAsset === ABSENT_WALLET || terms.sellerAsset === EXTERNAL_ASSET ? this.programId : this.tokenPda(terms.sellerAsset), false),
+      meta(terms.buyerAsset === ABSENT_WALLET || terms.buyerAsset === EXTERNAL_ASSET ? this.programId : this.tokenPda(terms.buyerAsset), false),
       meta(this.attestPda(terms.seller), false),
       // Pay Master ausente (Pubkey::default) → conta Option=None do Anchor = o PRÓPRIO programa.
       meta(terms.paymaster01 === ABSENT_WALLET ? this.programId : this.attestPda(terms.paymaster01), false),
@@ -221,6 +225,15 @@ export class SolanaChainAdapter implements ChainAdapter {
   async buildSign(terms: Terms, tradeId: string, approval: Signature): Promise<UnsignedTx> {
     const trade = this.tradePda(tradeId);
     const data = concat(fromHex(approval.termsHash), i64le(approval.deadline));
+    // Perna EXTERNA (cross-chain, ex.: BTC): o lado externo apenas ASSINA — sem depósito na Solana.
+    if (approval.role === Role.SELLER && terms.sellerAsset === EXTERNAL_ASSET) {
+      const keys = [meta(this.configPda, false), meta(trade, true), meta(pk(terms.seller), true, true)];
+      return this.toUnsigned(terms.seller, this.ix("seller_sign_external", keys, data), "seller_sign_external (vendedor externo: assina sem depositar)");
+    }
+    if (approval.role === Role.BUYER && terms.buyerAsset === EXTERNAL_ASSET) {
+      const keys = [meta(this.configPda, false), meta(trade, true), meta(pk(terms.buyer), true, true)];
+      return this.toUnsigned(terms.buyer, this.ix("buyer_sign_external", keys, data), "buyer_sign_external (comprador externo: assina sem depositar)");
+    }
     // Perna NATIVA (asset = Pubkey::default): depósito em lamports no PDA — SOL entra solto.
     if (approval.role === Role.SELLER && terms.sellerAsset === ABSENT_WALLET) {
       const cfg = await this.readConfig();
@@ -277,11 +290,36 @@ export class SolanaChainAdapter implements ChainAdapter {
     return raw;
   }
 
-  async buildSettle(tradeId: string): Promise<UnsignedTx> {
+  async buildSettle(tradeId: string, preimageHex?: string): Promise<UnsignedTx> {
     const { terms, sellerProgram, buyerProgram } = await this.loadTerms(tradeId);
     const trade = this.tradePda(tradeId);
     const seller = pk(terms.seller); const buyer = pk(terms.buyer);
     const exec = this.executor?.publicKey ?? seller;
+    // Perna CROSS-CHAIN (htlcHash): UMA perna de token SPL + perna externa (BTC) via preimage.
+    if (terms.htlcHash) {
+      if (!preimageHex) throw new Error("settle_xchain exige a preimage do hashlock");
+      const sellerExt = terms.sellerAsset === EXTERNAL_ASSET;
+      const onchainAsset = sellerExt ? terms.buyerAsset : terms.sellerAsset;
+      const onchainProgram = sellerExt ? buyerProgram : sellerProgram;
+      const recipientW = sellerExt ? seller : buyer; // quem recebe o token on-chain
+      const depositorW = sellerExt ? buyer : seller; // quem depositou (recebe o rent no close)
+      const om = pk(onchainAsset);
+      // Comissões só existem quando o COMPRADOR paga on-chain (vendedor externo); senão None.
+      const pm1On = sellerExt && terms.commissionPm1 > 0n && terms.paymaster01 !== ABSENT_WALLET;
+      const pm2On = sellerExt && terms.commissionPm2 > 0n && terms.paymaster02 !== ABSENT_WALLET;
+      const keys = [
+        meta(this.configPda, false), meta(trade, true), meta(exec, true, true), meta(om, false),
+        meta(associatedTokenAddress(trade, om, onchainProgram), true),
+        meta(recipientW, true), meta(associatedTokenAddress(recipientW, om, onchainProgram), true),
+        meta(depositorW, true),
+        meta(pm1On ? pk(terms.paymaster01) : this.programId, pm1On), meta(pm1On ? associatedTokenAddress(pk(terms.paymaster01), om, onchainProgram) : this.programId, pm1On),
+        meta(pm2On ? pk(terms.paymaster02) : this.programId, pm2On), meta(pm2On ? associatedTokenAddress(pk(terms.paymaster02), om, onchainProgram) : this.programId, pm2On),
+        meta(onchainProgram, false), meta(ASSOCIATED_TOKEN_PROGRAM_ID, false), meta(SystemProgram.programId, false),
+      ];
+      const preimage = fromHex(preimageHex);
+      const len = new Uint8Array(4); new DataView(len.buffer).setUint32(0, preimage.length, true);
+      return this.toUnsigned("ANY", this.ix("settle_xchain", keys, concat(len, preimage)), "settle_xchain (revela preimage; token → destino fixo)");
+    }
     // Perna NATIVA de um dos lados → settle dedicado (lamports direto do PDA, sem wSOL).
     const pm1C = terms.commissionPm1 > 0n && terms.paymaster01 !== ABSENT_WALLET;
     const pm2C = terms.commissionPm2 > 0n && terms.paymaster02 !== ABSENT_WALLET;
@@ -340,6 +378,22 @@ export class SolanaChainAdapter implements ChainAdapter {
     const trade = this.tradePda(tradeId);
     const seller = pk(terms.seller); const buyer = pk(terms.buyer);
     const exec = this.executor?.publicKey ?? seller;
+    // Perna CROSS-CHAIN (htlcHash): devolve SOMENTE a única perna de token on-chain ao depositante
+    // (a perna externa/BTC volta pelo timeout do P2WSH, fora da Solana).
+    if (terms.htlcHash) {
+      const sellerExt = terms.sellerAsset === EXTERNAL_ASSET;
+      const onchainAsset = sellerExt ? terms.buyerAsset : terms.sellerAsset;
+      const onchainProgram = sellerExt ? buyerProgram : sellerProgram;
+      const depositorW = sellerExt ? buyer : seller;
+      const om = pk(onchainAsset);
+      const keys = [
+        meta(trade, true), meta(exec, true, true), meta(om, false),
+        meta(associatedTokenAddress(trade, om, onchainProgram), true),
+        meta(depositorW, true), meta(associatedTokenAddress(depositorW, om, onchainProgram), true),
+        meta(onchainProgram, false), meta(ASSOCIATED_TOKEN_PROGRAM_ID, false), meta(SystemProgram.programId, false),
+      ];
+      return this.toUnsigned("ANY", this.ix("refund_xchain", keys, new Uint8Array()), "refund_xchain (devolve a perna de token ao depositante)");
+    }
     // Mesa com perna NATIVA → refund dedicado (lamports do PDA + perna de token).
     if (terms.sellerAsset === ABSENT_WALLET || terms.buyerAsset === ABSENT_WALLET) {
       const nativeSeller = terms.sellerAsset === ABSENT_WALLET;
@@ -570,8 +624,11 @@ export function decodeTerms(b: Uint8Array, chain: ChainDescriptor, programId: Pu
   const termsVersion = d.readUInt32LE(o); o += 4; const nonce = d.readBigUInt64LE(o); o += 8;
   // Termos v2: comissões on-chain dos PMs (pagas no settle; comprador deposita junto).
   const commissionPm1 = d.readBigUInt64LE(o); o += 8;
-  const commissionPm2 = d.readBigUInt64LE(o);
-  return { chainId: chain.chainId, escrowAddress: programId.toBase58(), seller, buyer, paymaster01, paymaster02, sellerAsset, sellerAmount, buyerAsset, buyerAmount, platformFeeBps, commissionBps, discountBps, slippageBps, createdAt, expiresAt, termsVersion, nonce, commissionPm1, commissionPm2 };
+  const commissionPm2 = d.readBigUInt64LE(o); o += 8;
+  // Termos v3: hashlock cross-chain (0x0 = mesa normal).
+  const htlcHashRaw = toHex(d.subarray(o, o + 32));
+  const htlcHash = /^0x0+$/.test(htlcHashRaw) ? undefined : htlcHashRaw;
+  return { chainId: chain.chainId, escrowAddress: programId.toBase58(), seller, buyer, paymaster01, paymaster02, sellerAsset, sellerAmount, buyerAsset, buyerAmount, platformFeeBps, commissionBps, discountBps, slippageBps, createdAt, expiresAt, termsVersion, nonce, commissionPm1, commissionPm2, htlcHash };
 }
 
 type EventSpec = { name: TradeEvent["name"]; fields: [string, "pubkey" | "u64" | "i64" | "u16" | "u32" | "u8" | "bytes32" | "string"][] };

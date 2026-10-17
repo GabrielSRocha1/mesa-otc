@@ -27,6 +27,15 @@ function cat(...parts: Uint8Array[]): Uint8Array {
   for (const p of parts) { out.set(p, o); o += p.length; }
   return out;
 }
+/** Campo fixo de 32 bytes a partir de hex (0x…) — ausente/vazio ⇒ 32 zeros (ex.: htlc_hash de mesa normal). */
+function bytes32(hex?: string): Uint8Array {
+  const out = new Uint8Array(32);
+  if (!hex) return out;
+  const h = hex.startsWith("0x") ? hex.slice(2) : hex;
+  if (h.length !== 64) throw new Error(`hash de 32 bytes inválido: ${hex}`);
+  for (let i = 0; i < 32; i++) out[i] = parseInt(h.slice(i * 2, i * 2 + 2), 16);
+  return out;
+}
 
 /** Serialização canônica dos termos (espelha `Terms::to_bytes` em Rust). */
 export function serializeTermsSolana(t: Terms): Uint8Array {
@@ -35,8 +44,10 @@ export function serializeTermsSolana(t: Terms): Uint8Array {
     pubkey(t.sellerAsset), u64(t.sellerAmount), pubkey(t.buyerAsset), u64(t.buyerAmount),
     u16(t.platformFeeBps), u16(t.commissionBps), u16(t.discountBps), u16(t.slippageBps),
     i64(t.createdAt), i64(t.expiresAt), u32(t.termsVersion), u64(t.nonce),
-    // Termos v2: comissões ON-CHAIN dos Pay Masters (pagas no settle; comprador deposita junto).
+    // Termos v2: comissões ON-CHAIN dos Pay Masters.
     u64(t.commissionPm1), u64(t.commissionPm2),
+    // Termos v3: hashlock cross-chain (deve bater com Terms::to_bytes, 292 bytes). 0x0 = mesa normal.
+    bytes32(t.htlcHash),
   );
 }
 

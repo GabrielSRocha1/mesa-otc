@@ -12,7 +12,7 @@ import { sha256Hex, type CanonicalAsset, type ChainRef, type Role } from '../../
 import { DomainError } from '../../domain/errors.js';
 import { TradeState, Role as OnchainRole, type ChainId, type Terms as VerumTerms, type Signature as VerumSignature } from '../../onchain/types.js';
 import { computeFee } from '../../onchain/core/index.js';
-import { SolanaChainAdapter, anchorDiscriminator, findPda, associatedTokenAddress, WSOL_MINT, TOKEN_PROGRAM_ID } from '../../onchain/router/adapters/solana.js';
+import { SolanaChainAdapter, anchorDiscriminator, findPda, associatedTokenAddress, WSOL_MINT, TOKEN_PROGRAM_ID, EXTERNAL_ASSET } from '../../onchain/router/adapters/solana.js';
 import type { AdapterCapabilities, ApprovalSignature, AssetVerification, DealCommitment, OnChainDealState, ParticipantStepProvider, RegisterResult, SettlementAdapter, TxRef, TxStatus } from '../types.js';
 import { buildVerumTerms, statusFromTradeState, depositsOf, bindingOf, ROLE_TO_ONCHAIN, ROLE_ALREADY_ADVANCED, type VerumAdapterDeps, type VerumMeta } from './common.js';
 import type { SolanaSettings } from '../../config.js';
@@ -103,12 +103,12 @@ export class VerumSolanaAdapter implements SettlementAdapter, ParticipantStepPro
   }
   private async verumTermsOf(dealId: string, c: DealCommitment | null, meta: VerumMeta): Promise<VerumTerms> {
     // Terms são determinísticos: commitment + createdAt persistido em meta ⇒ mesmos bytes/tradeId.
-    if (c) return buildVerumTerms(c, Number(this.cfg.chainId) as ChainId, this.cfg.programId, meta.onChainCreatedAt, SOLANA_ABSENT_PM);
+    if (c) return buildVerumTerms(c, Number(this.cfg.chainId) as ChainId, this.cfg.programId, meta.onChainCreatedAt, SOLANA_ABSENT_PM, EXTERNAL_ASSET);
     const deal = await this.deps.getDeal(dealId) as unknown as { terms: DealCommitment['terms']; hash: { dealHash: string; pricingHash: string; routeHash: string; domainHash: string }; revision: number } | null;
     if (!deal?.terms || !deal.hash) throw new DomainError('SETTLEMENT_NOT_ALLOWED', 'termos indisponíveis para reconstruir a trade Solana');
     const t = deal.terms;
     const commitment: DealCommitment = { dealId, revision: deal.revision, dealHash: deal.hash.dealHash, expiresAt: t.expiresAt, participants: t.participants, legs: t.legs, pricingHash: deal.hash.pricingHash, routeHash: deal.hash.routeHash, domainHash: deal.hash.domainHash, dealNonce: t.dealNonce, feeBps: t.pricing.platformFeeBps, treasury: '', terms: t };
-    return buildVerumTerms(commitment, Number(this.cfg.chainId) as ChainId, this.cfg.programId, meta.onChainCreatedAt, SOLANA_ABSENT_PM);
+    return buildVerumTerms(commitment, Number(this.cfg.chainId) as ChainId, this.cfg.programId, meta.onChainCreatedAt, SOLANA_ABSENT_PM, EXTERNAL_ASSET);
   }
 
   // htlc:true + escrowNN:true — o router liga a perna HTLC SÓ em rota cross-chain (vendedor aqui,
@@ -212,7 +212,7 @@ export class VerumSolanaAdapter implements SettlementAdapter, ParticipantStepPro
     }
     try {
       const now = await this.inner.now();
-      const terms = buildVerumTerms(c, Number(this.cfg.chainId) as ChainId, this.cfg.programId, now, SOLANA_ABSENT_PM);
+      const terms = buildVerumTerms(c, Number(this.cfg.chainId) as ChainId, this.cfg.programId, now, SOLANA_ABSENT_PM, EXTERNAL_ASSET);
       if (terms.sellerAmount > 0xffffffffffffffffn || terms.buyerAmount > 0xffffffffffffffffn) throw new DomainError('INVALID_INPUT', 'quantias excedem u64 (Solana)');
       const { tradeId, termsHash } = this.inner.computeIds(terms);
       await this.ensureAttested([terms.seller, terms.paymaster01, terms.paymaster02, terms.buyer].filter(w => w !== SOLANA_ABSENT_PM), terms.expiresAt + 3600);
@@ -261,6 +261,8 @@ export class VerumSolanaAdapter implements SettlementAdapter, ParticipantStepPro
       const terms = await this.verumTermsOf(dealId, null, b.meta);
       const seller = legIndex === 0;
       const mint = seller ? terms.sellerAsset : terms.buyerAsset;
+      // Perna EXTERNA cross-chain (BTC): não há depósito na Solana — custódia é o P2WSH na outra rede.
+      if (mint === EXTERNAL_ASSET) return this.ref('external-leg-no-solana-deposit');
       const native = mint === SOLANA_ABSENT_PM; // perna NATIVA: saldo em lamports, sem ATA
       const need = seller ? terms.sellerAmount + computeFee(terms.sellerAmount, terms.platformFeeBps) : terms.buyerAmount + terms.commissionPm1 + terms.commissionPm2;
       const bal = await this.getBalance(from, { contractOrMint: native ? null : mint, network: 'solana' } as CanonicalAsset);
@@ -319,7 +321,12 @@ export class VerumSolanaAdapter implements SettlementAdapter, ParticipantStepPro
     const trade = await this.inner.getTrade(b.meta.tradeId);
     if (trade?.state === TradeState.SETTLED) throw new DomainError('SETTLEMENT_ALREADY_EXECUTED', 'trade já liquidada on-chain');
     try {
-      const unsigned = await this.inner.buildSettle(b.meta.tradeId);
+      // Cross-chain (htlcHash nos termos): settle_xchain EXIGE a preimage (revela on-chain e destrava
+      // a perna BTC); mesa normal/nativa ignora o arg.
+      const onchainTerms = await this.verumTermsOf(dealId, null, b.meta).catch(() => null);
+      const needPreimage = !!onchainTerms?.htlcHash;
+      if (needPreimage && (!preimage || !/^[0-9a-f]{2,128}$/i.test(preimage))) throw new DomainError('SETTLEMENT_NOT_ALLOWED', 'settle_xchain exige a preimage (sha256) do swap BTC↔Solana');
+      const unsigned = await this.inner.buildSettle(b.meta.tradeId, needPreimage ? preimage!.toLowerCase() : undefined);
       const r = await this.inner.submitAsExecutor(unsigned);
       const conf = await this.inner.waitForConfirmation(r.txHash, 90_000);
       if (conf.status !== 'CONFIRMED') throw new Error(`settle não confirmado (${conf.status}): ${conf.reason ?? r.txHash}`);

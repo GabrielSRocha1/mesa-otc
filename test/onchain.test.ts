@@ -138,7 +138,7 @@ describe('onchain/crypto solana — layout borsh determinístico', () => {
     paymaster01: '4Nd1mBQtrMJVYVfKf2PJy9NZUZdTAsp7D4xWLs4gDB4T', paymaster02: 'GkVvdvAvo3g4VxKyGThLByzePKktuMAAN9vhNyQXuo4z',
     sellerAsset: 'Es9vMFrzaCERmJfrF4H2FYD4KCoNkY11McCe8BenwNYB', buyerAsset: SOL,
   });
-  it('serialização tem 260 bytes (Terms::SERIALIZED_LEN em Rust — v2: +commissionPm1/Pm2)', () => expect(serializeTermsSolana(t).length).toBe(260));
+  it('serialização tem 292 bytes (Terms::SERIALIZED_LEN em Rust — v3: +htlcHash)', () => expect(serializeTermsSolana(t).length).toBe(292));
   it('campos little-endian nas posições esperadas', () => {
     const b = serializeTermsSolana(t);
     const dv = new DataView(b.buffer, b.byteOffset, b.byteLength);

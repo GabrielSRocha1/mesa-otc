@@ -116,7 +116,7 @@ describe('Contrato on-chain · superfície segura do ABI e layout determinístic
     }
   });
 
-  it('Solana: serialização borsh dos termos é determinística e de tamanho fixo (260 bytes — termos v2)', () => {
+  it('Solana: serialização borsh dos termos é determinística e de tamanho fixo (292 bytes — termos v3)', () => {
     // serializeTermsSolana exige pubkeys base58 (não endereços EVM 0x…).
     const t = makeTerms({
       chainId: 103, escrowAddress: 'ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL',
@@ -125,7 +125,7 @@ describe('Contrato on-chain · superfície segura do ABI e layout determinístic
       sellerAsset: 'Es9vMFrzaCERmJfrF4H2FYD4KCoNkY11McCe8BenwNYB', buyerAsset: 'So11111111111111111111111111111111111111112',
     });
     const a = serializeTermsSolana(t); const b = serializeTermsSolana(t);
-    expect(a.length).toBe(260);
+    expect(a.length).toBe(292);
     expect(Buffer.from(a).equals(Buffer.from(b))).toBe(true); // determinístico
     const id1 = computeTradeIdSolana('So11111111111111111111111111111111111111112', hashTermsSolana(t));
     const id2 = computeTradeIdSolana('TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA', hashTermsSolana(t));

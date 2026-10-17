@@ -475,7 +475,10 @@ export async function buildApi(deps: ApiDeps): Promise<FastifyInstance> {
     const btcChair = btcBuyer ? buyerChair : sellerChair;       // tranca BTC no HTLC P2WSH
     const tokenChair = btcBuyer ? sellerChair : buyerChair;     // deposita token no escrow EVM
     const tokenNet = tokenChair.expectedAsset.network;
-    if (tokenNet !== 'ethereum') throw new DomainError('SETTLEMENT_NOT_ALLOWED', `Perna de contrato em ${tokenNet} ainda não é suportada no fluxo BTC da mesa: o lado NÃO-BTC precisa de um escrow que revele a preimage; hoje só o escrow V2 (Ethereum) faz isso (Solana exigiria fluxo de dois HTLCs; Tron não tem hashlock no contrato)`);
+    // Perna de contrato na SOLANA (escrow N-de-N com hashlock = settle_xchain): fluxo dedicado — o
+    // escrow Solana revela a preimage no settle, ancorando as 4 assinaturas on-chain (ADR-v5).
+    if (tokenNet === 'solana') return createMesaBtcSolanaDeal(mesa, b, onCreated);
+    if (tokenNet !== 'ethereum') throw new DomainError('SETTLEMENT_NOT_ALLOWED', `Perna de contrato em ${tokenNet} ainda não é suportada no fluxo BTC da mesa: o lado NÃO-BTC precisa de um escrow que revele a preimage; hoje escrow V2 (Ethereum) e escrow N-de-N com hashlock (Solana) fazem isso (Tron não tem hashlock no contrato)`);
     const btcAdapter = adapters.get('bitcoin'); const evmAdapter = adapters.get('ethereum');
     if (!btcAdapter || !evmAdapter) throw new DomainError('SETTLEMENT_NOT_ALLOWED', 'Adaptadores bitcoin/ethereum ausentes');
     const btcLabel = btcBuyer ? 'Comprador' : 'Vendedor'; const tokenLabel = btcBuyer ? 'Vendedor' : 'Comprador';
@@ -599,6 +602,84 @@ export async function buildApi(deps: ApiDeps): Promise<FastifyInstance> {
     const evmMeta = dealNow?.onChain?.ethereum?.meta as Record<string, unknown> | undefined;
     const registerTx = evmMeta?.registerPending && typeof evmMeta.registerTx === 'string' ? JSON.parse(evmMeta.registerTx) as Record<string, unknown> : null;
     return { ...await mesaDealView(dealNow), htlcFunding, registerTx };
+  };
+
+  /**
+   * Criação da Deal BTC↔SOLANA (ADR-v5): a perna Solana é um TOKEN SPL no escrow N-de-N COM HASHLOCK
+   * (settle_xchain) e o BTC é a perna EXTERNA (P2WSH). As 4 assinaturas acontecem NA SOLANA (todos os
+   * papéis com endereço Solana), ancorando a autorização on-chain; o settle_xchain revela a preimage
+   * que destrava o BTC. Espelha createMesaHtlcDeal trocando o escrow EVM pelo escrow Solana.
+   */
+  const createMesaBtcSolanaDeal = async (mesa: MesaRecord, b: MesaDealBody, onCreated: (dealId: string) => void) => {
+    const adapters = deps.adapters;
+    if (!adapters) throw new DomainError('SETTLEMENT_NOT_ALLOWED', 'Operação BTC↔Solana indisponível: adaptadores de rede não configurados');
+    const plan = deriveSettlementPlan(mesa.chairs);
+    if (plan?.mode !== 'HTLC_BTC') throw new DomainError('INVALID_INPUT', 'Mesa sem perna de BTC nativo');
+    const sellerChair = mesa.chairs.find(c => c.role === 'SELLER') as MesaChair;
+    const buyerChair = mesa.chairs.find(c => c.role === 'BUYER') as MesaChair;
+    const pm1Chair = mesa.chairs.find(c => c.role === 'PAYMASTER_1');
+    const pm2Chair = mesa.chairs.find(c => c.role === 'PAYMASTER_2');
+    if (!pm1Chair?.wallet) throw new DomainError('SETTLEMENT_NOT_ALLOWED', 'Operação BTC↔Solana pela mesa exige a cadeira Pay Master 1 conectada');
+    const btcBuyer = plan.htlc?.btcSide === 'BUYER';
+    const btcChair = btcBuyer ? buyerChair : sellerChair;       // tranca BTC no HTLC P2WSH (perna externa)
+    const tokenChair = btcBuyer ? sellerChair : buyerChair;     // deposita o token SPL no escrow Solana
+    const solAdapter = adapters.get('solana'); const btcAdapter = adapters.get('bitcoin');
+    if (!solAdapter || !btcAdapter) throw new DomainError('SETTLEMENT_NOT_ALLOWED', 'Adaptadores solana/bitcoin ausentes');
+    if (!tokenChair.expectedAsset.contractOrMint) throw new DomainError('SETTLEMENT_NOT_ALLOWED', 'v1 BTC↔Solana exige TOKEN SPL na perna Solana (SOL nativo↔BTC é follow-up)');
+    const btcLabel = btcBuyer ? 'Comprador' : 'Vendedor'; const tokenLabel = btcBuyer ? 'Vendedor' : 'Comprador';
+    const motivos: string[] = [];
+    // TODOS assinam na Solana → todos precisam de endereço Solana na carteira multichain.
+    const sellerSol = addressOn(sellerChair, 'solana'); if (!sellerSol || !solAdapter.validateAddress(sellerSol)) motivos.push('Vendedor: carteira sem endereço Solana válido');
+    const buyerSol = addressOn(buyerChair, 'solana'); if (!buyerSol || !solAdapter.validateAddress(buyerSol)) motivos.push('Comprador: carteira sem endereço Solana válido');
+    const pm1Sol = addressOn(pm1Chair, 'solana'); if (!pm1Sol || !solAdapter.validateAddress(pm1Sol)) motivos.push('Pay Master 1: carteira sem endereço Solana válido');
+    const pm2Sol = pm2Chair?.wallet ? addressOn(pm2Chair, 'solana') : null;
+    if (pm2Chair?.wallet && (!pm2Sol || !solAdapter.validateAddress(pm2Sol))) motivos.push('Pay Master 2: carteira sem endereço Solana válido');
+    // Perna externa BTC: quem tranca precisa de endereço Bitcoin; a CONTRAPARTE (faz o claim) também.
+    const btcAddr = addressOn(btcChair, 'bitcoin'); if (!btcAddr || !btcAdapter.validateAddress(btcAddr)) motivos.push(`${btcLabel}: carteira sem endereço Bitcoin válido`);
+    const counterBtc = addressOn(tokenChair, 'bitcoin'); if (!counterBtc || !btcAdapter.validateAddress(counterBtc)) motivos.push(`${tokenLabel}: carteira sem endereço Bitcoin (recebe/reclama o BTC do HTLC)`);
+    if (!mesa.config?.amountInBase) motivos.push('Configuração: quantidade não definida');
+    if (motivos.length) throw new DomainError('VERSION_CONFLICT', 'Não foi possível criar a operação BTC↔Solana', { motivos });
+    const btcAsset = { network: 'bitcoin', chainId: btcAdapter.chain.chainId, contractOrMint: null };
+    const solAsset = { network: 'solana', chainId: solAdapter.chain.chainId, contractOrMint: tokenChair.expectedAsset.contractOrMint };
+    // Participantes TODOS na Solana (assinatura do escrow N-de-N); os endereços BTC são resolvidos
+    // pela carteira multichain (btcAddressOf) na perna externa — não precisam estar aqui.
+    const participants = [
+      { role: 'SELLER', network: 'solana', chainId: solAdapter.chain.chainId, address: sellerSol },
+      { role: 'PAYMASTER_1', network: 'solana', chainId: solAdapter.chain.chainId, address: pm1Sol },
+      ...(pm2Sol ? [{ role: 'PAYMASTER_2', network: 'solana', chainId: solAdapter.chain.chainId, address: pm2Sol }] : []),
+      { role: 'BUYER', network: 'solana', chainId: solAdapter.chain.chainId, address: buyerSol },
+    ];
+    const input = {
+      assetIn: btcBuyer ? solAsset : btcAsset,   // btcSide SELLER: vende BTC; btcSide BUYER: vende token Solana
+      assetOut: btcBuyer ? btcAsset : solAsset,
+      amountInBase: mesa.config!.amountInBase as string, discountBps: b.discountBps, commissionBps: b.commissionBps, commissionSplitBps: b.commissionSplitBps,
+      maxSlippageBps: b.maxSlippageBps, maxPriceDriftBps: 500, expiresInSec: b.expiresInSec,
+      participants,
+    };
+    const creator = sellerSol as string;
+    const created = await deps.deals.create(input, creator);
+    onCreated(created.id); // linka ANTES do open: o registro resolve endereços BTC das contrapartes pela mesa
+    for (const p of participants) if (p.role !== 'SELLER') await deps.deals.connectWallet(created.id, p.role as Role, p.address as string, p.address as string);
+    await deps.deals.open(created.id, creator); // registra: create_trade (Solana, htlc_hash) + derivação do cofre (BTC)
+    // Funding: a perna de TOKEN é custodiada no seller_sign/buyer_sign (deposit = checagem de saldo);
+    // a perna BTC é o LOCK EXTERNO (P2WSH) — o fund devolve o endereço do cofre.
+    const tokenRole: Role = btcBuyer ? 'SELLER' : 'BUYER';
+    const btcRole: Role = btcBuyer ? 'BUYER' : 'SELLER';
+    let htlcFunding: { address: string; requiredSat: string } | null = null;
+    try { await deps.deals.fund(created.id, tokenRole, (btcBuyer ? sellerSol : buyerSol) as string); } catch (e) { logger.warn({ dealId: created.id, err: (e as Error).message }, 'funding da perna de token Solana pendente'); }
+    try { await deps.deals.fund(created.id, btcRole, btcAddr as string); }
+    catch (e) {
+      const err = e as DomainError;
+      if (err.code === 'FUNDING_REQUIRED' && err.details?.address) htlcFunding = { address: String(err.details.address), requiredSat: String(err.details.requiredSat ?? mesa.config!.amountInBase) };
+      else logger.warn({ dealId: created.id, err: err.message }, 'lock BTC pendente');
+    }
+    await deps.audit.append({ actorType: 'user', actorId: mesa.payMasterId, category: 'portal.mesa.deal.created', dealId: created.id, payload: { mode: btcBuyer ? 'btc-solana-comprador' : 'btc-solana', vault: htlcFunding?.address ?? null } });
+    const dealNow = await deps.deals.get(created.id);
+    if (!htlcFunding) {
+      const btcMeta = dealNow?.onChain?.bitcoin?.meta as Record<string, unknown> | undefined;
+      if (typeof btcMeta?.htlcAddress === 'string') htlcFunding = { address: btcMeta.htlcAddress, requiredSat: String(mesa.config!.amountInBase) };
+    }
+    return { ...await mesaDealView(dealNow), htlcFunding };
   };
 
   /** Criação de deal ESCROW_DIRECT (v4): Vendedor e Comprador NA MESMA REDE, ambos com TOKEN
