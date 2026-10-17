@@ -3512,8 +3512,27 @@ window.addEventListener('unhandledrejection',function(e){try{console.warn('[veru
         pReentry('Sua sessão não corresponde ao seu papel nesta operação (a rede/carteira mudou). Reconecte a Verum Wallet para assinar.');
         return;
       }
-      toast(e.message||'Falha ao assinar','err'); if(btn){ btn.disabled=false; btn.textContent='Assinar e continuar'; }
+      // Erro PERSISTENTE e copiável (o toast some em ~3s — inviável de ler/printar no dapp-browser do
+      // celular). Mostra código + mensagem + etapa pra diagnosticar exatamente onde a assinatura falhou.
+      pErrBox('Falha ao assinar', ((e&&e.code)?('['+e.code+'] '):'')+((e&&e.message)||String(e))); if(btn){ btn.disabled=false; btn.textContent='Assinar e continuar'; }
     }
+  }
+  // Caixa de erro PERSISTENTE (não some como o toast): a pessoa consegue LER e PRINTAR a mensagem
+  // exata — essencial no celular/dapp-browser pra diagnosticar a falha.
+  function pErrBox(title,msg){
+    var old=document.getElementById('pErrBox'); if(old) old.remove();
+    var el=document.createElement('div'); el.id='pErrBox';
+    el.style.cssText='position:fixed;inset:0;background:rgba(2,6,16,.82);z-index:95;display:grid;place-items:center;padding:16px';
+    el.innerHTML='<div style="background:var(--card);border:1px solid #b91c1c;border-radius:16px;max-width:460px;width:100%;padding:24px">'
+      +'<div style="font-family:var(--f-head);font-weight:800;font-size:17px;margin-bottom:10px;color:#fecaca">'+esc(title)+'</div>'
+      +'<div style="font-size:13px;color:var(--ink-2);white-space:pre-wrap;word-break:break-word;background:var(--bg-2);border:1px solid var(--line);border-radius:10px;padding:12px;max-height:40vh;overflow:auto">'+esc(msg)+'</div>'
+      +'<div style="display:flex;gap:8px;margin-top:14px">'
+      +'<button class="btn" id="pErrCopy" style="flex:1;height:42px">Copiar erro</button>'
+      +'<button class="btn btn-primary" id="pErrClose" style="flex:1;height:42px">Fechar</button>'
+      +'</div></div>';
+    document.body.appendChild(el);
+    var c=$('#pErrCopy'); if(c) c.addEventListener('click',function(){ try{ clip(title+': '+msg); toast('Erro copiado','ok'); }catch(e){} });
+    var x=$('#pErrClose'); if(x) x.addEventListener('click',function(){ el.remove(); });
   }
   let pReentering=false, pStarted=false;
   // Web Push "é sua vez de assinar": inscreve a carteira deste participante (best-effort; se o
