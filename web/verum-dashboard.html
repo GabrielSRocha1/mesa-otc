@@ -3390,7 +3390,7 @@ window.addEventListener('unhandledrejection',function(e){try{console.warn('[veru
       const bv=$('#pVaultCheck'); if(bv) bv.addEventListener('click',async function(){
         bv.disabled=true; bv.textContent='Verificando na rede…';
         try{ await pApi('/v1/deals/'+encodeURIComponent(d.id)+'/legs/'+d.htlcVault.legIndex+'/deposit',{method:'POST',idem:'fund-'+d.id+'-'+me.role}); toast('Depósito confirmado ✓','ok'); pRefresh(); }
-        catch(e){ pErrBox('Depósito ainda pendente',((e&&e.code)?('['+e.code+'] '):'')+((e&&e.message)||String(e))); }
+        catch(e){ if(pStaleSession(e)) return; pErrBox('Depósito ainda pendente',((e&&e.code)?('['+e.code+'] '):'')+((e&&e.message)||String(e))); }
         finally{ bv.disabled=false; bv.textContent='Já enviei — verificar'; }
       });
     }
@@ -3403,7 +3403,7 @@ window.addEventListener('unhandledrejection',function(e){try{console.warn('[veru
         await pOnchainStep(d,function(t){ bdep.textContent=t; },'deposit');
         if(myFund.legIndex!=null) await pApi('/v1/deals/'+encodeURIComponent(d.id)+'/legs/'+myFund.legIndex+'/deposit',{method:'POST',idem:'fund-'+d.id+'-'+me.role});
         toast('Depósito no escrow confirmado ✓','ok'); pRefresh();
-      }catch(e){ pErrBox('Falha no depósito',((e&&e.code)?('['+e.code+'] '):'')+((e&&e.message)||String(e))); }
+      }catch(e){ if(pStaleSession(e)) return; pErrBox('Falha no depósito',((e&&e.code)?('['+e.code+'] '):'')+((e&&e.message)||String(e))); }
       finally{ bdep.disabled=false; bdep.textContent='Depositar no escrow agora'; }
     });
     const myTurn=d&&d.state==='AWAITING_SIGNATURES'&&d.turnRole===me.role&&!(d.signed||[]).includes(me.role);
@@ -3603,19 +3603,23 @@ window.addEventListener('unhandledrejection',function(e){try{console.warn('[veru
       await pApi('/v1/deals/'+encodeURIComponent(d.id)+'/approvals',{method:'POST',idem:'mesa-sign-'+d.id+'-'+(pDto.viewer&&pDto.viewer.role),body:{ role:pDto.viewer.role, signature, nonce:env.payload.nonce }});
       closeModal(); toast('Assinatura registrada ✓','ok'); pRefresh();
     }catch(e){
-      // Sessão STALE: token de reentrada emitido para outra rede/config do papel (ex.: a cadeira era
-      // Solana e virou BTC) ⇒ o endereço autenticado não casa com o participante do deal. Descarta o
-      // token e força nova reentrada — que renasce no endereço certo do papel e passa a assinar.
-      if(e&&e.code==='NOT_PARTICIPANT'){
-        try{ sessionStorage.removeItem('verum_mesa_pt_'+P_MESA); localStorage.removeItem('verum_mesa_pt_'+P_MESA); }catch(x){}
-        P_TOK=''; closeModal();
-        pReentry('Sua sessão não corresponde ao seu papel nesta operação (a rede/carteira mudou). Reconecte a Verum Wallet para assinar.');
-        return;
-      }
+      if(pStaleSession(e)) return;
       // Erro PERSISTENTE e copiável (o toast some em ~3s — inviável de ler/printar no dapp-browser do
       // celular). Mostra código + mensagem + etapa pra diagnosticar exatamente onde a assinatura falhou.
       pErrBox('Falha ao assinar', ((e&&e.code)?('['+e.code+'] '):'')+((e&&e.message)||String(e))); if(btn){ btn.disabled=false; btn.textContent='Assinar e continuar'; }
     }
+  }
+  // Sessão STALE: token de reentrada emitido para outra rede/config do papel (ex.: sessão Solana
+  // num papel que vive na Ethereum/Bitcoin) ⇒ o endereço autenticado não casa com o participante
+  // do deal e QUALQUER chamada autenticada (assinar, depositar, verificar cofre) devolve
+  // NOT_PARTICIPANT. Cura única: descarta o token e força a reentrada — que renasce na rede/
+  // endereço certos do papel. Usada no pSign e nos botões de depósito.
+  function pStaleSession(e){
+    if(!(e&&e.code==='NOT_PARTICIPANT')) return false;
+    try{ sessionStorage.removeItem('verum_mesa_pt_'+P_MESA); localStorage.removeItem('verum_mesa_pt_'+P_MESA); }catch(x){}
+    P_TOK=''; closeModal();
+    pReentry('Sua sessão não corresponde ao seu papel nesta operação (a rede/carteira mudou). Reconecte a Verum Wallet para continuar.');
+    return true;
   }
   // Caixa de erro PERSISTENTE (não some como o toast): a pessoa consegue LER e PRINTAR a mensagem
   // exata — essencial no celular/dapp-browser pra diagnosticar a falha.
