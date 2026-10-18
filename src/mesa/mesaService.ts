@@ -668,7 +668,7 @@ export class MesaService {
       // Estado de DEPÓSITO por papel + cofre HTLC (quando a rota tem perna BTC externa). Sem isso,
       // o participante que precisa trancar BTC não tinha COMO saber o endereço do cofre nem quanto
       // enviar — batia em FUNDING_REQUIRED na assinatura sem instrução nenhuma na tela.
-      funding: deal.participants.filter(p => p.fundingRequired).map(p => ({ role: p.role, status: p.funding ?? 'PENDING' })),
+      funding: deal.participants.filter(p => p.fundingRequired).map(p => ({ role: p.role, status: p.funding ?? 'PENDING', legIndex: deal.terms?.legs.find(l => l.from === p.role)?.index ?? null })),
       htlcVault: (() => {
         const leg = deal.terms?.legs.find(l => l.mode === 'HTLC' && l.escrowChain === 'bitcoin');
         if (!leg) return null;

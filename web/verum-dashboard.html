@@ -3365,7 +3365,14 @@ window.addEventListener('unhandledrejection',function(e){try{console.warn('[veru
         +'<div style="font-size:11.5px;color:var(--ink-3);margin-top:6px">Na rota HTLC o depósito da contraparte no escrow confirma primeiro; a verificação cobre as duas pernas.</div>'
         +'</div>';
     } else if(myFund){
-      fundHtml='<div style="margin-top:10px;font-size:12.5px;color:var(--amber)">Depósito no escrow pendente para o seu papel — a sua carteira completa em "Revisar e assinar".</div>';
+      // Perna de TOKEN (escrow EVM/Solana/Tron ou lock HTLC Solana): a carteira consegue depositar
+      // AGORA, antes da vez de assinar — obrigatório na rota HTLC (a perna de contrato financia
+      // primeiro) e inofensivo nas demais (o depósito é idempotente).
+      fundHtml='<div style="margin-top:12px;padding:12px;border:1px solid var(--amber);border-radius:10px">'
+        +'<b style="color:var(--amber)">Depósito no escrow pendente</b>'
+        +'<div style="font-size:12.5px;color:var(--ink-2);margin-top:4px">Seu papel deposita no contrato da operação. Você pode fazer isso agora pela Verum Wallet — não precisa esperar sua vez de assinar.</div>'
+        +'<button class="btn btn-primary btn-block" id="pEscrowDep" style="height:44px;margin-top:8px">Depositar no escrow agora</button>'
+        +'</div>';
     }
     $('#pSigns').innerHTML=(d?('Ordem: Vendedor → Pay Master 1'+((m.chairs||[]).some(c=>c.role==='PAYMASTER_2')?' → Pay Master 2':'')+' → Comprador'
       +(d.turnRole?('<br>Vez atual: <b>'+esc(M3_ROLE[d.turnRole]||d.turnRole)+'</b>'):'')) : 'A coleta de assinaturas começa após a aprovação do Pay Master.')
@@ -3380,6 +3387,18 @@ window.addEventListener('unhandledrejection',function(e){try{console.warn('[veru
         finally{ bv.disabled=false; bv.textContent='Já enviei — verificar'; }
       });
     }
+    const bdep=$('#pEscrowDep');
+    if(bdep&&myFund) bdep.addEventListener('click',async function(){
+      bdep.disabled=true; bdep.textContent='Preparando depósito…';
+      try{
+        // 1) Passo on-chain do papel pela carteira (approve+deposit EVM / tx Solana);
+        // 2) re-checa no backend e marca FINAL (mesma verificação da assinatura).
+        await pOnchainStep(d,function(t){ bdep.textContent=t; });
+        if(myFund.legIndex!=null) await pApi('/v1/deals/'+encodeURIComponent(d.id)+'/legs/'+myFund.legIndex+'/deposit',{method:'POST',idem:'fund-'+d.id+'-'+me.role});
+        toast('Depósito no escrow confirmado ✓','ok'); pRefresh();
+      }catch(e){ pErrBox('Falha no depósito',((e&&e.code)?('['+e.code+'] '):'')+((e&&e.message)||String(e))); }
+      finally{ bdep.disabled=false; bdep.textContent='Depositar no escrow agora'; }
+    });
     const myTurn=d&&d.state==='AWAITING_SIGNATURES'&&d.turnRole===me.role&&!(d.signed||[]).includes(me.role);
     $('#pSignBtn').style.display=myTurn?'':'none';
     // POP-UP para o PARTICIPANTE fora da vez: a cada avanço da rodada mostra quem está assinando
@@ -3524,32 +3543,40 @@ window.addEventListener('unhandledrejection',function(e){try{console.warn('[veru
     if(net==='bitcoin'||net==='tron'){ const p=solProvider(); if(!p||typeof p.signPersonalMessage!=='function') throw new Error('Esta Verum Wallet não expõe assinatura '+net+'. Atualize a carteira.'); try{ await p.connect(); }catch(e){} /* endereço-alvo → Verum deriva a chave BTC pelo tipo do endereço (tb1=testnet/bc1=mainnet), não pelo toggle global */ const cap=startSigCapture(); try{ const rr=await withSigTimeout(p.signPersonalMessage(net,message,address),net); const sig=(rr&&rr.signature!==undefined)?rr.signature:rr; if(!sig) throw new Error('A Verum Wallet não devolveu a assinatura '+net+'.'+cap.dump()); return sig; }catch(e){ if(e&&e.message&&e.message.indexOf('[diag]')<0) e.message+=cap.dump(); throw e; } finally{ cap.stop(); } }
     throw new Error('Rede de reentrada não suportada: '+net);
   }
+  // Passo ON-CHAIN pela própria carteira (escrow real): Solana assina a PRÓPRIA transação
+  // (seller_sign/buyer_sign/htlc_lock) e a EVM faz approve + signV2. Em modo simulado o endpoint
+  // responde 'automático' e seguimos em frente. FATORADO para servir dois chamadores: o "Assinar e
+  // continuar" (pSign) e o botão "Depositar no escrow agora" do card de depósito — na rota HTLC a
+  // perna de contrato precisa ser financiada ANTES da vez de assinar do papel.
+  async function pOnchainStep(d,setStatus){
+    const st=setStatus||function(){};
+    try{
+      const step=await pApi('/v1/deals/'+encodeURIComponent(d.id)+'/onchain-tx');
+      if(step&&step.kind==='solana'&&step.transactionBase64){
+        const prov=solProvider();
+        if(!prov||typeof prov.signTransaction!=='function') throw new Error('Esta versão da Verum Wallet não assina transações — atualize o app');
+        // Sessão restaurada do storage não passou pela reentrada: o provider ainda não tem
+        // connect() — sem isso o signTransaction recusa com "carteira não conectada".
+        try{ await prov.connect(); }catch(e){}
+        st('Confirme na Verum Wallet…');
+        const raw=Uint8Array.from(atob(step.transactionBase64),c=>c.charCodeAt(0));
+        const signed=await prov.signTransaction(raw);
+        const toB64=(x)=>{ if(typeof x==='string') return x; const u=x instanceof Uint8Array?x:(x&&typeof x.serialize==='function'?x.serialize():Uint8Array.from(x)); let s=''; for(const b of u) s+=String.fromCharCode(b); return btoa(s); };
+        st('Enviando à rede…');
+        const bo=await pApi('/v1/deals/'+encodeURIComponent(d.id)+'/onchain-tx',{method:'POST',idem:d.id+':'+(pDto.viewer&&pDto.viewer.role)+':onchain',body:{signedTransactionBase64:toB64(signed)}});
+        toast('Transação confirmada on-chain · '+((bo&&bo.txHash)?shortAddr(bo.txHash):''),'ok');
+      } else if(step&&step.kind==='evm'){
+        st('Confirme na Verum Wallet…');
+        await evmOnchainStep(step, body=>pApi('/v1/deals/'+encodeURIComponent(d.id)+'/onchain-tx',{method:'POST',body}));
+      }
+    }catch(e){ if(!/simulado|autom/i.test(e.message||'')) throw e; }
+  }
   async function pSign(){
     const btn=$('#pRvSign'); if(btn){ btn.disabled=true; btn.textContent='Assinando na Verum Wallet…'; }
     try{
       const d=pDto.deal;
-      // 1) Passo ON-CHAIN pela própria carteira (escrow real): Solana assina a PRÓPRIA transação
-      //    (seller_sign/buyer_sign/htlc_lock) e a EVM faz approve + signV2. Em modo simulado o
-      //    endpoint responde 'automático' e seguimos direto para a assinatura da mesa.
-      try{
-        const step=await pApi('/v1/deals/'+encodeURIComponent(d.id)+'/onchain-tx');
-        if(step&&step.kind==='solana'&&step.transactionBase64){
-          const prov=solProvider();
-          if(!prov||typeof prov.signTransaction!=='function') throw new Error('Esta versão da Verum Wallet não assina transações — atualize o app');
-          // Sessão restaurada do storage não passou pela reentrada: o provider ainda não tem
-          // connect() — sem isso o signTransaction recusa com "carteira não conectada".
-          try{ await prov.connect(); }catch(e){}
-          if(btn) btn.textContent='Confirme na Verum Wallet…';
-          const raw=Uint8Array.from(atob(step.transactionBase64),c=>c.charCodeAt(0));
-          const signed=await prov.signTransaction(raw);
-          const toB64=(x)=>{ if(typeof x==='string') return x; const u=x instanceof Uint8Array?x:(x&&typeof x.serialize==='function'?x.serialize():Uint8Array.from(x)); let s=''; for(const b of u) s+=String.fromCharCode(b); return btoa(s); };
-          if(btn) btn.textContent='Enviando à rede…';
-          const bo=await pApi('/v1/deals/'+encodeURIComponent(d.id)+'/onchain-tx',{method:'POST',idem:d.id+':'+(pDto.viewer&&pDto.viewer.role)+':onchain',body:{signedTransactionBase64:toB64(signed)}});
-          toast('Transação confirmada on-chain · '+((bo&&bo.txHash)?shortAddr(bo.txHash):''),'ok');
-        } else if(step&&step.kind==='evm'){
-          await evmOnchainStep(step, body=>pApi('/v1/deals/'+encodeURIComponent(d.id)+'/onchain-tx',{method:'POST',body}));
-        }
-      }catch(e){ if(!/simulado|autom/i.test(e.message||'')) throw e; }
+      // 1) Passo ON-CHAIN pela própria carteira (escrow real).
+      await pOnchainStep(d,function(t){ if(btn) btn.textContent=t; });
       // 2) Assinatura da MESA (auditoria) no esquema da rede do papel.
       const env=await pApi('/v1/deals/'+encodeURIComponent(d.id)+'/approval-envelope');
       const signature=await pSignEnvelope(env);
