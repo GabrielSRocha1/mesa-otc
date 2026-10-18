@@ -1537,7 +1537,10 @@ window.addEventListener('unhandledrejection',function(e){try{console.warn('[veru
   /** Executa o passo da vez devolvido por /onchain-tx|/deal/step: approve ERC-20 (se pendente) +
    *  assinatura EIP-712 do Approval; `submit(body)` envia ao backend — PMs são relayados pelo
    *  keeper, Vendedor/Comprador recebem o txRequest e a própria carteira envia o signV2. */
-  async function evmOnchainStep(step, submit){
+  // APPROVE isolado: no escrow V2 o depósito da perna de token é o ALLOWANCE (o pull acontece no
+  // sign do papel) — o card "Depositar no escrow agora" roda SÓ isto, antes da vez de assinar.
+  // Devolve {p,from} para o evmOnchainStep continuar com o sign quando for a vez de verdade.
+  async function evmApproveOnly(step){
     const p=await findVerumEthProvider(); if(!p) throw new Error('Provider EVM da Verum Wallet não foi injetado nesta aba.');
     const accs=await p.request({method:'eth_requestAccounts'}); const from=accs&&accs[0];
     if(!from) throw new Error('Nenhuma conta EVM na carteira.');
@@ -1546,6 +1549,10 @@ window.addEventListener('unhandledrejection',function(e){try{console.warn('[veru
       const h=await p.request({method:'eth_sendTransaction',params:[{from,to:step.approve.token,data}]});
       await evmWaitReceipt(p,h);
     }
+    return {p,from};
+  }
+  async function evmOnchainStep(step, submit){
+    const {p,from}=await evmApproveOnly(step);
     const sig=await evmSignCascade(p,from,step.typedData,step.digestHex); // v4→v3→personal_sign(digest)
     const res=await submit({signature:sig,deadline:step.deadline});
     if(res&&res.kind==='txRequest'&&res.txRequest){ const h=await p.request({method:'eth_sendTransaction',params:[{from,to:res.txRequest.to,data:res.txRequest.data}]}); await evmWaitReceipt(p,h); }
@@ -3391,9 +3398,9 @@ window.addEventListener('unhandledrejection',function(e){try{console.warn('[veru
     if(bdep&&myFund) bdep.addEventListener('click',async function(){
       bdep.disabled=true; bdep.textContent='Preparando depósito…';
       try{
-        // 1) Passo on-chain do papel pela carteira (approve+deposit EVM / tx Solana);
-        // 2) re-checa no backend e marca FINAL (mesma verificação da assinatura).
-        await pOnchainStep(d,function(t){ bdep.textContent=t; });
+        // 1) Parte que FINANCIA do passo on-chain (approve EVM / lock HTLC Solana — o sign fica
+        //    para a vez de assinar); 2) re-checa no backend e marca FINAL.
+        await pOnchainStep(d,function(t){ bdep.textContent=t; },'deposit');
         if(myFund.legIndex!=null) await pApi('/v1/deals/'+encodeURIComponent(d.id)+'/legs/'+myFund.legIndex+'/deposit',{method:'POST',idem:'fund-'+d.id+'-'+me.role});
         toast('Depósito no escrow confirmado ✓','ok'); pRefresh();
       }catch(e){ pErrBox('Falha no depósito',((e&&e.code)?('['+e.code+'] '):'')+((e&&e.message)||String(e))); }
@@ -3548,10 +3555,17 @@ window.addEventListener('unhandledrejection',function(e){try{console.warn('[veru
   // responde 'automático' e seguimos em frente. FATORADO para servir dois chamadores: o "Assinar e
   // continuar" (pSign) e o botão "Depositar no escrow agora" do card de depósito — na rota HTLC a
   // perna de contrato precisa ser financiada ANTES da vez de assinar do papel.
-  async function pOnchainStep(d,setStatus){
+  async function pOnchainStep(d,setStatus,mode){
     const st=setStatus||function(){};
     try{
       const step=await pApi('/v1/deals/'+encodeURIComponent(d.id)+'/onchain-tx');
+      // Modo DEPÓSITO (antes da vez de assinar): só a parte que FINANCIA — EVM = approve do token
+      // (o pull acontece no sign da vez); Solana escrow = nada on-chain (custódia no sign; o fund é
+      // checagem de saldo); Solana HTLC (purpose htlc_lock) = a própria tx de lock, que É o depósito.
+      if(mode==='deposit'){
+        if(step&&step.kind==='evm'){ st('Aprovando o token (approve)…'); await evmApproveOnly(step); return; }
+        if(!(step&&step.kind==='solana'&&step.purpose==='htlc_lock'&&step.transactionBase64)) return;
+      }
       if(step&&step.kind==='solana'&&step.transactionBase64){
         const prov=solProvider();
         if(!prov||typeof prov.signTransaction!=='function') throw new Error('Esta versão da Verum Wallet não assina transações — atualize o app');
