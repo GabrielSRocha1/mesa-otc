@@ -125,12 +125,20 @@ describe('Signature Engine', () => {
     const r = await signAs(app, d.id, 'BUYER', parts.BUYER); expect(r.count).toBe(3); expect(r.state).toBe('SETTLEMENT_VALIDATION');
     expect((await app.deals.get(d.id)).turnRole).toBeNull(); await app.close();
   });
-  it('janela rolante de 5 min por assinante: se o da vez não assina em 5 min, a Deal expira (turno)', async () => {
+  it('janela rolante de 5 min por assinante: pausa com depósito pendente; depois de financiado, 5 min sem assinar expira', async () => {
     const { app, clock } = await makeApp({ autoSettle: false }); const parts = solParts();
     const d = await prepareDeal(app, parts, { expiresInSec: 10 * 24 * 3600 }); await app.deals.open(d.id, parts.SELLER.address); // teto global folgado
     const opened = await app.deals.get(d.id); expect(opened.turnRole).toBe('SELLER'); expect(opened.turnExpiresAt).toBe(clock.now() + 5 * 60 * 1000);
-    clock.advance(5 * 60 * 1000 + 1000); // Vendedor deixou passar os 5 min dele
-    expect(await app.deals.expireDue()).toContain(d.id); expect((await app.deals.get(d.id)).state).toBe('EXPIRED'); await app.close();
+    // Depósito do Vendedor PENDENTE: a janela NÃO expira a vez (tempo de blockchain não consome o
+    // prazo de assinar) — o teto global continua valendo.
+    clock.advance(5 * 60 * 1000 + 1000);
+    expect(await app.deals.expireDue()).not.toContain(d.id); expect((await app.deals.get(d.id)).state).toBe('AWAITING_SIGNATURES');
+    // Depósito confirma → janela REINICIA; 5 min sem assinar a partir daqui → expira (turno).
+    await app.deals.fund(d.id, 'SELLER', parts.SELLER.address);
+    expect((await app.deals.get(d.id)).turnExpiresAt).toBe(clock.now() + 5 * 60 * 1000);
+    clock.advance(5 * 60 * 1000 + 1000); // Vendedor financiado deixou passar os 5 min dele
+    // Expira o turno e, como há depósito FINAL, a devolução automática dispara (EXPIRED→REFUNDING).
+    expect(await app.deals.expireDue()).toContain(d.id); expect(['REFUNDING', 'REFUNDED']).toContain((await app.deals.get(d.id)).state); await app.close();
   });
   it('Deal alterada após assinaturas: assinaturas invalidadas (superseded), depósitos devolvidos, novo hash, nova revisão', async () => {
     const { app } = await makeApp(); const parts = solParts(); const d = await prepareDeal(app, parts); const h1 = d.hash!.dealHash; await app.deals.open(d.id, parts.SELLER.address);

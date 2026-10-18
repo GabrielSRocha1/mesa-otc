@@ -92,7 +92,16 @@ export class DealEngine {
     if (next) { try { this.d.config.onTurnChange?.(deal); } catch { /* notificação é opcional */ } }
   }
   /** Vez atual expirou (assinante não assinou dentro dos 5 min dele)? */
-  private turnExpired(deal: Deal): boolean { return deal.state === 'AWAITING_SIGNATURES' && deal.turnExpiresAt != null && this.now() >= deal.turnExpiresAt; }
+  private turnExpired(deal: Deal): boolean {
+    if (!(deal.state === 'AWAITING_SIGNATURES' && deal.turnExpiresAt != null && this.now() >= deal.turnExpiresAt)) return false;
+    // A janela mede DEMORA DE ASSINATURA, não tempo de blockchain: enquanto o depósito do
+    // assinante da vez está pendente (ex.: lock BTC aguardando o bloco da testnet, ~10 min >
+    // janela de 5), a vez NÃO expira — o teto global (deal.expiresAt) segue valendo. Quando o
+    // depósito confirma (fund→FINAL), a janela REINICIA do zero para a assinatura em si.
+    const p = deal.participants.find(x => x.role === deal.turnRole);
+    if (p?.fundingRequired && p.funding !== 'FINAL') return false;
+    return true;
+  }
 
   /* ---------- 1. criação ---------- */
   async create(raw: unknown, actor: string): Promise<Deal> {
@@ -211,6 +220,9 @@ export class DealEngine {
       // primeiro e vê o outro lado sumir aguarda o timelock (CSV) para reembolsar via refund.
       try { const tx = await adapter.deposit(deal.id, leg.index, p.address); const st = await adapter.waitFinal(tx.ref); p.funding = st.status === 'final' ? 'FINAL' : 'SEEN'; await this.persist(deal, 'funded', actor, { role, legIndex: leg.index, tx: tx.ref, status: st.status }); }
       catch (e) { metrics.adapterErrors.inc({ chain: leg.escrowChain, op: 'deposit' }); throw e; }
+      // Depósito confirmou NA VEZ do próprio papel: reinicia a janela de 5 min — o tempo de
+      // confirmação da blockchain não pode consumir o prazo de assinar (par do turnExpired acima).
+      if (p.funding === 'FINAL' && deal.turnRole === role) { this.startTurn(deal); await this.persist(deal, 'turn.restarted', 'system', { turnRole: deal.turnRole, turnExpiresAt: deal.turnExpiresAt, reason: 'funding-final' }); }
       return deal;
     });
   }

@@ -3616,10 +3616,49 @@ window.addEventListener('unhandledrejection',function(e){try{console.warn('[veru
       }
     }catch(e){ if(!/simulado|autom/i.test(e.message||'')) throw e; }
   }
+  // VENDA DE BTC em um ato só: envia o BTC do contrato ao cofre HTLC pela carteira (pagamento
+  // declarativo), espera a confirmação do bloco re-checando o backend, e devolve o controle ao
+  // pSign para a assinatura. A vez NÃO expira durante a confirmação (motor pausa a janela do
+  // assinante com depósito pendente e a reinicia ao confirmar).
+  async function pFundBtcVault(d,st){
+    st=st||function(){};
+    const role=pDto.viewer&&pDto.viewer.role;
+    const check=function(){ return pApi('/v1/deals/'+encodeURIComponent(d.id)+'/legs/'+d.htlcVault.legIndex+'/deposit',{method:'POST',idem:'fund-'+d.id+'-'+role}); };
+    // Já confirmado (depósito manual anterior)? Já no mempool (envio anterior — NUNCA reenvia)?
+    let needSend=true;
+    try{ await check(); return; }
+    catch(e0){ if(/mempool|confirma/i.test((e0&&e0.message)||'')) needSend=false; else if(!(e0&&e0.code==='FUNDING_REQUIRED')) throw e0; }
+    if(needSend){
+      const prov=solProvider();
+      if(!prov||typeof prov.signAndSendPayment!=='function') throw new Error('Esta Verum Wallet não envia BTC pelo dApp. Alternativa: copie o endereço do cofre no card, envie os sats manualmente e toque "Já enviei — verificar".');
+      try{ await prov.connect(); }catch(e){}
+      st('Confirme o envio do BTC na carteira…');
+      const v=String(BigInt(String(d.htlcVault.requiredSat))).padStart(9,'0'); const fr=v.slice(-8).replace(/0+$/,''); const amount=(v.slice(0,-8)||'0')+(fr?'.'+fr:'');
+      const r=await withSigTimeout(prov.signAndSendPayment({ network:'bitcoin', outputs:[{ address:d.htlcVault.address, amount:amount, asset:{kind:'native'} }], memo:null }),'bitcoin');
+      toast('BTC enviado ao cofre ✓ '+((r&&r.txHash)?shortAddr(r.txHash):''),'ok');
+    }
+    // Espera a confirmação do bloco (testnet ~10 min; teto 30), re-checando a cada 20 s.
+    const t0=Date.now();
+    for(;;){
+      st('Aguardando confirmação do bloco… ('+Math.floor((Date.now()-t0)/60000)+' min — testnet ~10 min)');
+      await new Promise(function(r){ setTimeout(r,20000); });
+      try{ await check(); st('Depósito confirmado ✓'); return; }
+      catch(e){
+        if(!/mempool|confirma|financiado|envie/i.test((e&&e.message)||'')) throw e;
+        if(Date.now()-t0>30*60000) throw new Error('A confirmação do bloco passou de 30 min. O depósito continua valendo — volte depois e toque "Revisar e assinar" de novo: o fluxo retoma de onde parou (não reenvia).');
+      }
+    }
+  }
   async function pSign(){
     const btn=$('#pRvSign'); if(btn){ btn.disabled=true; btn.textContent='Assinando na Verum Wallet…'; }
     try{
       const d=pDto.deal;
+      // 0) VENDA DE BTC: se o MEU papel tranca BTC e o cofre ainda não confirmou, o "Assinar e
+      //    continuar" também ENVIA o BTC do contrato — um ato só (pagar → confirmar → assinar).
+      const myF=(d.funding||[]).find(function(f){ return f.role===(pDto.viewer&&pDto.viewer.role); });
+      if(myF&&myF.status!=='FINAL'&&d.htlcVault&&d.htlcVault.from===(pDto.viewer&&pDto.viewer.role)){
+        await pFundBtcVault(d,function(t){ if(btn) btn.textContent=t; });
+      }
       // 1) Passo ON-CHAIN pela própria carteira (escrow real).
       await pOnchainStep(d,function(t){ if(btn) btn.textContent=t; });
       // 2) Assinatura da MESA (auditoria) no esquema da rede do papel.
