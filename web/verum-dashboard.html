@@ -3351,9 +3351,35 @@ window.addEventListener('unhandledrejection',function(e){try{console.warn('[veru
       : '<div class="r"><span class="k">Configuração</span><span class="v" style="color:var(--ink-3)">Aguardando o Pay Master</span></div>';
     const d=m.deal;
     $('#pSigCount').textContent=d?((d.validSignatures||0)+'/'+(d.requiredSignatures||0)):'0/0';
+    // DEPÓSITO pendente do MEU papel: na rota HTLC o lock BTC é EXTERNO (a pessoa envia sats ao
+    // cofre P2WSH por fora) — sem este card, o participante batia em FUNDING_REQUIRED na assinatura
+    // sem nunca ver o endereço do cofre nem o valor. O botão re-checa o depósito no backend.
+    let fundHtml='';
+    const myFund=d&&d.state==='AWAITING_SIGNATURES'?((d.funding||[]).find(f=>f.role===me.role&&f.status!=='FINAL')):null;
+    if(myFund&&d.htlcVault&&d.htlcVault.from===me.role){
+      fundHtml='<div style="margin-top:12px;padding:12px;border:1px solid var(--amber);border-radius:10px">'
+        +'<b style="color:var(--amber)">Depósito BTC pendente</b>'
+        +'<div style="font-size:12.5px;color:var(--ink-2);margin-top:4px">Envie <b class="mono">'+esc(String(d.htlcVault.requiredSat))+' sats</b> para o cofre HTLC desta operação:</div>'
+        +'<div class="mono" style="word-break:break-all;font-size:12px;background:var(--bg-2);border:1px solid var(--line);border-radius:8px;padding:8px;margin:8px 0">'+esc(d.htlcVault.address)+'</div>'
+        +'<div style="display:flex;gap:8px"><button class="btn" id="pVaultCopy" style="flex:1;height:40px">Copiar endereço</button><button class="btn btn-primary" id="pVaultCheck" style="flex:1;height:40px">Já enviei — verificar</button></div>'
+        +'<div style="font-size:11.5px;color:var(--ink-3);margin-top:6px">Na rota HTLC o depósito da contraparte no escrow confirma primeiro; a verificação cobre as duas pernas.</div>'
+        +'</div>';
+    } else if(myFund){
+      fundHtml='<div style="margin-top:10px;font-size:12.5px;color:var(--amber)">Depósito no escrow pendente para o seu papel — a sua carteira completa em "Revisar e assinar".</div>';
+    }
     $('#pSigns').innerHTML=(d?('Ordem: Vendedor → Pay Master 1'+((m.chairs||[]).some(c=>c.role==='PAYMASTER_2')?' → Pay Master 2':'')+' → Comprador'
       +(d.turnRole?('<br>Vez atual: <b>'+esc(M3_ROLE[d.turnRole]||d.turnRole)+'</b>'):'')) : 'A coleta de assinaturas começa após a aprovação do Pay Master.')
-      +(m.irreversible?'<br><span style="color:var(--amber)">🔒 Operação irreversível — fundos trancados; o contrato roda até a liquidação (preimage) ou o reembolso após o timelock.</span>':'');
+      +(m.irreversible?'<br><span style="color:var(--amber)">🔒 Operação irreversível — fundos trancados; o contrato roda até a liquidação (preimage) ou o reembolso após o timelock.</span>':'')
+      +fundHtml;
+    if(fundHtml&&d&&d.htlcVault){
+      const bc=$('#pVaultCopy'); if(bc) bc.addEventListener('click',function(){ clip(d.htlcVault.address); toast('Endereço do cofre copiado','ok'); });
+      const bv=$('#pVaultCheck'); if(bv) bv.addEventListener('click',async function(){
+        bv.disabled=true; bv.textContent='Verificando na rede…';
+        try{ await pApi('/v1/deals/'+encodeURIComponent(d.id)+'/legs/'+d.htlcVault.legIndex+'/deposit',{method:'POST',idem:'fund-'+d.id+'-'+me.role}); toast('Depósito confirmado ✓','ok'); pRefresh(); }
+        catch(e){ pErrBox('Depósito ainda pendente',((e&&e.code)?('['+e.code+'] '):'')+((e&&e.message)||String(e))); }
+        finally{ bv.disabled=false; bv.textContent='Já enviei — verificar'; }
+      });
+    }
     const myTurn=d&&d.state==='AWAITING_SIGNATURES'&&d.turnRole===me.role&&!(d.signed||[]).includes(me.role);
     $('#pSignBtn').style.display=myTurn?'':'none';
     // POP-UP para o PARTICIPANTE fora da vez: a cada avanço da rodada mostra quem está assinando

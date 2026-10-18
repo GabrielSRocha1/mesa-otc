@@ -665,6 +665,16 @@ export class MesaService {
       turnRole: deal.turnRole ?? null, turnExpiresAt: deal.turnExpiresAt ?? null, expiresAt: deal.expiresAt,
       assetIn: deal.draft?.assetIn?.code ?? null, assetOut: deal.draft?.assetOut?.code ?? null, amountInBase: deal.draft?.amountInBase ?? null,
       signed: deal.signatures.filter(s => s.status === 'valid' && s.revision === deal.revision).map(s => s.role),
+      // Estado de DEPÓSITO por papel + cofre HTLC (quando a rota tem perna BTC externa). Sem isso,
+      // o participante que precisa trancar BTC não tinha COMO saber o endereço do cofre nem quanto
+      // enviar — batia em FUNDING_REQUIRED na assinatura sem instrução nenhuma na tela.
+      funding: deal.participants.filter(p => p.fundingRequired).map(p => ({ role: p.role, status: p.funding ?? 'PENDING' })),
+      htlcVault: (() => {
+        const leg = deal.terms?.legs.find(l => l.mode === 'HTLC' && l.escrowChain === 'bitcoin');
+        if (!leg) return null;
+        const meta = deal.onChain?.bitcoin?.meta as Record<string, unknown> | undefined;
+        return typeof meta?.htlcAddress === 'string' ? { address: meta.htlcAddress, requiredSat: leg.amountBase, from: leg.from, legIndex: leg.index } : null;
+      })(),
     };
   }
 
