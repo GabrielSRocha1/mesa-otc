@@ -3382,10 +3382,15 @@ window.addEventListener('unhandledrejection',function(e){try{console.warn('[veru
       // Perna de TOKEN (escrow EVM/Solana/Tron ou lock HTLC Solana): a carteira consegue depositar
       // AGORA, antes da vez de assinar — obrigatório na rota HTLC (a perna de contrato financia
       // primeiro) e inofensivo nas demais (o depósito é idempotente).
+      // TERMINOLOGIA por papel: o COMPRADOR não "financia o contrato" — ele AUTORIZA o pagamento
+      // (approve); quem financia o ativo à venda é sempre o Vendedor (regra derivada da operação).
+      const isBuyerDep=me.role==='BUYER';
       fundHtml='<div style="margin-top:12px;padding:12px;border:1px solid var(--amber);border-radius:10px">'
-        +'<b style="color:var(--amber)">Depósito no escrow pendente</b>'
-        +'<div style="font-size:12.5px;color:var(--ink-2);margin-top:4px">Seu papel deposita no contrato da operação. Você pode fazer isso agora pela Verum Wallet — não precisa esperar sua vez de assinar.</div>'
-        +'<button class="btn btn-primary btn-block" id="pEscrowDep" style="height:44px;margin-top:8px">Depositar no escrow agora</button>'
+        +'<b style="color:var(--amber)">'+(isBuyerDep?'Autorização de pagamento pendente':'Depósito do ativo à venda pendente')+'</b>'
+        +'<div style="font-size:12.5px;color:var(--ink-2);margin-top:4px">'+(isBuyerDep
+          ?'Autorize o valor do PAGAMENTO pela Verum Wallet (não é o ativo à venda — esse é depositado pelo Vendedor). Pode fazer agora, sem esperar sua vez de assinar.'
+          :'Seu papel deposita o ativo à venda no contrato. Você pode fazer isso agora pela Verum Wallet — não precisa esperar sua vez de assinar.')+'</div>'
+        +'<button class="btn btn-primary btn-block" id="pEscrowDep" style="height:44px;margin-top:8px">'+(isBuyerDep?'Autorizar pagamento agora':'Depositar no escrow agora')+'</button>'
         +'</div>';
     }
     $('#pSigns').innerHTML=(d?('Ordem: Vendedor → Pay Master 1'+((m.chairs||[]).some(c=>c.role==='PAYMASTER_2')?' → Pay Master 2':'')+' → Comprador'
@@ -3428,8 +3433,8 @@ window.addEventListener('unhandledrejection',function(e){try{console.warn('[veru
         await pOnchainStep(d,function(t){ bdep.textContent=t; },'deposit');
         if(myFund.legIndex!=null) await pApi('/v1/deals/'+encodeURIComponent(d.id)+'/legs/'+myFund.legIndex+'/deposit',{method:'POST',idem:'fund-'+d.id+'-'+me.role});
         toast('Depósito no escrow confirmado ✓','ok'); pRefresh();
-      }catch(e){ if(pStaleSession(e)) return; pErrBox('Falha no depósito',((e&&e.code)?('['+e.code+'] '):'')+((e&&e.message)||String(e))); }
-      finally{ bdep.disabled=false; bdep.textContent='Depositar no escrow agora'; }
+      }catch(e){ if(pStaleSession(e)) return; pErrBox(me.role==='BUYER'?'Falha na autorização do pagamento':'Falha no depósito',((e&&e.code)?('['+e.code+'] '):'')+((e&&e.message)||String(e))); }
+      finally{ bdep.disabled=false; bdep.textContent=me.role==='BUYER'?'Autorizar pagamento agora':'Depositar no escrow agora'; }
     });
     const myTurn=d&&d.state==='AWAITING_SIGNATURES'&&d.turnRole===me.role&&!(d.signed||[]).includes(me.role);
     $('#pSignBtn').style.display=myTurn?'':'none';
@@ -3502,10 +3507,18 @@ window.addEventListener('unhandledrejection',function(e){try{console.warn('[veru
       +'<div class="kv">'
       +'<div class="r"><span class="k">Mesa</span><span class="v mono">'+esc(m.code)+'</span></div>'
       +'<div class="r"><span class="k">Participante</span><span class="v">'+esc((me.firstName||'')+' · '+(me.roleLabel||''))+'</span></div>'
-      +'<div class="r"><span class="k">Quantidade</span><span class="v mono">'+esc((function(){var sc=(m.chairs||[]).find(c=>c.role==='SELLER');return (m.config&&m.config.amountInBase&&sc&&sc.decimals!=null)?(baseToHuman(m.config.amountInBase,sc.decimals)+' '+(sc.asset||'')):((m.config&&m.config.amountInBase)||'—');})())+'</span></div>'
+      +'<div class="r"><span class="k">Vendedor entrega</span><span class="v mono">'+esc((function(){var sc=(m.chairs||[]).find(c=>c.role==='SELLER');return (m.config&&m.config.amountInBase&&sc&&sc.decimals!=null)?(baseToHuman(m.config.amountInBase,sc.decimals)+' '+(sc.asset||'')):((m.config&&m.config.amountInBase)||'—');})())+'</span></div>'
+      // REGRA DE NEGÓCIO (permanente, derivada da operação — nunca escolhida na tela): o VENDEDOR
+      // financia o ativo à venda, paga a taxa da plataforma e tem a comissão dos Pay Masters
+      // debitada do que recebe; o COMPRADOR só autoriza o PAGAMENTO; gás é de cada carteira.
+      +(m.config?('<div class="r"><span class="k">Taxa da plataforma</span><span class="v">0,03% · paga pelo Vendedor</span></div>'
+        +'<div class="r"><span class="k">Comissão Pay Masters</span><span class="v">'+(m.config.commissionBps/100).toLocaleString('pt-BR')+'% · debitada do Vendedor</span></div>'):'')
+      +'<div class="r"><span class="k">Gás</span><span class="v">cada carteira paga o da própria transação</span></div>'
       +'<div class="r"><span class="k">Rede</span><span class="v">'+esc(m.networkLabel||m.network)+'</span></div>'
       +'<div class="r"><span class="k">Operação</span><span class="v mono">'+esc(d.id)+'</span></div>'
       +'</div>'
+      +(me.role==='BUYER'?'<p style="font-size:12.5px;color:var(--ink-3);margin:12px 0 0">Você autoriza apenas o PAGAMENTO acordado — quem deposita o ativo à venda é o Vendedor.</p>':'')
+      +(me.role==='SELLER'?'<p style="font-size:12.5px;color:var(--ink-3);margin:12px 0 0">Você deposita o ativo à venda no contrato; a taxa da plataforma sai do seu lado e a comissão dos Pay Masters é descontada do valor que você recebe.</p>':'')
       +'<p style="font-size:12.5px;color:var(--amber);margin:12px 0">Revise cuidadosamente os dados antes de assinar.</p>'
       +'<button class="btn btn-primary btn-block" id="pRvSign" style="height:50px">Assinar e continuar</button>'
       +'</div></div>';
