@@ -3306,7 +3306,7 @@ window.addEventListener('unhandledrejection',function(e){try{console.warn('[veru
   // operação (histórico/ativa) em vez da ativa da mesa. Somente leitura, exceto se for a vez do papel.
   const P_OP=(new URLSearchParams(location.search)).get('op')||'';
   let P_TOK='';
-  let pAutoTurnKey=null;
+  let pAutoTurnKey=null, pAutoSignKey=null;
   let pTurnKey=null; // pop-up de turno do participante (fora da vez) // "ser puxado para assinar": abre a tela de assinatura 1x quando chega a vez
   (function(){ try{ const m=/[#&]pt=([^&]+)/.exec(location.hash); if(m){ P_TOK=decodeURIComponent(m[1]); try{ sessionStorage.setItem('verum_mesa_pt_'+P_MESA,P_TOK); localStorage.setItem('verum_mesa_pt_'+P_MESA,P_TOK); }catch(e){} history.replaceState(null,'',location.pathname+location.search); } if(!P_TOK&&P_MESA){ try{ P_TOK=sessionStorage.getItem('verum_mesa_pt_'+P_MESA)||localStorage.getItem('verum_mesa_pt_'+P_MESA)||''; }catch(e){} } }catch(e){} })();
   const P_ON=!!(P_MESA&&P_TOK);
@@ -3439,6 +3439,12 @@ window.addEventListener('unhandledrejection',function(e){try{console.warn('[veru
         const key=d.id+':'+me.role;
         if(pAutoTurnKey!==key && !document.querySelector('#modalRoot #pRvBack')){
           pAutoTurnKey=key; pReview();
+          // FUSÃO depósito→assinatura: quem JÁ DEPOSITOU (funding FINAL) não toca em mais nada —
+          // a assinatura da vez dispara sozinha e o deslize na carteira vira a ÚNICA ação do
+          // participante (depositou = vai assinar). PMs e papéis sem depósito seguem no botão
+          // manual. 1x por turno (pAutoSignKey); se falhar, o modal fica aberto para retentar.
+          const ff=(d.funding||[]).find(x=>x.role===me.role);
+          if(ff&&ff.status==='FINAL'&&pAutoSignKey!==key){ pAutoSignKey=key; pSign(); }
         }
       } else if(!d || d.turnRole!==me.role){ pAutoTurnKey=null; }
     }catch(e){}
