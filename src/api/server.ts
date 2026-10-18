@@ -29,7 +29,7 @@ import type { Store } from '../db/repository.js';
 import { AuditLog } from '../audit/audit.js';
 import { hasParticipantSteps, type AdapterRegistry } from '../adapters/types.js';
 import { registry as metricsRegistry, logger, metrics } from '../monitoring/metrics.js';
-import { randomUUID } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import { allChains, getChain, chainIconId } from '../chains/registry.js';
 import { getPrices, getPricesById } from '../chains/prices.js';
 import { readNativeBalance } from '../chains/balances.js';
@@ -1350,7 +1350,14 @@ export async function buildApi(deps: ApiDeps): Promise<FastifyInstance> {
   // (window.verum p/ quando o OTC roda DENTRO do navegador dApp da Verum — via iframe/postMessage).
   const dirOf = (p: string): string => p.replace(/[\\/][^\\/]*$/, '');
   const withApiMeta = (path: string): string => readFileSync(path, 'utf8').replace('<meta name="verum-otc-api" content="">', `<meta name="verum-otc-api" content="/">`);
-  const withProvider = (html: string): string => html.replace('</head>', '<script src="/verum-provider.js"></script></head>');
+  // O provider é lido ANTES de injetar o <script>: o rev (hash do conteúdo) vai na URL — sem ele,
+  // o celular ficava até 1h preso no provider ANTIGO em cache (max-age=3600) mesmo após o deploy
+  // de um fix (ex.: o case VERUM_SIGN_PERSONAL_RESPONSE que destravava o "Deslize para assinar…").
+  const webDirEarly = deps.mesaHtmlPath ? dirOf(deps.mesaHtmlPath) : deps.portalHtmlPath ? dirOf(deps.portalHtmlPath) : deps.conviteHtmlPath ? dirOf(deps.conviteHtmlPath) : null;
+  let providerJs = '';
+  if (webDirEarly) { try { providerJs = readFileSync(`${webDirEarly}/verum-provider.js`, 'utf8'); } catch { /* ausente */ } }
+  const providerRev = createHash('sha256').update(providerJs).digest('hex').slice(0, 8);
+  const withProvider = (html: string): string => html.replace('</head>', `<script src="/verum-provider.js?v=${providerRev}"></script></head>`);
   const prepHtml = (path: string): string => withProvider(injectPwa(withApiMeta(path)));
   // Convite: SEM service worker (injectPwaNoSW desregistra SW antigo + limpa caches) — um SW preso
   // estava servindo o HTML velho do convite no dapp-browser da Verum.
@@ -1362,8 +1369,7 @@ export async function buildApi(deps: ApiDeps): Promise<FastifyInstance> {
   if (deps.conviteHtmlPath) { const convite = prepHtmlNoSW(deps.conviteHtmlPath); for (const p of ['/convite', '/convite/:token', '/invite', '/invite/:token', '/otc/convite/:token']) app.get(p, async (_req, reply) => sendHtml(reply, convite)); }
   // Provider da Verum (window.verum) — só ativa quando embutido no iframe do navegador dApp da Verum.
   // Same-origin (CSP script-src 'self'). Lido do mesmo diretório dos HTML.
-  const webDir = deps.mesaHtmlPath ? dirOf(deps.mesaHtmlPath) : deps.portalHtmlPath ? dirOf(deps.portalHtmlPath) : deps.conviteHtmlPath ? dirOf(deps.conviteHtmlPath) : null;
-  if (webDir) { let providerJs = ''; try { providerJs = readFileSync(`${webDir}/verum-provider.js`, 'utf8'); } catch { /* ausente */ } app.get('/verum-provider.js', async (_req, reply) => reply.type('text/javascript; charset=utf-8').header('cache-control', 'public, max-age=3600').send(providerJs)); }
+  if (webDirEarly) { app.get('/verum-provider.js', async (_req, reply) => reply.type('text/javascript; charset=utf-8').header('cache-control', 'public, max-age=3600').send(providerJs)); }
   // A raiz encaminha para a entrada do portal (login/cadastro exigido antes da mesa).
   app.get('/', async (_req, reply) => reply.redirect('/portal'));
 

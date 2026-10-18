@@ -3440,6 +3440,19 @@ window.addEventListener('unhandledrejection',function(e){try{console.warn('[veru
   function withSigTimeout(promise,label){
     return Promise.race([promise, new Promise(function(_,rej){ setTimeout(function(){ rej(new Error('A Verum Wallet não respondeu ao pedido de assinatura '+label+' (timeout 60s). Confirme/atualize o app da Verum Wallet e tente de novo. Em navegador/PWA sem a carteira, a assinatura '+label+' não funciona.')); },60000); })]);
   }
+  // CAPTURA de diagnóstico: durante a assinatura multichain, grava os postMessage que chegam do
+  // dapp-browser (tipo do evento + chaves + erro). Se a carteira responder num formato que o
+  // provider injetado não mapeia — ou não responder nada após o "deslize" — o despejo anexado ao
+  // erro mostra exatamente o que veio (ou que nada veio), printável/copiável no celular.
+  function startSigCapture(){
+    const seen=[];
+    function onMsg(ev){ try{ let d=ev.data; if(typeof d==='string'){ try{ d=JSON.parse(d); }catch(e){ seen.push('str:'+d.slice(0,80)); return; } } if(d&&typeof d==='object'){ const t=d.type||d.name||d.method||'?'; const ks=Object.keys(d).slice(0,8).join(','); const er=d.error?(' erro='+String((d.error&&d.error.message)||d.error).slice(0,140)):''; seen.push(String(t)+'{'+ks+'}'+er); } }catch(e){} }
+    window.addEventListener('message',onMsg);
+    return {
+      stop(){ window.removeEventListener('message',onMsg); },
+      dump(){ return seen.length?('\n\n[diag] Mensagens da carteira após o pedido: '+seen.slice(-10).join(' | ')):'\n\n[diag] NENHUMA resposta (postMessage) da carteira chegou à página após o pedido de assinatura — a falha é no app da Verum Wallet (não devolve o resultado do deslize ao dapp).'; }
+    };
+  }
   async function pSignEnvelope(env){
     const addr=env.payload&&env.payload.signer;
     if(env.network==='solana'){
@@ -3466,10 +3479,14 @@ window.addEventListener('unhandledrejection',function(e){try{console.warn('[veru
       // Passa o endereço-ALVO (signer do envelope): a Verum deriva a chave BTC pelo TIPO do endereço
       // (tb1→testnet, bc1→mainnet) em vez do toggle global — sem isso, dApp testnet assinado com a
       // chave mainnet gerava assinatura inválida contra o tb1q… do deal.
-      const r=await withSigTimeout(prov.signPersonalMessage(chainKey,env.message,addr),chainKey);
-      const sig=(r&&r.signature!==undefined)?r.signature:r;
-      if(!sig) throw new Error('A Verum Wallet não devolveu a assinatura '+chainKey+'.');
-      return sig;
+      const cap=startSigCapture();
+      try{
+        const r=await withSigTimeout(prov.signPersonalMessage(chainKey,env.message,addr),chainKey);
+        const sig=(r&&r.signature!==undefined)?r.signature:r;
+        if(!sig) throw new Error('A Verum Wallet não devolveu a assinatura '+chainKey+'.'+cap.dump());
+        return sig;
+      }catch(e){ if(e&&e.message&&e.message.indexOf('[diag]')<0) e.message+=cap.dump(); throw e; }
+      finally{ cap.stop(); }
     }
     throw new Error('Rede de assinatura não suportada nesta tela: '+env.network);
   }
@@ -3478,7 +3495,7 @@ window.addEventListener('unhandledrejection',function(e){try{console.warn('[veru
   async function pReenterSign(net,address,message){
     if(net==='solana'){ const p=solProvider(); if(!p) throw new Error('Verum Wallet não detectada.'); return solSignMessage(p,message); }
     if(net==='ethereum'){ const p=await findVerumEthProvider(); if(!p) throw new Error('Provider EVM da Verum Wallet não injetado nesta aba.'); try{ await p.request({method:'eth_requestAccounts'}); }catch(e){} return p.request({method:'personal_sign',params:[message,address]}); }
-    if(net==='bitcoin'||net==='tron'){ const p=solProvider(); if(!p||typeof p.signPersonalMessage!=='function') throw new Error('Esta Verum Wallet não expõe assinatura '+net+'. Atualize a carteira.'); try{ await p.connect(); }catch(e){} /* endereço-alvo → Verum deriva a chave BTC pelo tipo do endereço (tb1=testnet/bc1=mainnet), não pelo toggle global */ const rr=await withSigTimeout(p.signPersonalMessage(net,message,address),net); const sig=(rr&&rr.signature!==undefined)?rr.signature:rr; if(!sig) throw new Error('A Verum Wallet não devolveu a assinatura '+net+'.'); return sig; }
+    if(net==='bitcoin'||net==='tron'){ const p=solProvider(); if(!p||typeof p.signPersonalMessage!=='function') throw new Error('Esta Verum Wallet não expõe assinatura '+net+'. Atualize a carteira.'); try{ await p.connect(); }catch(e){} /* endereço-alvo → Verum deriva a chave BTC pelo tipo do endereço (tb1=testnet/bc1=mainnet), não pelo toggle global */ const cap=startSigCapture(); try{ const rr=await withSigTimeout(p.signPersonalMessage(net,message,address),net); const sig=(rr&&rr.signature!==undefined)?rr.signature:rr; if(!sig) throw new Error('A Verum Wallet não devolveu a assinatura '+net+'.'+cap.dump()); return sig; }catch(e){ if(e&&e.message&&e.message.indexOf('[diag]')<0) e.message+=cap.dump(); throw e; } finally{ cap.stop(); } }
     throw new Error('Rede de reentrada não suportada: '+net);
   }
   async function pSign(){
@@ -3602,7 +3619,7 @@ window.addEventListener('unhandledrejection',function(e){try{console.warn('[veru
       +'<div style="text-align:center;padding:10px 0">'
       +'<div style="font-family:var(--f-head);font-weight:700;font-size:17px;margin-bottom:6px">Entrar na operação</div>'
       +'<div style="font-size:13px;color:var(--ink-3);margin-bottom:16px">Reconecte a Verum Wallet para ver esta operação (somente leitura). Você assina apenas para provar que é a mesma carteira — não movimenta nada.</div>'
-      +(err?'<div style="color:#fecaca;font-size:12.5px;margin-bottom:12px">'+esc(err)+'</div>':'')
+      +(err?'<div id="pReErr" style="color:#fecaca;font-size:12.5px;margin-bottom:12px;white-space:pre-wrap;word-break:break-word">'+esc(err)+'</div>':'')
       +'<button class="btn btn-primary" id="pReBtn" style="max-width:320px;margin:0 auto">Entrar com a Verum Wallet</button>'
       +'</div>';
     // esconde as outras seções do participante até reentrar
@@ -3610,6 +3627,9 @@ window.addEventListener('unhandledrejection',function(e){try{console.warn('[veru
     const btn=$('#pReBtn');
     btn.addEventListener('click',async()=>{
       btn.disabled=true; btn.textContent='Conectando…';
+      // Limpa o erro da tentativa ANTERIOR: ele ficava na tela durante a nova assinatura e fazia
+      // parecer que o erro antigo (ex.: sessão stale) era a causa atual — confundia o diagnóstico.
+      try{ const old=document.getElementById('pReErr'); if(old) old.remove(); }catch(e){}
       try{
         const prov=solProvider(); if(!prov) throw new Error('Verum Wallet não detectada nesta aba.');
         const r=await prov.connect(); const pk=(r&&r.publicKey)?r.publicKey:prov.publicKey;
@@ -3635,7 +3655,7 @@ window.addEventListener('unhandledrejection',function(e){try{console.warn('[veru
         // restaura as seções e abre a operação
         ['pChairs','pSummary','pSigns'].forEach(id=>{ const el=$('#'+id); if(el){ const c=el.closest('.card'); if(c) c.style.display=''; } });
         pReentering=false; pStart(); pRefresh();
-      }catch(ex){ btn.disabled=false; btn.textContent='Entrar com a Verum Wallet'; pReentry(ex.message||'Falha na reentrada.'); }
+      }catch(ex){ btn.disabled=false; btn.textContent='Entrar com a Verum Wallet'; pReentry(ex.message||'Falha na reentrada.'); pErrBox('Falha na reentrada',(ex&&ex.message)||String(ex)); }
     });
   }
 

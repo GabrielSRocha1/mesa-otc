@@ -280,6 +280,15 @@
         case 'VERUM_SIGN_MSG_REJECTED':
           settle(d.id, null, d.reason || 'USER_REJECTED');
           break;
+        case 'VERUM_SIGN_PERSONAL_RESPONSE':
+          // personal_sign multichain (EIP-191/TIP-191/BIP-137/SEP-53). SEM este
+          // case, a resposta da carteira caía no vazio e o dApp ficava preso em
+          // "Deslize para assinar…" para sempre (promise nunca liquidada).
+          settle(d.id, { signature: d.signature, address: d.address, chainKey: d.chainKey }, null);
+          break;
+        case 'VERUM_SIGN_PERSONAL_REJECTED':
+          settle(d.id, null, d.reason || 'USER_REJECTED');
+          break;
         case 'VERUM_TRANSFER_RESPONSE':
           // Resolve { txHash } — a assinatura já aceita pelo RPC (base58).
           settle(d.id, { txHash: d.txHash }, null);
