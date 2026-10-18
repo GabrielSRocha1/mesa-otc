@@ -292,7 +292,21 @@ export async function buildApi(deps: ApiDeps): Promise<FastifyInstance> {
   app.post('/v1/deals/:id/proposals/:pid/withdraw', async req => { const s = requireSession(req); const { id, pid } = req.params as { id: string; pid: string }; return deps.proposals.withdraw(id, pid, s.address); });
   app.post('/v1/deals/:id/proposals/:pid/reject', async req => { const s = requireSession(req); const { id, pid } = req.params as { id: string; pid: string }; return deps.proposals.reject(id, pid, s.address); });
   app.get('/v1/deals/:id/approval-envelope', async req => { const s = requireSession(req); const { id } = req.params as { id: string }; const d = await deps.deals.get(id); const me = requireParticipant(d, s); const env = await deps.deals.envelope(id, me.role, s.address); return { scheme: env.scheme, network: env.network, payload: env.payload, message: env.message, typedData: env.typedData ? { ...env.typedData, message: Object.fromEntries(Object.entries(env.typedData.message).map(([k, v]) => [k, typeof v === 'bigint' ? v.toString() : v])) } : undefined }; });
-  app.post('/v1/deals/:id/approvals', async (req, reply) => { const s = requireSession(req); const { id } = req.params as { id: string }; const b = parse(z.object({ role: RoleZ, signature: z.string().min(20), nonce: z.string().min(8) }), req.body); return idempotent(req, reply, async () => { const r = await deps.deals.submitSignature(id, { role: b.role, signer: s.address, scheme: s.keyScheme, signature: b.signature, nonce: b.nonce }, s.address); return { count: r.count, required: r.deal.requiredSignatures, state: r.deal.state }; }); });
+  app.post('/v1/deals/:id/approvals', async (req, reply) => { const s = requireSession(req); const { id } = req.params as { id: string }; const b = parse(z.object({ role: RoleZ, signature: z.string().min(20), nonce: z.string().min(8) }), req.body); return idempotent(req, reply, async () => {
+    // RE-CHECA o funding ANTES do gate de assinatura: o fund() só rodava na CRIAÇÃO da deal (cofre
+    // ainda vazio) e nenhum caminho do participante re-lia o depósito depois — o lock BTC externo
+    // (HTLC P2WSH) ficava eternamente pendente e a assinatura barrava com o genérico "Deposite no
+    // escrow antes de assinar" MESMO com os sats confirmados no cofre. Igual ao retry do modo dev
+    // (signTurnOfDeal). Se seguir sem depósito, o erro do adapter sobe com endereço/sats/confirmações.
+    const d0 = await deps.deals.get(id);
+    const p0 = d0.participants.find(x => x.role === b.role);
+    if (d0.state === 'AWAITING_SIGNATURES' && p0?.fundingRequired && p0.funding !== 'FINAL' && p0.address.toLowerCase() === s.address.toLowerCase()) {
+      // Só o FUNDING_REQUIRED (com endereço do cofre/sats vistos/confirmações) interessa ao assinante;
+      // qualquer outro erro do fund cai no fluxo normal do submit (403/409 canônicos preservados).
+      try { await deps.deals.fund(id, b.role, p0.address); }
+      catch (e) { if ((e as DomainError).code === 'FUNDING_REQUIRED') throw e; }
+    }
+    const r = await deps.deals.submitSignature(id, { role: b.role, signer: s.address, scheme: s.keyScheme, signature: b.signature, nonce: b.nonce }, s.address); return { count: r.count, required: r.deal.requiredSignatures, state: r.deal.state }; }); });
   /**
    * Fluxo de CARTEIRA REAL (escrow canônico Verum): o passo on-chain da vez do participante.
    * GET devolve o que assinar/enviar (EVM/Tron: approve pendente + typedData Approval; Solana: tx base64).
