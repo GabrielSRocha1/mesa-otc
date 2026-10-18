@@ -205,7 +205,10 @@ export class DealEngine {
       if (p.address.toLowerCase() !== actor.toLowerCase()) throw new DomainError('FORBIDDEN', 'só a carteira do papel deposita');
       if (p.funding === 'FINAL') return deal;
       const leg = (deal.terms as Terms).legs[role === 'SELLER' ? 0 : 1] as Leg; const adapter = this.d.adapters.require(leg.escrowChain);
-      if (leg.mode === 'HTLC') { const other = deal.participants.find(x => x.fundingRequired && x.role !== role) as Deal['participants'][number]; if (other.funding !== 'FINAL') throw new DomainError('FUNDING_REQUIRED', 'Na rota HTLC a leg de contrato precisa ser financiada primeiro'); }
+      // Decisão de produto (2026-10-18): depósitos em QUALQUER ordem — o lock BTC pode vir antes da
+      // leg de contrato. A segurança do swap não depende da ordem (assinaturas e liquidação seguem
+      // exigindo as DUAS pernas financiadas); o que muda é o risco de ESPERA — quem tranca BTC
+      // primeiro e vê o outro lado sumir aguarda o timelock (CSV) para reembolsar via refund.
       try { const tx = await adapter.deposit(deal.id, leg.index, p.address); const st = await adapter.waitFinal(tx.ref); p.funding = st.status === 'final' ? 'FINAL' : 'SEEN'; await this.persist(deal, 'funded', actor, { role, legIndex: leg.index, tx: tx.ref, status: st.status }); }
       catch (e) { metrics.adapterErrors.inc({ chain: leg.escrowChain, op: 'deposit' }); throw e; }
       return deal;

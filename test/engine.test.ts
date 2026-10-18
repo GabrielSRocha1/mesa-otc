@@ -238,12 +238,13 @@ describe('Multichain: EVM (EIP-712) e Bitcoin (HTLC)', () => {
     const d = await prepareDeal(app, parts, { assetIn: ASSETS.ETH, assetOut: ASSETS.USDC_ETH, amountInBase: '12000000000000000000' }); expect(d.terms!.route.routeId).toBe('RT-ESCROW_NN-ETHEREUM-ETHEREUM');
     await fullySign(app, d.id, parts); expect((await app.settlement.settle(d.id)).status).toBe('DONE'); expect(app.local!.evm.balanceOf(parts.BUYER.address, null)).toBe(11820000000000000000n); await app.close(); // comprador recebe a perna do vendedor já com o deságio (12 ETH × (1 − 150bps))
   });
-  it('Deal BTC → USDC(Solana) por HTLC: leg de contrato financiada primeiro, preimage revelada no settle, claim BTC pelo comprador', async () => {
+  it('Deal BTC → USDC(Solana) por HTLC: depósitos em qualquer ordem (BTC pode trancar primeiro), preimage revelada no settle, claim BTC pelo comprador', async () => {
     const { app } = await makeApp({ autoSettle: false }); const parts: Parts = { SELLER: btcWallet(), BUYER: solWallet(), PAYMASTER_1: solWallet() };
     const d = await prepareDeal(app, parts, { assetIn: ASSETS.BTC, assetOut: ASSETS.USDC_SOL, amountInBase: '75000000' }); expect(d.terms!.route.kind).toBe('HTLC'); expect(d.terms!.route.htlcHash).toHaveLength(64);
     await app.deals.open(d.id, parts.SELLER.address);
-    expect(await code(app.deals.fund(d.id, 'SELLER', parts.SELLER.address))).toBe('FUNDING_REQUIRED'); // BTC só depois da leg de contrato
-    await app.deals.fund(d.id, 'BUYER', parts.BUYER.address); await app.deals.fund(d.id, 'SELLER', parts.SELLER.address);
+    // Decisão de produto (2026-10-18): o lock BTC NÃO depende mais da leg de contrato — quem tranca
+    // primeiro só assume o risco de esperar o timelock se o outro lado sumir.
+    await app.deals.fund(d.id, 'SELLER', parts.SELLER.address); await app.deals.fund(d.id, 'BUYER', parts.BUYER.address);
     for (const role of SIGNING_ORDER) { const w = parts[role]; if (w) await signAs(app, d.id, role, w); }
     const rec = await app.settlement.settle(d.id); expect(rec.status).toBe('DONE'); expect((await app.deals.get(d.id)).state).toBe('SETTLED');
     expect(await app.local!.solana.revealedPreimage(d.id)).toBeTruthy(); expect(app.local!.bitcoin.balanceOf(parts.BUYER.address, null)).toBe(73875000n); await app.close(); // comprador reclama o BTC do vendedor já com o deságio (0,75 BTC × (1 − 150bps))

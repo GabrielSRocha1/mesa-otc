@@ -3369,7 +3369,7 @@ window.addEventListener('unhandledrejection',function(e){try{console.warn('[veru
         +'<div style="font-size:12.5px;color:var(--ink-2);margin-top:4px">Envie <b class="mono">'+esc(String(d.htlcVault.requiredSat))+' sats</b> para o cofre HTLC desta operação:</div>'
         +'<div class="mono" style="word-break:break-all;font-size:12px;background:var(--bg-2);border:1px solid var(--line);border-radius:8px;padding:8px;margin:8px 0">'+esc(d.htlcVault.address)+'</div>'
         +'<div style="display:flex;gap:8px"><button class="btn" id="pVaultCopy" style="flex:1;height:40px">Copiar endereço</button><button class="btn btn-primary" id="pVaultCheck" style="flex:1;height:40px">Já enviei — verificar</button></div>'
-        +'<div style="font-size:11.5px;color:var(--ink-3);margin-top:6px">Na rota HTLC o depósito da contraparte no escrow confirma primeiro; a verificação cobre as duas pernas.</div>'
+        +'<div style="font-size:11.5px;color:var(--ink-3);margin-top:6px">Você pode trancar a qualquer momento (independe da contraparte). Se a operação não se completar, o reembolso fica disponível após o timelock.</div>'
         +'</div>';
     } else if(myFund){
       // Perna de TOKEN (escrow EVM/Solana/Tron ou lock HTLC Solana): a carteira consegue depositar
