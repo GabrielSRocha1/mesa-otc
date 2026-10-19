@@ -1119,6 +1119,9 @@ export async function buildApi(deps: ApiDeps): Promise<FastifyInstance> {
     if (mesa.cancelled) throw new DomainError('VERSION_CONFLICT', 'Mesa cancelada.');
     if (mesa.expiresAt != null && deps.mesa.nowMs() >= mesa.expiresAt) throw new DomainError('VERSION_CONFLICT', 'Mesa expirada — crie uma nova mesa.');
     if (mesa.approvedAt) throw new DomainError('VERSION_CONFLICT', 'Operação já aprovada.');
+    // Cura mesas antigas: cadeira NATIVA criada sem o escrow configurado ganha o embrulho (ETH→WETH)
+    // agora — sem isso o approve morria com "escrow Verum é só-token" em mesa nascida no preview cru.
+    deps.mesa.healNativeWraps(mesa);
     // Anti-scam: token que se passa por USDT/USDC/WBTC… com contrato divergente do registro oficial
     // (ou marcado como malicioso pela Verum Wallet) BLOQUEIA a operação com 403 — antes de qualquer saldo.
     const scam = await validateMesaTokens(mesa.chairs, tokenSecurity);
