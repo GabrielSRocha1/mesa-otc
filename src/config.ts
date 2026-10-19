@@ -63,6 +63,9 @@ const Schema = z.object({
   TRON_TBTC: z.string().regex(/^T[1-9A-HJ-NP-Za-km-z]{33}$/).optional(),
   TRON_CONFIRMATIONS: z.coerce.number().int().min(1).max(64).default(19),
   // Bitcoin nativo (HTLC P2WSH real via Esplora — blockstream/mempool/regtest local).
+  // Força o SIMULADOR de Bitcoin mesmo com o grupo BITCOIN_* completo — preview/teste do fluxo
+  // de usuário com blocos instantâneos sem mexer nas envs reais herdadas da produção.
+  BITCOIN_SIMULATE: z.enum(['0', '1']).default('0'),
   BITCOIN_ESPLORA_URL: z.string().optional(),
   BITCOIN_NETWORK: z.enum(['mainnet', 'testnet', 'regtest']).optional(),
   BITCOIN_CLAIM_KEY: z.string().regex(/^(0x)?[0-9a-fA-F]{64}$/).optional(),
@@ -129,6 +132,7 @@ export function solanaConfig(c: Config): SolanaSettings | null {
 /** Bitcoin nativo (HTLC P2WSH real). null = grupo ausente (simulador regtest local). */
 export interface BitcoinSettingsCfg { esploraUrl: string; network: 'mainnet' | 'testnet' | 'regtest'; claimKey: string; refundKey: string; confirmations: number; csvBlocks: number; feeFloorSatVb: number }
 export function bitcoinConfig(c: Config): BitcoinSettingsCfg | null {
+  if (c.BITCOIN_SIMULATE === '1') return null;
   if (!c.BITCOIN_ESPLORA_URL || !c.BITCOIN_NETWORK || !c.BITCOIN_CLAIM_KEY || !c.BITCOIN_REFUND_KEY) return null;
   return { esploraUrl: c.BITCOIN_ESPLORA_URL, network: c.BITCOIN_NETWORK, claimKey: c.BITCOIN_CLAIM_KEY, refundKey: c.BITCOIN_REFUND_KEY, confirmations: c.BITCOIN_CONFIRMATIONS, csvBlocks: c.BITCOIN_CSV_BLOCKS, feeFloorSatVb: c.BITCOIN_FEE_FLOOR_SAT_VB };
 }
