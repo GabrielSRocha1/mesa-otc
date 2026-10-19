@@ -65,7 +65,9 @@ const Schema = z.object({
   // Bitcoin nativo (HTLC P2WSH real via Esplora — blockstream/mempool/regtest local).
   // Força o SIMULADOR de Bitcoin mesmo com o grupo BITCOIN_* completo — preview/teste do fluxo
   // de usuário com blocos instantâneos sem mexer nas envs reais herdadas da produção.
-  BITCOIN_SIMULATE: z.enum(['0', '1']).default('0'),
+  // BRANCH DE TESTE (teste-btc-simulado): default flipado para '1' — o preview deste branch roda
+  // com Bitcoin SIMULADO sem precisar de env no Vercel (acesso a envs é só pelo dashboard).
+  BITCOIN_SIMULATE: z.enum(['0', '1']).default('1'),
   BITCOIN_ESPLORA_URL: z.string().optional(),
   BITCOIN_NETWORK: z.enum(['mainnet', 'testnet', 'regtest']).optional(),
   BITCOIN_CLAIM_KEY: z.string().regex(/^(0x)?[0-9a-fA-F]{64}$/).optional(),
