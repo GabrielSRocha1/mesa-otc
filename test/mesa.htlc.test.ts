@@ -69,6 +69,18 @@ describe('mesa v4 — approve cria a deal HTLC das cadeiras', () => {
     expect(deal.participants.find(p => p.role === 'SELLER')?.address).toBe(seller.address);
     expect(deal.participants.find(p => p.role === 'BUYER')?.address).toBe(buyer.address);
     expect(app.mesa.mesaById(mesaId)!.dealId).toBe(deal.id);
+
+    // RECONEXÃO DE SESSÃO (auditoria 2026-10-19): a reentrada identifica a cadeira por QUALQUER
+    // endereço multichain, mas o desafio nasce na rede/endereço do PARTICIPANTE DO DEAL (Vendedor
+    // BTC assina em bitcoin) — e a sessão emitida passa no gate do depósito (a sessão stale que
+    // dava "só a carteira do papel deposita" se auto-cura por este caminho).
+    const ch = await app.mesa.reenterChallenge(mesaId, { network: 'ethereum', address: sellerEvm.address, addresses: [{ network: 'ethereum', address: sellerEvm.address }] });
+    expect(ch.network).toBe('bitcoin');
+    expect(ch.address).toBe(seller.address);
+    const re = await app.mesa.reenterMesa(mesaId, { network: 'bitcoin', address: seller.address, nonce: ch.nonce, signature: await seller.signMessage!(ch.message) });
+    expect(re.role).toBe('SELLER');
+    const dep = await app.api.inject({ method: 'POST', url: `/v1/deals/${deal.id}/legs/0/deposit`, headers: { authorization: `Bearer ${re.token}`, 'idempotency-key': 'reenter-deposit-1' }, payload: {} });
+    expect(dep.statusCode, dep.body).toBe(200); // sessão renasceu no endereço do papel → gate do depósito passa
     await app.close();
   }, 60_000);
 

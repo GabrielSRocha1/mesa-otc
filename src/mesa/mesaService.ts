@@ -64,6 +64,8 @@ export interface MesaServiceDeps {
    *  ex.: SOL fica nativo na rota cross-chain (HTLC nativo) e vira wSOL só no escrow direto
    *  Solana↔Solana. Símbolo exibido continua o nativo. null/ausente = sem embrulho. */
   nativeWrapOf?: (network: string, counterpartyNetwork: string | null) => { contractOrMint: string; decimals: number } | null;
+  /** true quando a perna Bitcoin roda no SIMULADOR (preview/dev) — a UI exibe "BTC simulado". */
+  btcSimulated?: () => boolean;
 }
 
 export interface CreateMesaChairInput { role: MesaChairRole; expectedAsset: ChairAsset; label?: string }
@@ -673,8 +675,14 @@ export class MesaService {
         const leg = deal.terms?.legs.find(l => l.mode === 'HTLC' && l.escrowChain === 'bitcoin');
         if (!leg) return null;
         const meta = deal.onChain?.bitcoin?.meta as Record<string, unknown> | undefined;
-        return typeof meta?.htlcAddress === 'string' ? { address: meta.htlcAddress, requiredSat: leg.amountBase, from: leg.from, legIndex: leg.index } : null;
+        // simulated: a UI marca "BTC SIMULADO" quando a perna roda no simulador (preview/dev) —
+        // exigência da auditoria: nenhum ambiente de teste pode se passar por BTC real.
+        return typeof meta?.htlcAddress === 'string' ? { address: meta.htlcAddress, requiredSat: leg.amountBase, from: leg.from, legIndex: leg.index, simulated: this.d.btcSimulated?.() ?? false } : null;
       })(),
+      // REEMBOLSOS por perna (REFUNDED/PENDING): a UI mostra "aguardando timelock" em vez de
+      // sumir com o estado — exigência da auditoria (recuperação explicável por operação).
+      // (?? []: dado antigo/fake persistido pode não ter o campo — a view nunca pode quebrar)
+      refunds: (deal.refunds ?? []).map(r => ({ role: r.role, legIndex: r.legIndex, status: r.status, txRef: r.txRef })),
     };
   }
 
