@@ -454,6 +454,7 @@ export async function buildApi(deps: ApiDeps): Promise<FastifyInstance> {
 
   // ---- Operação (Deal real) a partir da mesa: cria no DealEngine e expõe o estado vivo p/ a esteira ----
   // No modo EVM inclui o contrato de liquidação e as transferências (txids reais) p/ o painel do frontend.
+  const refundRetryAt = new Map<string, number>(); // throttle do heal de refund no poll (por instância)
   const mesaDealView = async (d: Deal) => {
     const ev = deps.dev?.evm ?? null;
     const legs = d.terms?.legs ?? [];
@@ -469,6 +470,8 @@ export async function buildApi(deps: ApiDeps): Promise<FastifyInstance> {
       escrowContract: legs[0]?.escrowContract ?? null, escrowChainId: ev?.chainId ?? null, explorerBase: ev?.explorerBase ?? null,
       pair: { in: { code: d.draft.assetIn.code, decimals: d.draft.assetIn.decimals, amountBase: d.draft.amountInBase }, out: { code: d.draft.assetOut.code, decimals: d.draft.assetOut.decimals, amountBase: legs[1]?.amountBase ?? null } },
       settlement: rec ? { status: rec.status, legs: rec.legs.map(l => ({ index: l.index, label: legLabel(l.index), txRef: l.txRef, step: l.step, confirmations: l.confirmations })) } : null,
+      // Reembolsos por perna (REFUNDED/PENDING) — a esteira mostra "aguardando timelock" (auditoria).
+      refunds: (d.refunds ?? []).map(r => ({ role: r.role, legIndex: r.legIndex, status: r.status, txRef: r.txRef })),
       // LOCK ANTES DO OPEN: com o open adiado, o createTradeV2 pendente precisa estar VISÍVEL no
       // poll do admin (antes era devolvido só na resposta do approve) — o PM1 envia pela carteira.
       // O meta registerPending nunca é limpo: a view re-checa on-chain e esconde quando confirmar.
@@ -852,6 +855,13 @@ export async function buildApi(deps: ApiDeps): Promise<FastifyInstance> {
       try { await deps.dev?.ensureOnChain?.(id); } catch { /* melhor esforço */ }
       try { if (d.state === 'SETTLEMENT_VALIDATION') await deps.settlement.settle(id, 'keeper'); else await deps.settlement.recover(); } catch { /* idempotente; falha vira BLOCKED */ }
       d = await deps.deals.get(id).catch(() => d);
+    }
+    // Serverless sem scheduler: o poll do admin também retenta reembolsos PENDENTES (ex.: refund
+    // BTC aguardando o timelock CSV). Throttle por instância (90 s): cada tentativa consulta a
+    // rede e gera evento de auditoria — o poll de segundos não pode virar spam.
+    if (d && d.state === 'REFUNDING' && d.refunds.some(r => r.status === 'PENDING') && Date.now() - (refundRetryAt.get(id) ?? 0) > 90_000) {
+      refundRetryAt.set(id, Date.now());
+      try { d = await deps.deals.retryRefunds(id); } catch { /* fica PENDING até a próxima */ }
     }
     return { deal: d ? await mesaDealView(d) : null };
   });

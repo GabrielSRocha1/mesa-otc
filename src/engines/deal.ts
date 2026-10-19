@@ -343,6 +343,10 @@ export class DealEngine {
   private async refundAll(deal: Deal, actor: string, cancelled: boolean): Promise<void> {
     const t = deal.terms; if (!t) return; let allDone = true;
     for (const leg of t.legs) { const p = deal.participants.find(x => x.role === leg.from) as Deal['participants'][number]; if (p.funding !== 'FINAL') continue;
+      // GUARD de reexecução (auditoria 2026-10-19): leg já reembolsada nesta vida da deal nunca
+      // re-executa o adapter — mesmo que uma detecção tardia de depósito re-marque FINAL. A defesa
+      // final continua on-chain (EVM máquina de estados; BTC UTXO de gasto único), isto é o cinto.
+      if (deal.refunds.some(r => r.legIndex === leg.index && r.status === 'REFUNDED')) { p.funding = 'PENDING'; continue; }
       try { const a = this.d.adapters.require(leg.escrowChain); const tx = await a.refund(deal.id, leg.index); p.funding = 'PENDING'; deal.refunds.push({ role: leg.from, legIndex: leg.index, status: 'REFUNDED', txRef: tx.ref }); await this.persist(deal, 'refunded', actor, { role: leg.from, legIndex: leg.index, tx: tx.ref }); }
       catch (e) { allDone = false; metrics.adapterErrors.inc({ chain: leg.escrowChain, op: 'refund' }); deal.refunds.push({ role: leg.from, legIndex: leg.index, status: 'PENDING', txRef: null }); await this.persist(deal, 'refund.pending', actor, { role: leg.from, error: (e as Error).message }); }
     }

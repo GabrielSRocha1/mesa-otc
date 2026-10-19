@@ -89,6 +89,16 @@ export class EsploraRegtest {
   mine(n = 1): void { this.height += n; }
   utxosOf(address: string): Utxo[] { return [...this.utxos.values()].filter(u => u.address === address); }
 
+  /** REORG: desfaz uma transação CONFIRMADA — ela some da cadeia (/tx → 404), os outputs saem do
+   *  UTXO set e os inputs voltam a ser gastáveis. Simula o lock sumindo após o FINAL. */
+  reorg(txid: string): void {
+    const i = this.txs.findIndex(t => t.txid === txid); if (i < 0) throw new Error(`reorg: tx desconhecida ${txid}`);
+    const tx = this.txs[i] as RegtestTx;
+    tx.vout.forEach((o, k) => { if (!o.scriptpubkey_address) return; this.utxos.delete(`${txid}:${k}`); this.fundedByAddr.set(o.scriptpubkey_address, (this.fundedByAddr.get(o.scriptpubkey_address) ?? 0) - o.value); });
+    for (const v of tx.vin) { const prev = this.txs.find(p => p.txid === v.txid); const o = prev?.vout[v.vout]; if (prev && o?.scriptpubkey_address) this.utxos.set(`${v.txid}:${v.vout}`, { txid: v.txid, vout: v.vout, value: o.value, address: o.scriptpubkey_address, height: prev.height }); }
+    this.txs.splice(i, 1);
+  }
+
   /** Valida inputs contra o UTXO set, aplica e "minera" imediatamente (1 confirmação). */
   private broadcast(hex: string): string {
     const tx = parseTx(hex);

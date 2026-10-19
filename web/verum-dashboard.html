@@ -2086,7 +2086,7 @@ window.addEventListener('unhandledrejection',function(e){try{console.warn('[veru
     if(['FULLY_SIGNED','SETTLEMENT_VALIDATION'].includes(d.state)){ sCls='turn'; sMeta='Validando liquidação…'; }
     else if(d.state==='SETTLING'){ sCls='turn'; sMeta='Executando no contrato…'; }
     else if(d.state==='SETTLED'){ sCls='done'; sMeta='Liquidada no contrato'; }
-    else if(['BLOCKED','REFUNDING','REFUNDED','EXPIRED','CANCELLED'].includes(d.state)){ sMeta='Não liquidada ('+d.state+')'; }
+    else if(['BLOCKED','REFUNDING','REFUNDED','EXPIRED','CANCELLED'].includes(d.state)){ sMeta='Não liquidada ('+d.state+')'; const rfs=d.refunds||[]; const rd=rfs.filter(r=>r.status==='REFUNDED').length, rp=rfs.filter(r=>r.status==='PENDING').length; if(rd||rp) sMeta+=' · reembolsos: '+rd+' concluído(s)'+(rp?(' · '+rp+' aguardando (timelock — retry automático)'):''); }
     const settleStep='<div class="op-step '+sCls+'"><div class="line"></div><div class="dot">'+OP_DOT[sCls]+'</div><div class="nm">Liquidação via contrato</div><div class="meta">'+esc(sMeta)+'</div><div class="addr2">'+esc(d.escrowContract?shortAddr(d.escrowContract):'')+'</div></div>';
     steps.innerHTML=order.map((r,i)=>{
       const isSigned=signed.has(r), isTurn=d.turnRole===r; const cls=isSigned?'done':isTurn?'turn':'lock';
@@ -3023,7 +3023,7 @@ window.addEventListener('unhandledrejection',function(e){try{console.warn('[veru
     if(['FULLY_SIGNED','SETTLEMENT_VALIDATION'].includes(d.state)){ sCls='turn'; sMeta='Validando liquidação…'; }
     else if(d.state==='SETTLING'){ sCls='turn'; sMeta='Executando no contrato…'; }
     else if(d.state==='SETTLED'){ sCls='done'; sMeta='Liquidada no contrato'; }
-    else if(['BLOCKED','REFUNDING','REFUNDED','EXPIRED','CANCELLED'].includes(d.state)){ sMeta='Não liquidada ('+d.state+')'; }
+    else if(['BLOCKED','REFUNDING','REFUNDED','EXPIRED','CANCELLED'].includes(d.state)){ sMeta='Não liquidada ('+d.state+')'; const rfs=d.refunds||[]; const rd=rfs.filter(r=>r.status==='REFUNDED').length, rp=rfs.filter(r=>r.status==='PENDING').length; if(rd||rp) sMeta+=' · reembolsos: '+rd+' concluído(s)'+(rp?(' · '+rp+' aguardando (timelock — retry automático)'):''); }
     const settleStep='<div class="op-step '+sCls+'"><div class="line"></div><div class="dot">'+OP_DOT[sCls]+'</div><div class="nm">Liquidação via contrato</div><div class="meta">'+esc(sMeta)+'</div><div class="addr2"></div></div>';
     steps.innerHTML=order.map((r,i)=>{
       const isSigned=signed.has(r), isTurn=d.turnRole===r; const cls=isSigned?'done':isTurn?'turn':'lock';
@@ -3397,7 +3397,10 @@ window.addEventListener('unhandledrejection',function(e){try{console.warn('[veru
       // Pagamento DECLARATIVO pela própria carteira (signAndSendPayment bitcoin): um toque envia o
       // valor exato ao cofre — sem copiar endereço. Fallback manual continua (carteira antiga/flag off).
       const provPay=solProvider(); const canPay=!!(provPay&&typeof provPay.signAndSendPayment==='function');
+      // Banner obrigatório de ambiente (auditoria): perna BTC no SIMULADOR nunca se passa por real.
+      const simBanner=d.htlcVault.simulated?'<div style="margin-bottom:8px;padding:6px 10px;border-radius:8px;background:rgba(245,158,11,.14);border:1px solid var(--amber);color:var(--amber);font-size:12px;font-weight:700">⚠ AMBIENTE DE TESTE — BTC SIMULADO (nenhum BTC real se move)</div>':'';
       fundHtml='<div style="margin-top:12px;padding:12px;border:1px solid var(--amber);border-radius:10px">'
+        +simBanner
         +'<b style="color:var(--amber)">Depósito BTC pendente</b>'
         +'<div style="font-size:12.5px;color:var(--ink-2);margin-top:4px">Tranque <b class="mono">'+esc(btcHuman)+' BTC</b> ('+esc(String(d.htlcVault.requiredSat))+' sats) no cofre HTLC desta operação:</div>'
         +'<div class="mono" style="word-break:break-all;font-size:12px;background:var(--bg-2);border:1px solid var(--line);border-radius:8px;padding:8px;margin:8px 0">'+esc(d.htlcVault.address)+'</div>'
