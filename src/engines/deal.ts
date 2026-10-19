@@ -187,44 +187,67 @@ export class DealEngine {
     } finally { end(); }
   }
   private commitment(deal: Deal): DealCommitment { const t = deal.terms as Terms; const h = deal.hash as NonNullable<Deal['hash']>; return { dealId: deal.id, revision: deal.revision, dealHash: h.dealHash, expiresAt: t.expiresAt, participants: t.participants, legs: t.legs, pricingHash: h.pricingHash, routeHash: h.routeHash, domainHash: h.domainHash, dealNonce: t.dealNonce, feeBps: t.pricing.platformFeeBps, treasury: this.d.config.treasury, htlcHash: t.route.htlcHash, terms: t }; }
-  private async registerOnChain(deal: Deal): Promise<void> {
+  private async registerChain(deal: Deal, chain: Network): Promise<void> {
+    if (deal.onChain[chain]?.registered && deal.onChain[chain]?.revision === deal.revision) return; // retry idempotente
     const c = this.commitment(deal);
-    for (const chain of new Set(c.legs.map(l => l.escrowChain))) {
-      if (deal.onChain[chain]?.registered && deal.onChain[chain]?.revision === deal.revision) continue; // retry de open idempotente
-      try {
-        const tx = await this.d.adapters.require(chain).registerDeal(c);
-        deal.onChain[chain] = { registered: true, revision: deal.revision, ...(tx.meta ? { meta: tx.meta } : {}) };
-        // Escrow real tem janela fixa on-chain (40 min a partir do createTrade): o teto da Deal
-        // é clampado a ela (menos a margem de execução) p/ que turnos + liquidação caibam dentro.
-        const onChainExpiresAt = typeof tx.meta?.onChainExpiresAt === 'number' ? tx.meta.onChainExpiresAt : null;
-        if (onChainExpiresAt) deal.expiresAt = Math.min(deal.expiresAt, onChainExpiresAt * 1000 - this.d.config.execMarginMs);
-        await this.persist(deal, 'chain.registered', 'keeper', { chain, tx: tx.ref, ...(tx.meta ? { meta: tx.meta } : {}) });
-      } catch (e) { metrics.adapterErrors.inc({ chain, op: 'register' }); throw e; }
-    }
+    try {
+      const tx = await this.d.adapters.require(chain).registerDeal(c);
+      deal.onChain[chain] = { registered: true, revision: deal.revision, ...(tx.meta ? { meta: tx.meta } : {}) };
+      // Escrow real tem janela fixa on-chain (40 min a partir do createTrade): o teto da Deal
+      // é clampado a ela (menos a margem de execução) p/ que turnos + liquidação caibam dentro.
+      const onChainExpiresAt = typeof tx.meta?.onChainExpiresAt === 'number' ? tx.meta.onChainExpiresAt : null;
+      if (onChainExpiresAt) deal.expiresAt = Math.min(deal.expiresAt, onChainExpiresAt * 1000 - this.d.config.execMarginMs);
+      await this.persist(deal, 'chain.registered', 'keeper', { chain, tx: tx.ref, ...(tx.meta ? { meta: tx.meta } : {}) });
+    } catch (e) { metrics.adapterErrors.inc({ chain, op: 'register' }); throw e; }
+  }
+  private async registerOnChain(deal: Deal): Promise<void> {
+    for (const chain of new Set((deal.terms as Terms).legs.map(l => l.escrowChain))) await this.registerChain(deal, chain);
   }
 
   /* ---------- 7. abertura para assinaturas ---------- */
-  async open(dealId: string, actor: string): Promise<Deal> { return this.withDeal(dealId, async deal => { this.assertCreator(deal, actor); await this.registerOnChain(deal); await this.transition(deal, 'AWAITING_SIGNATURES', actor); this.startTurn(deal); await this.persist(deal, 'turn.started', 'system', { turnRole: deal.turnRole, turnExpiresAt: deal.turnExpiresAt }); return deal; }); }
+  async open(dealId: string, actor: string): Promise<Deal> { return this.withDeal(dealId, async deal => { this.assertCreator(deal, actor);
+    // LOCK ANTES DO OPEN (auditoria 2026-10-19): a janela fixa de 40 min do escrow nasce no
+    // createTrade — ela NÃO pode ser gasta esperando bloco Bitcoin. A perna HTLC externa precisa
+    // estar FINAL antes de registrar a perna de contrato; aqui ainda tentamos detectar um lock já
+    // confirmado no cofre (scripts/retry), e sem ele o open devolve FUNDING_REQUIRED com o cofre.
+    const ext = (deal.terms as Terms).legs.find(l => l.mode === 'HTLC');
+    const extP = ext ? deal.participants.find(x => x.role === ext.from) : undefined;
+    if (ext && extP?.fundingRequired && extP.funding !== 'FINAL') {
+      await this.registerChain(deal, ext.escrowChain); // deriva o cofre (sem transação) p/ a detecção
+      await this.fundLeg(deal, ext.from, actor);       // detecta lock confirmado; lança FUNDING_REQUIRED c/ endereço do cofre se não houver
+      if ((extP.funding as string) !== 'FINAL') throw new DomainError('FUNDING_REQUIRED', 'Lock externo visto mas ainda sem confirmações — aguarde o bloco e abra de novo'); // fundLeg muta extP; TS não vê
+    }
+    await this.registerOnChain(deal); await this.transition(deal, 'AWAITING_SIGNATURES', actor); this.startTurn(deal); await this.persist(deal, 'turn.started', 'system', { turnRole: deal.turnRole, turnExpiresAt: deal.turnExpiresAt }); return deal; }); }
 
   /* ---------- 8. funding (dev: simulador; prod: indexer reporta) ---------- */
   async fund(dealId: string, role: Role, actor: string): Promise<Deal> {
     return this.withDeal(dealId, async deal => {
-      if (deal.state !== 'AWAITING_SIGNATURES') throw new DomainError('SETTLEMENT_NOT_ALLOWED', `Depósito só em AWAITING_SIGNATURES (atual ${deal.state})`);
+      const leg0 = (deal.terms as Terms | undefined)?.legs[role === 'SELLER' ? 0 : 1] as Leg | undefined;
+      // LOCK ANTES DO OPEN (auditoria 2026-10-19): a perna HTLC EXTERNA pode (e deve) ser financiada
+      // ainda em LIQUIDITY_VERIFIED — a janela on-chain de 40 min só nasce no open/createTrade,
+      // DEPOIS do lock confirmado. As pernas de contrato continuam exigindo AWAITING_SIGNATURES.
+      const preOpen = deal.state === 'LIQUIDITY_VERIFIED' && leg0?.mode === 'HTLC';
+      if (deal.state !== 'AWAITING_SIGNATURES' && !preOpen) throw new DomainError('SETTLEMENT_NOT_ALLOWED', `Depósito só em AWAITING_SIGNATURES (atual ${deal.state})`);
       const p = deal.participants.find(x => x.role === role); if (!p || !p.fundingRequired) throw new DomainError('NOT_PARTICIPANT', 'papel não deposita');
       if (p.address.toLowerCase() !== actor.toLowerCase()) throw new DomainError('FORBIDDEN', `só a carteira do papel deposita (${role} espera ${p.address}; autenticado ${actor})`, { role, expected: p.address, actor });
       if (p.funding === 'FINAL') return deal;
-      const leg = (deal.terms as Terms).legs[role === 'SELLER' ? 0 : 1] as Leg; const adapter = this.d.adapters.require(leg.escrowChain);
-      // Decisão de produto (2026-10-18): depósitos em QUALQUER ordem — o lock BTC pode vir antes da
-      // leg de contrato. A segurança do swap não depende da ordem (assinaturas e liquidação seguem
-      // exigindo as DUAS pernas financiadas); o que muda é o risco de ESPERA — quem tranca BTC
-      // primeiro e vê o outro lado sumir aguarda o timelock (CSV) para reembolsar via refund.
-      try { const tx = await adapter.deposit(deal.id, leg.index, p.address); const st = await adapter.waitFinal(tx.ref); p.funding = st.status === 'final' ? 'FINAL' : 'SEEN'; await this.persist(deal, 'funded', actor, { role, legIndex: leg.index, tx: tx.ref, status: st.status }); }
-      catch (e) { metrics.adapterErrors.inc({ chain: leg.escrowChain, op: 'deposit' }); throw e; }
+      if (preOpen) await this.registerChain(deal, (leg0 as Leg).escrowChain); // deriva o cofre (BTC: sem transação) p/ a detecção do lock
+      // Depósitos em QUALQUER ordem dentro da fase (2026-10-18): a segurança do swap não depende da
+      // ordem (assinaturas e liquidação seguem exigindo as DUAS pernas financiadas); quem tranca BTC
+      // e vê o outro lado sumir aguarda o timelock (CSV) para reembolsar via refund.
+      await this.fundLeg(deal, role, actor);
       // Depósito confirmou NA VEZ do próprio papel: reinicia a janela de 5 min — o tempo de
       // confirmação da blockchain não pode consumir o prazo de assinar (par do turnExpired acima).
-      if (p.funding === 'FINAL' && deal.turnRole === role) { this.startTurn(deal); await this.persist(deal, 'turn.restarted', 'system', { turnRole: deal.turnRole, turnExpiresAt: deal.turnExpiresAt, reason: 'funding-final' }); }
+      if ((p.funding as string) === 'FINAL' && deal.turnRole === role) { this.startTurn(deal); await this.persist(deal, 'turn.restarted', 'system', { turnRole: deal.turnRole, turnExpiresAt: deal.turnExpiresAt, reason: 'funding-final' }); } // fundLeg muta p; TS não vê
       return deal;
     });
+  }
+  /** Detecção/execução do depósito de UMA perna (usada pelo fund e pelo gate do open). */
+  private async fundLeg(deal: Deal, role: Role, actor: string): Promise<void> {
+    const p = deal.participants.find(x => x.role === role) as Deal['participants'][number];
+    const leg = (deal.terms as Terms).legs[role === 'SELLER' ? 0 : 1] as Leg; const adapter = this.d.adapters.require(leg.escrowChain);
+    try { const tx = await adapter.deposit(deal.id, leg.index, p.address); const st = await adapter.waitFinal(tx.ref); p.funding = st.status === 'final' ? 'FINAL' : 'SEEN'; await this.persist(deal, 'funded', actor, { role, legIndex: leg.index, tx: tx.ref, status: st.status }); }
+    catch (e) { metrics.adapterErrors.inc({ chain: leg.escrowChain, op: 'deposit' }); throw e; }
   }
 
   /* ---------- 9. assinaturas ---------- */
