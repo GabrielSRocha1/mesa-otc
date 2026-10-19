@@ -3467,7 +3467,12 @@ window.addEventListener('unhandledrejection',function(e){try{console.warn('[veru
       finally{ bdep.disabled=false; bdep.textContent=me.role==='BUYER'?'Autorizar pagamento agora':'Depositar no escrow agora'; }
     });
     const myTurn=d&&d.state==='AWAITING_SIGNATURES'&&d.turnRole===me.role&&!(d.signed||[]).includes(me.role);
-    $('#pSignBtn').style.display=myTurn?'':'none';
+    // LOCK ANTES DO OPEN, em UM ATO: quem tranca o BTC vê "Revisar e assinar" JÁ na fase do lock
+    // (LIQUIDITY_VERIFIED) — o pSign paga pela carteira, espera a confirmação, a operação abre
+    // sozinha e a assinatura segue, sem o participante tocar em mais nada. O card de depósito
+    // continua como fallback manual (carteira antiga / envio por fora).
+    const preOpenPay=!!(d&&d.state==='LIQUIDITY_VERIFIED'&&d.htlcVault&&d.htlcVault.from===me.role&&myFund);
+    $('#pSignBtn').style.display=(myTurn||preOpenPay)?'':'none';
     // POP-UP para o PARTICIPANTE fora da vez: a cada avanço da rodada mostra quem está assinando
     // agora / quem acabou de assinar; na liquidação, confirma. (Na SUA vez o modal de assinatura
     // abre sozinho logo abaixo — o pop-up informativo não compete com ele.)
@@ -3495,8 +3500,8 @@ window.addEventListener('unhandledrejection',function(e){try{console.warn('[veru
     // modal já aberto. Fora da vez, reseta a trava. (Antes travava em solProvider() ⇒ só abria em
     // turno Solana; PM/outros papéis em EVM/BTC ficavam só com o pop-up informativo.)
     try{
-      if(myTurn){
-        const key=d.id+':'+me.role;
+      if(myTurn||preOpenPay){
+        const key=d.id+':'+me.role+(preOpenPay?':lock':'');
         if(pAutoTurnKey!==key && !document.querySelector('#modalRoot #pRvBack')){
           pAutoTurnKey=key; pReview();
           // FUSÃO depósito→assinatura: quem JÁ DEPOSITOU (funding FINAL) não toca em mais nada —
@@ -3701,6 +3706,14 @@ window.addEventListener('unhandledrejection',function(e){try{console.warn('[veru
       const myF=(d.funding||[]).find(function(f){ return f.role===(pDto.viewer&&pDto.viewer.role); });
       if(myF&&myF.status!=='FINAL'&&d.htlcVault&&d.htlcVault.from===(pDto.viewer&&pDto.viewer.role)){
         await pFundBtcVault(d,function(t){ if(btn) btn.textContent=t; });
+        // LOCK ANTES DO OPEN: o depósito confirmado ABRIU a operação no backend (auto-open). Se a
+        // vez de assinar ainda não é deste papel (ex.: comprador trancou BTC e a ordem começa no
+        // Vendedor), encerra aqui com sucesso — a assinatura vem quando chegar a vez dele.
+        const fresh=await pApi('/v1/mesas/'+encodeURIComponent(P_MESA));
+        const fd=fresh&&fresh.deal;
+        if(fd&&fd.state==='AWAITING_SIGNATURES'&&fd.turnRole!==(pDto.viewer&&pDto.viewer.role)){
+          closeModal(); toast('BTC trancado no cofre ✓ — operação aberta. Você assina quando chegar a sua vez.','ok'); pRefresh(); return;
+        }
       }
       // 1) Passo ON-CHAIN pela própria carteira (escrow real).
       await pOnchainStep(d,function(t){ if(btn) btn.textContent=t; });
