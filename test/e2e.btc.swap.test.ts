@@ -16,7 +16,6 @@ import { bitcoinMessageHash } from '../src/engines/signature.js';
 import { htlcWitnessScript, p2wshAddress, p2wpkhAddress, bip143Sighash, varint, type HtlcUtxo } from '../src/adapters/bitcoin.js';
 import { EsploraRegtest } from './esploraRegtest.js';
 
-const code = (p: Promise<unknown>) => p.then(() => null, e => (e as { code?: string }).code ?? 'ERRO');
 const u32le = (n: number): Uint8Array => { const b = new Uint8Array(4); new DataView(b.buffer).setUint32(0, n >>> 0, true); return b; };
 const u64le = (n: bigint): Uint8Array => { const b = new Uint8Array(8); new DataView(b.buffer).setBigUint64(0, n, true); return b; };
 
