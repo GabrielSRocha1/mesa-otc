@@ -303,6 +303,9 @@ export class VerumEvmV2Adapter implements SettlementAdapter, ParticipantStepProv
     const b = await this.binding(dealId);
     try {
       const t = await this.rawTrade(b.meta.tradeId);
+      // Trade ainda NÃO registrada (createTradeV2 pendente do PM1): a dívida sai zerada do struct
+      // vazio e o allowance 0 >= 0 marcava FINAL indevidamente — nunca marque depósito sem registro.
+      if (Number(t.state) === StateV2.NONE) throw new DomainError('FUNDING_REQUIRED', 'Operação ainda não registrada on-chain — o Pay Master 1 precisa enviar o createTradeV2 (botão "Registrar on-chain" na esteira)', { registerPending: true, tradeId: b.meta.tradeId });
       const isSellerLeg = Number(b.meta.sellerLegIndex) === legIndex && Number(b.meta.sellerLegIndex) >= 0;
       const owner = isSellerLeg ? t.seller : t.buyer;
       const token = isSellerLeg ? t.sellerAsset : t.buyerAsset;
@@ -313,13 +316,17 @@ export class VerumEvmV2Adapter implements SettlementAdapter, ParticipantStepProv
       const due = base + (paysFee ? t.feeAmount : 0n);
       const allowance = await this.pub.readContract({ address: token, abi: ERC20_ABI, functionName: 'allowance', args: [owner, this.escrowV2] }) as bigint;
       if (allowance >= due) return this.ref('approved');
+      // CARTEIRA REAL (sem chave dev): allowance insuficiente é FUNDING_REQUIRED nominal — com os
+      // números — e não um erro genérico de chave (que o re-check da assinatura engolia, deixando
+      // o participante só com o gate seco "Deposite no escrow antes de assinar").
+      if (!this.keyring?.accountByAddress(owner)) throw new DomainError('FUNDING_REQUIRED', `Autorize o token pela carteira (approve): liberado ${allowance} de ${due} necessários`, { token, owner, allowance: allowance.toString(), due: due.toString(), spender: this.escrowV2 });
       const acc = this.devAccount(owner);
       await this.ensureGas(acc.address);
       const wallet = createWalletClient({ chain: this.viemChain, transport: http(this.cfg.rpcUrl), account: acc });
       const h = await wallet.writeContract({ address: token, abi: ERC20_ABI, functionName: 'approve', args: [this.escrowV2, due], account: acc, chain: this.viemChain });
       await this.pub.waitForTransactionReceipt({ hash: h });
       return this.ref(h);
-    } catch (e) { this.fail('deposit', e); }
+    } catch (e) { if (e instanceof DomainError && e.code === 'FUNDING_REQUIRED') throw e; this.fail('deposit', e); }
   }
 
   /** Submete signV2 na vez do papel (idempotente quando o papel já avançou o nextIdx on-chain). */
