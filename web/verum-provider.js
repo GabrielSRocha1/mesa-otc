@@ -913,6 +913,99 @@ log('DETECTION', 'Provider pronto', {
   connected:  window.verum.connected
 });
 
+  // ── window.ethereum (EIP-1193) no IFRAME do dapp-browser WEB ──────────────
+  // No app NATIVO a carteira injeta o provider EVM completo; no dapp-browser
+  // WEB (verumcrypto.com com o OTC em iframe cross-origin) o pai NÃO consegue
+  // injetar — e sem ele approve/signV2/createTradeV2 morriam com "Provider EVM
+  // não injetado". O dispatcher da carteira JÁ trata as mensagens VERUM_ETH_*
+  // vindas do iframe (accounts/personal_sign/typedData/sendTx/rpc) — esta
+  // fachada fala exatamente esse protocolo. ADITIVO: só no iframe e só quando
+  // nenhum provider Verum existe (nativo/extensão mantêm os caminhos atuais).
+  (function () {
+    if (!_isIframe || _isWebView || _isExtension) return;
+    if (window.ethereum && window.ethereum.isVerum) return;
+    var _ethCbs = {}; var _ethSeq = 0;
+    var ethState = { accounts: [], chainId: null };
+    function ethBridge(type, extra) {
+      return new Promise(function (resolve, reject) {
+        var id = 'eth_' + (++_ethSeq) + '_' + Date.now();
+        var th = setTimeout(function () { if (_ethCbs[id]) { delete _ethCbs[id]; reject(rpcErr(-32603, 'Timeout aguardando a Verum Wallet (' + type + ')')); } }, 120000);
+        _ethCbs[id] = { resolve: resolve, reject: reject, t: th };
+        var msg = { type: type, id: id, origin: window.location.origin };
+        for (var k in extra) msg[k] = extra[k];
+        window.parent.postMessage(msg, '*');
+        log('SIGNATURE', 'eth bridge → ' + type, id);
+      });
+    }
+    function rpcErr(code, message) { var e = new Error(message); e.code = code; return e; }
+    window.addEventListener('message', function (e) {
+      var d = e.data;
+      if (!d || typeof d !== 'object' || !d.id) return;
+      if (d.type === 'VERUM_ETH_RESPONSE') {
+        var cb = _ethCbs[d.id]; if (!cb) return; delete _ethCbs[d.id]; clearTimeout(cb.t);
+        if (d.error) cb.reject(rpcErr(d.error.code != null ? d.error.code : -32603, d.error.message || 'Erro na Verum Wallet'));
+        else cb.resolve(d.result);
+      } else if (d.type === 'VERUM_ETH_EVENT') {
+        if (Array.isArray(d.accounts)) ethState.accounts = d.accounts;
+        if (d.chainId) ethState.chainId = d.chainId;
+      }
+    });
+    var isAddr = function (v) { return typeof v === 'string' && v.length === 42 && v.indexOf('0x') === 0; };
+    var ethProvider = {
+      isVerum: true,
+      request: function (args) {
+        var method = (args && args.method) || '';
+        var params = (args && args.params) || [];
+        switch (method) {
+          case 'eth_requestAccounts':
+            if (ethState.accounts.length) return Promise.resolve(ethState.accounts.slice());
+            return ethBridge('VERUM_ETH_ACCOUNTS_REQUEST', {}).then(function (accts) {
+              if (Array.isArray(accts) && accts.length) ethState.accounts = accts.slice();
+              return Array.isArray(accts) ? accts.slice() : accts;
+            });
+          case 'eth_accounts': return Promise.resolve(ethState.accounts.slice());
+          case 'eth_chainId': return ethState.chainId ? Promise.resolve(ethState.chainId) : ethBridge('VERUM_ETH_RPC_REQUEST', { method: 'eth_chainId', params: [] });
+          case 'personal_sign': {
+            var m0 = params[0], m1 = params[1];
+            var msgData = isAddr(m0) ? m1 : m0; var addr = (msgData === m0) ? m1 : m0;
+            if (!msgData) return Promise.reject(rpcErr(-32602, 'personal_sign: mensagem ausente'));
+            return ethBridge('VERUM_ETH_PERSONAL_SIGN_REQUEST', { message: msgData, address: addr });
+          }
+          case 'eth_signTypedData_v3':
+          case 'eth_signTypedData_v4': {
+            var a0 = params[0], a1 = params[1];
+            var addr712 = isAddr(a0) ? a0 : (isAddr(a1) ? a1 : a0);
+            var typed = (addr712 === a0) ? a1 : a0;
+            if (!typed) return Promise.reject(rpcErr(-32602, 'signTypedData: payload ausente'));
+            return ethBridge('VERUM_ETH_SIGN_TYPED_DATA_REQUEST', { address: addr712, typedData: typeof typed === 'string' ? typed : JSON.stringify(typed) });
+          }
+          case 'eth_sendTransaction': {
+            var tx = params[0];
+            if (!tx || typeof tx !== 'object') return Promise.reject(rpcErr(-32602, 'transação ausente'));
+            return ethBridge('VERUM_ETH_SEND_TX_REQUEST', { tx: tx });
+          }
+          case 'wallet_switchEthereumChain': {
+            var target = params[0] && params[0].chainId;
+            if (!target) return Promise.reject(rpcErr(-32602, 'chainId ausente'));
+            return ethBridge('VERUM_ETH_SWITCH_CHAIN_REQUEST', { chainId: target });
+          }
+          case 'eth_sign': return Promise.reject(rpcErr(4200, 'eth_sign é inseguro — use personal_sign.'));
+          default:
+            // Leitura pura (receipt, estimate, call, blockNumber…) — relay RPC da carteira.
+            return ethBridge('VERUM_ETH_RPC_REQUEST', { method: method, params: params });
+        }
+      },
+      on: function () { return ethProvider; }, removeListener: function () { return ethProvider; },
+    };
+    window.ethereum = ethProvider;
+    // EIP-6963 — o findVerumEthProvider do dashboard identifica por rdns/isVerum.
+    var ethInfo = Object.freeze({ uuid: 'a8f2b7e4-verum-0000-0000-eip6963shim1', name: 'Verum Wallet', icon: "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='8' fill='%230A0A0A'/%3E%3Ctext x='16' y='23' font-family='serif' font-size='20' font-weight='bold' fill='%23C9A84C' text-anchor='middle'%3EV%3C/text%3E%3C/svg%3E", rdns: 'com.verumcrypto.wallet' });
+    function ethAnnounce() { try { window.dispatchEvent(new CustomEvent('eip6963:announceProvider', { detail: Object.freeze({ info: ethInfo, provider: ethProvider }) })); } catch (e2) {} }
+    window.addEventListener('eip6963:requestProvider', ethAnnounce);
+    ethAnnounce();
+    log('DETECTION', 'window.ethereum (fachada iframe) injetado');
+  })();
+
   window.dispatchEvent(new Event('verum#initialized'));
   document.dispatchEvent(new Event('verum#initialized'));
 })();
