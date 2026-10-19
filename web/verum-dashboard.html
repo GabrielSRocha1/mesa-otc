@@ -3739,7 +3739,10 @@ window.addEventListener('unhandledrejection',function(e){try{console.warn('[veru
   // NOT_PARTICIPANT. Cura única: descarta o token e força a reentrada — que renasce na rede/
   // endereço certos do papel. Usada no pSign e nos botões de depósito.
   function pStaleSession(e){
-    if(!(e&&e.code==='NOT_PARTICIPANT')) return false;
+    // Também se auto-cura quando o TOKEN nem é reconhecido ("Sessão necessária"/401): token antigo
+    // no storage, emitido antes de uma troca de SESSION_SECRET/ambiente — reentrada renova.
+    const semSessao=!!(e&&(e.status===401||(e.code==='FORBIDDEN'&&/sess[ãa]o/i.test(e.message||''))));
+    if(!(e&&e.code==='NOT_PARTICIPANT')&&!semSessao) return false;
     try{ sessionStorage.removeItem('verum_mesa_pt_'+P_MESA); localStorage.removeItem('verum_mesa_pt_'+P_MESA); }catch(x){}
     P_TOK=''; closeModal();
     pReentry('Sua sessão não corresponde ao seu papel nesta operação (a rede/carteira mudou). Reconecte a Verum Wallet para continuar.');
