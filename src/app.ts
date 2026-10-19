@@ -40,7 +40,7 @@ import { MesaService } from './mesa/mesaService.js';
 import { PushService, vapidFrom } from './mesa/push.js';
 import { metrics, logger } from './monitoring/metrics.js';
 import type { Config } from './config.js';
-import type { Deal, Participant, Role } from './domain/types.js';
+import type { Deal, Network, Participant, Role } from './domain/types.js';
 import type { ApprovalSignature } from './adapters/types.js';
 
 export interface AppOverrides { autoSettle?: boolean; store?: Store; adapters?: SettlementAdapter[]; priceSources?: PriceSource[]; liquiditySources?: LiquiditySource[]; screening?: WalletScreening; now?: () => number; denylist?: string[]; balanceReaders?: import('./mesa/balances.js').BalanceReaders; btcAddressOf?: (dealId: string, role: Role) => Promise<string | null>; evmAddressOf?: (dealId: string, role: Role) => Promise<string | null>; /** Runner de swap resumível (testnet): preimage HTLC fixa p/ recriar a deal com o mesmo htlcHash de um lock confirmado. */ htlcPreimageHex?: string }
@@ -222,13 +222,15 @@ export async function createApp(config: Config, o: AppOverrides = {}): Promise<A
       const a = adapters.require(chain);
       if (!(a instanceof LocalChainAdapter)) continue; // adapters reais são stateless vs RPC — nada a re-hidratar
       const st = await a.getDealState(deal.id);
-      if (st.status !== 'NONE') continue;
-      await a.registerDeal(c);
-      const sim = chain === 'solana' ? local.solana : chain === 'bitcoin' ? local.bitcoin : chain === 'tron' ? (local.tron ?? local.evm) : local.evm;
+      if (st.status === 'NONE') await a.registerDeal(c);
       for (const leg of t.legs.filter(l => l.escrowChain === chain)) {
-        const p = deal.participants.find(x => x.role === leg.from); if (!p || p.funding !== 'FINAL') continue;
-        sim.mint(p.address, leg.asset.contractOrMint, BigInt(leg.amountBase));
-        await a.deposit(deal.id, leg.index, p.address);
+        const p = deal.participants.find(x => x.role === leg.from); if (!p) continue;
+        // Saldo do depositante É por instância no simulador: semeia SEMPRE (amount + folga p/
+        // comissões) — cobre tanto o re-depósito dos FINAL quanto o depósito VIVO de uma carteira
+        // real numa perna simulada (preview BITCOIN_SIMULATE), que chega zerada em toda instância.
+        a.mint(p.address, leg.asset.contractOrMint, BigInt(leg.amountBase) * 2n);
+        if (p.funding !== 'FINAL') continue;
+        try { await a.deposit(deal.id, leg.index, p.address); } catch { /* idempotente/expirada — melhor esforço */ }
       }
     }
   };
@@ -297,7 +299,7 @@ export async function createApp(config: Config, o: AppOverrides = {}): Promise<A
   };
   // Ativação de token na allowlist on-chain do escrow V2 (ex.: WETH) — só quando o V2 está ativo.
   const escrowAddToken = verumEvmV2 ? ((t: `0x${string}`, d: number, s: string) => verumEvmV2!.addToken(t, d, s)) : undefined;
-  const api = await buildApi({ deals, settlement, price, liquidity, router, registry, adapters, platformFeeBps: config.PLATFORM_FEE_BPS, mesa, push, escrowAddToken, networkCostUsd: async n => adapters.require(n).estimateCostUsd('settle'), auth, portal, identity, identityDev, rooms, proposals, store, audit, balanceReaders: o.balanceReaders, mesaHtmlPath: config.MESA_HTML_PATH, portalHtmlPath: config.PORTAL_HTML_PATH, conviteHtmlPath: config.CONVITE_HTML_PATH, operacaoHtmlPath: config.OPERACAO_HTML_PATH, env: config.OTC_ENV, demoDeferFunding: config.DEMO_DEFER_FUNDING, rateLimit: { windowMs: 60_000, max: config.OTC_ENV === 'dev' ? 100_000 : 120 }, dev: local ? { solanaChainId: adapters.require('solana').chain.chainId, mint: (a, c, amt) => local!.solana.mint(a, c, amt), demo, ensureOnChain, evm: verumEvm && verumEvmKeyring && verumEvmCfg ? { chainId: String(verumEvmCfg.chainId), escrow: verumEvmCfg.escrow, tbtc: verumEvmCfg.tbtc, tusdt: verumEvmCfg.tusdt, explorerBase: verumEvmCfg.explorerBase, keyring: verumEvmKeyring, mintToken: (t, to, amt) => verumEvm!.mintToken(t, to, amt) } : undefined } : undefined });
+  const api = await buildApi({ deals, settlement, price, liquidity, router, registry, adapters, platformFeeBps: config.PLATFORM_FEE_BPS, mesa, push, escrowAddToken, networkCostUsd: async n => adapters.require(n).estimateCostUsd('settle'), auth, portal, identity, identityDev, rooms, proposals, store, audit, balanceReaders: o.balanceReaders, mesaHtmlPath: config.MESA_HTML_PATH, portalHtmlPath: config.PORTAL_HTML_PATH, conviteHtmlPath: config.CONVITE_HTML_PATH, operacaoHtmlPath: config.OPERACAO_HTML_PATH, env: config.OTC_ENV, demoDeferFunding: config.DEMO_DEFER_FUNDING, rateLimit: { windowMs: 60_000, max: config.OTC_ENV === 'dev' ? 100_000 : 120 }, dev: local ? { solanaChainId: adapters.require('solana').chain.chainId, mint: (a, c, amt) => local!.solana.mint(a, c, amt), demo, ensureOnChain, seed: (network, address, contract, amount) => { const a = adapters.get(network as Network); if (a instanceof LocalChainAdapter) a.mint(address, contract, amount); }, evm: verumEvm && verumEvmKeyring && verumEvmCfg ? { chainId: String(verumEvmCfg.chainId), escrow: verumEvmCfg.escrow, tbtc: verumEvmCfg.tbtc, tusdt: verumEvmCfg.tusdt, explorerBase: verumEvmCfg.explorerBase, keyring: verumEvmKeyring, mintToken: (t, to, amt) => verumEvm!.mintToken(t, to, amt) } : undefined } : undefined });
   let timer: NodeJS.Timeout | null = null;
   let ticks = 0;
   const tick = async () => { try { const ids = await deals.expireDue(); if (ids.length) logger.info({ ids }, 'deals expiradas'); if (++ticks % 720 === 0) { const purged = await store.purge(now(), 24 * 3600_000); logger.info(purged, 'retenção'); } metrics.priceBreakerOpen.set(price.breakerState().open ? 1 : 0); for (const s of ['AWAITING_SIGNATURES', 'SETTLING', 'SETTLEMENT_VALIDATION', 'REFUNDING'] as const) metrics.activeDeals.set({ state: s }, (await store.listDeals({ states: [s] })).length); } catch (e) { logger.error({ err: (e as Error).message }, 'scheduler'); } };

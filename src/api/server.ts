@@ -47,7 +47,7 @@ import type { PushService } from '../mesa/push.js';
 const MAX_STREAMS_PER_SESSION = 8; const streams = new Map<string, number>();
 
 /** Simulador local usado só em dev para dar saldo ao Vendedor ao criar a Deal-demo da mesa. */
-export interface DevMint { solanaChainId: string; mint: (address: string, contract: string | null, amount: bigint) => unknown; evm?: DevEvm; demo?: DevDemo; ensureOnChain?: (dealId: string) => Promise<void> }
+export interface DevMint { solanaChainId: string; mint: (address: string, contract: string | null, amount: bigint) => unknown; evm?: DevEvm; demo?: DevDemo; ensureOnChain?: (dealId: string) => Promise<void>; /** Mint em QUALQUER rede cujo adapter registrado seja o simulador (no-op nas reais) — semeia carteiras reais em pernas simuladas (preview). */ seed?: (network: string, address: string, contract: string | null, amount: bigint) => void }
 /** Conta demo (apresentações): keyring das 4 carteiras falsas + set de todos os endereços fake. */
 export interface DevDemo { keyring: import('../portal/demo.js').DemoMesaKeyring; addresses: Set<string> }
 /** Modo EVM dev: contrato real (Sepolia/anvil), keyring de EOAs dev e mint dos tokens mock. */
@@ -286,7 +286,11 @@ export async function buildApi(deps: ApiDeps): Promise<FastifyInstance> {
   // ex.: reentrada antiga na Solana para um Vendedor BTC) caía no gate do motor como FORBIDDEN
   // "só a carteira do papel deposita", que a UI não sabe curar; o NOT_PARTICIPANT diagnóstico
   // dispara o auto-heal (pStaleSession) e a reentrada renasce no endereço real do participante.
-  app.post('/v1/deals/:id/legs/:idx/deposit', async (req, reply) => { const s = requireSession(req); const { id, idx } = req.params as { id: string; idx: string }; const d = await deps.deals.get(id); const leg = d.terms?.legs[Number(idx)]; if (!leg) throw new DomainError('INVALID_INPUT', 'leg inexistente'); requireParticipant(d, s); return idempotent(req, reply, async () => deps.deals.view(await deps.deals.fund(id, leg.from, s.address), s.address)); });
+  app.post('/v1/deals/:id/legs/:idx/deposit', async (req, reply) => { const s = requireSession(req); const { id, idx } = req.params as { id: string; idx: string }; const d = await deps.deals.get(id); const leg = d.terms?.legs[Number(idx)]; if (!leg) throw new DomainError('INVALID_INPUT', 'leg inexistente'); requireParticipant(d, s);
+    // Serverless + perna simulada: a deal pode ter sido registrada em OUTRA instância — re-hidrata
+    // o simulador local (registro + saldo do depositante) antes do fund. No-op nas redes reais.
+    try { await deps.dev?.ensureOnChain?.(id); } catch { /* melhor esforço */ }
+    return idempotent(req, reply, async () => deps.deals.view(await deps.deals.fund(id, leg.from, s.address), s.address)); });
   /* ---------- Propostas estruturadas de alteração de termos (§5.3/§6) ---------- */
   // Mudança tipada e validada (nunca texto livre). Aplicar aciona o amend: version++ invalida
   // todas as assinaturas e a operação retorna a AWAITING_SIGNATURES para reassinatura.
@@ -310,7 +314,18 @@ export async function buildApi(deps: ApiDeps): Promise<FastifyInstance> {
       try { await deps.deals.fund(id, b.role, p0.address); }
       catch (e) { if ((e as DomainError).code === 'FUNDING_REQUIRED') throw e; }
     }
-    const r = await deps.deals.submitSignature(id, { role: b.role, signer: s.address, scheme: s.keyScheme, signature: b.signature, nonce: b.nonce }, s.address); return { count: r.count, required: r.deal.requiredSignatures, state: r.deal.state }; }); });
+    // Serverless + perna simulada: re-hidrata o simulador desta instância ANTES do submit (a última
+    // assinatura valida o funding on-chain e dispara a liquidação). Depois, liquida INLINE quando a
+    // validação destravou — o listener assíncrono pode ser congelado após a resposta (par do m3Sign).
+    try { await deps.dev?.ensureOnChain?.(id); } catch { /* melhor esforço */ }
+    const r = await deps.deals.submitSignature(id, { role: b.role, signer: s.address, scheme: s.keyScheme, signature: b.signature, nonce: b.nonce }, s.address);
+    let st = r.deal.state;
+    if (st === 'SETTLEMENT_VALIDATION') {
+      try { await deps.dev?.ensureOnChain?.(id); } catch { /* melhor esforço */ }
+      try { await deps.settlement.settle(id, 'keeper'); } catch { /* rejeição vira BLOCKED/EXPIRED; o refetch reflete */ }
+      st = (await deps.deals.get(id).catch(() => r.deal)).state;
+    }
+    return { count: r.count, required: r.deal.requiredSignatures, state: st }; }); });
   /**
    * Fluxo de CARTEIRA REAL (escrow canônico Verum): o passo on-chain da vez do participante.
    * GET devolve o que assinar/enviar (EVM/Tron: approve pendente + typedData Approval; Solana: tx base64).
@@ -527,6 +542,10 @@ export async function buildApi(deps: ApiDeps): Promise<FastifyInstance> {
         { role: 'BUYER', network: btcBuyer ? 'bitcoin' : 'ethereum', chainId: btcBuyer ? btcAdapter.chain.chainId : evmAdapter.chain.chainId, address: btcBuyer ? btcAddr : tokenEvm },
       ],
     };
+    // Pernas SIMULADAS (preview/dev com carteiras reais): o simulador nasce zerado — semeia o saldo
+    // dos depositantes ANTES do create (o verify checa o saldo do Vendedor) . No-op nas redes reais.
+    deps.dev?.seed?.('bitcoin', btcAddr as string, null, BigInt(mesa.config!.amountInBase as string) * 2n);
+    deps.dev?.seed?.('ethereum', tokenEvm as string, tokenAsset.contractOrMint, 10n ** 15n);
     const creator = (btcBuyer ? tokenEvm : btcAddr) as string;
     const created = await deps.deals.create(input, creator);
     // Linka a deal à mesa ANTES do open: o registro on-chain (dentro do open) resolve o endereço
@@ -680,6 +699,11 @@ export async function buildApi(deps: ApiDeps): Promise<FastifyInstance> {
       maxSlippageBps: b.maxSlippageBps, maxPriceDriftBps: 500, expiresInSec: b.expiresInSec,
       participants,
     };
+    // Pernas SIMULADAS (preview/dev com carteiras reais): semeia os depositantes antes do create.
+    // Neste fluxo TODOS os participantes são endereços Solana — a perna BTC simulada deposita pelo
+    // endereço Solana do papel (o btcAddr só importa no lock externo REAL). No-op nas redes reais.
+    deps.dev?.seed?.('bitcoin', (btcBuyer ? buyerSol : sellerSol) as string, null, BigInt(mesa.config!.amountInBase as string) * 2n);
+    deps.dev?.seed?.('solana', (btcBuyer ? sellerSol : buyerSol) as string, solAsset.contractOrMint, 10n ** 15n);
     const creator = sellerSol as string;
     const created = await deps.deals.create(input, creator);
     onCreated(created.id); // linka ANTES do open: o registro resolve endereços BTC das contrapartes pela mesa
@@ -746,6 +770,10 @@ export async function buildApi(deps: ApiDeps): Promise<FastifyInstance> {
       participants: mesa.chairs.filter(c => roleAddr[c.role]).map(c => ({ role: c.role as Role, network: net, chainId, address: roleAddr[c.role] as string })),
     };
     const sellerAddr = roleAddr['SELLER'] as string;
+    // Rede SIMULADA (preview/dev com carteiras reais): semeia os dois depositantes antes do create
+    // (o verify checa o saldo do Vendedor; o deposit debita do simulador). No-op nas redes reais.
+    deps.dev?.seed?.(net, sellerAddr, input.assetIn.contractOrMint, BigInt(mesa.config!.amountInBase as string) * 2n);
+    if (roleAddr['BUYER']) deps.dev?.seed?.(net, roleAddr['BUYER'] as string, input.assetOut.contractOrMint, 10n ** 15n);
     const created = await deps.deals.create(input, sellerAddr);
     onCreated(created.id);
     for (const p of input.participants) if (p.role !== 'SELLER') await deps.deals.connectWallet(created.id, p.role, p.address, p.address);
