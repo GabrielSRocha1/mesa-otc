@@ -143,7 +143,23 @@ export async function buildApi(deps: ApiDeps): Promise<FastifyInstance> {
   };
 
   /* ---------- saúde e métricas ---------- */
-  app.get('/health', async () => ({ ok: true, env: deps.env, time: Date.now(), adapters: deps.adapters?.all().map(a => `${a.chain.network}:${a.chain.chainId}`) ?? [] }));
+  // envGroups: SÓ presença/contagem (nunca valores) — diagnóstico de campo de env faltando por
+  // ambiente (ex.: preview sem o grupo VERUM_EVM_* bootava tudo simulado sem pista do porquê).
+  app.get('/health', async () => {
+    const count = (keys: string[]) => keys.filter(k => !!process.env[k]).length;
+    return { ok: true, env: deps.env, time: Date.now(), adapters: deps.adapters?.all().map(a => `${a.chain.network}:${a.chain.chainId}`) ?? [],
+      envGroups: {
+        verumEvm: `${count(['VERUM_EVM_RPC_URL', 'VERUM_EVM_CHAIN_ID', 'VERUM_EVM_ESCROW_ADDRESS', 'VERUM_EVM_KEEPER_KEY', 'VERUM_EVM_ATTESTOR_KEY', 'VERUM_EVM_TBTC', 'VERUM_EVM_TUSDT'])}/7`,
+        verumEvmV2: count(['VERUM_EVM_V2_ESCROW_ADDRESS']),
+        solana: `${count(['SOLANA_RPC_URL', 'SOLANA_CHAIN_ID', 'SOLANA_PROGRAM_ID', 'SOLANA_EXECUTOR_KEYPAIR', 'SOLANA_ATTESTOR_KEYPAIR', 'SOLANA_TUSDT_MINT', 'SOLANA_TBTC_MINT'])}/7`,
+        tron: `${count(['TRON_FULL_HOST', 'TRON_CHAIN_ID', 'TRON_ESCROW_ADDRESS', 'TRON_EXECUTOR_KEY', 'TRON_ATTESTOR_KEY', 'TRON_TUSDT', 'TRON_TBTC'])}/7`,
+        bitcoin: `${count(['BITCOIN_ESPLORA_URL', 'BITCOIN_NETWORK', 'BITCOIN_CLAIM_KEY', 'BITCOIN_REFUND_KEY'])}/4`,
+        bitcoinSimulate: process.env.BITCOIN_SIMULATE ?? null,
+        chainEndpoints: Object.keys(process.env).filter(k => k.startsWith('CHAIN_ENDPOINT_')).length,
+        database: process.env.DATABASE_MODE ?? null,
+        sessionSecret: !!process.env.SESSION_SECRET,
+      } };
+  });
   // Diagnóstico da persistência do portal: roundtrip de escrita + resumo do singleton NO BANCO.
   // Não expõe dados sensíveis (só contagens e mensagens de erro de infraestrutura).
   app.get('/health/portal', async () => ({ persistence: (await deps.portal.persistenceHealth()) ?? 'memória/arquivo (sem backend async)' }));
