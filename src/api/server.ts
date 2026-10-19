@@ -856,6 +856,8 @@ export async function buildApi(deps: ApiDeps): Promise<FastifyInstance> {
       try { if (d.state === 'SETTLEMENT_VALIDATION') await deps.settlement.settle(id, 'keeper'); else await deps.settlement.recover(); } catch { /* idempotente; falha vira BLOCKED */ }
       d = await deps.deals.get(id).catch(() => d);
     }
+    // Turnos adiados (registro pendente do PM1): o poll do admin retoma quando confirmar on-chain.
+    if (d && d.state === 'AWAITING_SIGNATURES' && d.turnRole === null) { await healDeferredTurns(id); d = await deps.deals.get(id).catch(() => d); }
     // Serverless sem scheduler: o poll do admin também retenta reembolsos PENDENTES (ex.: refund
     // BTC aguardando o timelock CSV). Throttle por instância (90 s): cada tentativa consulta a
     // rede e gera evento de auditoria — o poll de segundos não pode virar spam.
@@ -1326,15 +1328,28 @@ export async function buildApi(deps: ApiDeps): Promise<FastifyInstance> {
   });
 
   // --- mesa (admin OU participante; DTO recortado por papel NO BACKEND) ---
+  // TURNOS ADIADOS → RETOMADA: quando o registro pendente (createTradeV2 do PM1) confirma
+  // on-chain, os turnos começam — detectado nos polls (participante e admin) com throttle por
+  // instância (a checagem lê a chain). Idempotente; no-op quando não há nada adiado.
+  const turnHealAt = new Map<string, number>();
+  const healDeferredTurns = async (dealId: string | null | undefined): Promise<void> => {
+    if (!dealId || Date.now() - (turnHealAt.get(dealId) ?? 0) < 15_000) return;
+    const d = await deps.deals.get(dealId).catch(() => null);
+    if (!d || d.state !== 'AWAITING_SIGNATURES' || d.turnRole !== null || d.validSignatures >= d.requiredSignatures) return;
+    turnHealAt.set(dealId, Date.now());
+    try { await deps.deals.startTurnsIfRegistered(dealId); } catch { /* próxima rodada */ }
+  };
   app.get('/v1/mesas/:mesaId', async req => {
     const { mesaId } = req.params as { mesaId: string };
     const mesaClaim = req.session?.mesa;
     if (mesaClaim && mesaClaim.mesaId === mesaId) {
       const mesa = deps.mesa.mesaById(mesaId);
       if (!mesa) throw new DomainError('INVALID_INPUT', 'Mesa não encontrada');
+      await healDeferredTurns(mesa.dealId);
       return deps.mesa.mesaViewFor(mesa, { kind: 'participant', chairId: mesaClaim.chairId });
     }
     const { mesa } = adminMesa(req, mesaId, false);
+    await healDeferredTurns(mesa.dealId);
     return deps.mesa.mesaViewFor(mesa, { kind: 'admin' });
   });
   // Web Push — chave pública VAPID (p/ o front se inscrever). Vazia = push desligado (sem VAPID).

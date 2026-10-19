@@ -217,7 +217,31 @@ export class DealEngine {
       await this.fundLeg(deal, ext.from, actor);       // detecta lock confirmado; lança FUNDING_REQUIRED c/ endereço do cofre se não houver
       if ((extP.funding as string) !== 'FINAL') throw new DomainError('FUNDING_REQUIRED', 'Lock externo visto mas ainda sem confirmações — aguarde o bloco e abra de novo'); // fundLeg muta extP; TS não vê
     }
-    await this.registerOnChain(deal); await this.transition(deal, 'AWAITING_SIGNATURES', actor); this.startTurn(deal); await this.persist(deal, 'turn.started', 'system', { turnRole: deal.turnRole, turnExpiresAt: deal.turnExpiresAt }); return deal; }); }
+    await this.registerOnChain(deal); await this.transition(deal, 'AWAITING_SIGNATURES', actor);
+    // GATE DE SEQUÊNCIA (auditoria 2026-10-19): com registro PENDENTE de carteira real
+    // (createTradeV2 do PM1 ainda não enviado), os TURNOS NÃO começam — sem isso o Vendedor
+    // assinava a mesa antes de o contrato existir e o signV2 on-chain dele ficava órfão
+    // (a liquidação morreria na validação). startTurnsIfRegistered retoma quando confirmar.
+    if (this.registerPendingChains(deal).length) { await this.persist(deal, 'turn.deferred', 'system', { reason: 'register-pending' }); }
+    else { this.startTurn(deal); await this.persist(deal, 'turn.started', 'system', { turnRole: deal.turnRole, turnExpiresAt: deal.turnExpiresAt }); }
+    return deal; }); }
+  /** Redes cujo registro on-chain ficou pendente para a carteira do criador (meta registerPending). */
+  private registerPendingChains(deal: Deal): Network[] {
+    return (Object.entries(deal.onChain) as [Network, { meta?: Record<string, unknown> } | undefined][]).filter(([, o]) => !!o?.meta?.registerPending).map(([c]) => c);
+  }
+  /** Retoma os turnos adiados quando o registro pendente CONFIRMAR on-chain (chamado nos polls, com throttle). */
+  async startTurnsIfRegistered(dealId: string): Promise<Deal> {
+    return this.withDeal(dealId, async deal => {
+      if (deal.state !== 'AWAITING_SIGNATURES' || deal.turnRole !== null || deal.validSignatures >= deal.requiredSignatures) return deal;
+      for (const chain of this.registerPendingChains(deal)) {
+        const st = await this.d.adapters.require(chain).getDealState(deal.id).catch(() => null);
+        if (!st || st.status === 'NONE') return deal; // registro ainda não confirmou — segue adiado
+      }
+      this.startTurn(deal);
+      await this.persist(deal, 'turn.started', 'system', { turnRole: deal.turnRole, turnExpiresAt: deal.turnExpiresAt, reason: 'register-confirmed' });
+      return deal;
+    });
+  }
 
   /* ---------- 8. funding (dev: simulador; prod: indexer reporta) ---------- */
   async fund(dealId: string, role: Role, actor: string): Promise<Deal> {
