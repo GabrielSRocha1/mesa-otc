@@ -306,7 +306,17 @@ export async function buildApi(deps: ApiDeps): Promise<FastifyInstance> {
     // Serverless + perna simulada: a deal pode ter sido registrada em OUTRA instância — re-hidrata
     // o simulador local (registro + saldo do depositante) antes do fund. No-op nas redes reais.
     try { await deps.dev?.ensureOnChain?.(id); } catch { /* melhor esforço */ }
-    return idempotent(req, reply, async () => deps.deals.view(await deps.deals.fund(id, leg.from, s.address), s.address)); });
+    return idempotent(req, reply, async () => {
+      let after = await deps.deals.fund(id, leg.from, s.address);
+      // LOCK ANTES DO OPEN: o lock externo confirmou com a deal ainda fechada — ABRE agora (o
+      // createTrade/createTradeV2 registra e a janela de 40 min nasce AQUI, não no approve).
+      // Actor = criador da deal (transição de estado do motor, não assinatura de participante).
+      if (after.state === 'LIQUIDITY_VERIFIED' && after.participants.find(x => x.role === leg.from)?.funding === 'FINAL') {
+        try { after = await deps.deals.open(id, after.createdBy); }
+        catch (e) { logger.warn({ dealId: id, err: (e as Error).message }, 'auto-open pós-lock falhou (segue fechada; retry no próximo depósito/approve)'); }
+      }
+      return deps.deals.view(after, s.address);
+    }); });
   /* ---------- Propostas estruturadas de alteração de termos (§5.3/§6) ---------- */
   // Mudança tipada e validada (nunca texto livre). Aplicar aciona o amend: version++ invalida
   // todas as assinaturas e a operação retorna a AWAITING_SIGNATURES para reassinatura.
@@ -458,7 +468,16 @@ export async function buildApi(deps: ApiDeps): Promise<FastifyInstance> {
       demo: !!(deps.dev?.demo && d.participants.some(p => deps.dev!.demo!.addresses.has(p.address))),
       escrowContract: legs[0]?.escrowContract ?? null, escrowChainId: ev?.chainId ?? null, explorerBase: ev?.explorerBase ?? null,
       pair: { in: { code: d.draft.assetIn.code, decimals: d.draft.assetIn.decimals, amountBase: d.draft.amountInBase }, out: { code: d.draft.assetOut.code, decimals: d.draft.assetOut.decimals, amountBase: legs[1]?.amountBase ?? null } },
-      settlement: rec ? { status: rec.status, legs: rec.legs.map(l => ({ index: l.index, label: legLabel(l.index), txRef: l.txRef, step: l.step, confirmations: l.confirmations })) } : null
+      settlement: rec ? { status: rec.status, legs: rec.legs.map(l => ({ index: l.index, label: legLabel(l.index), txRef: l.txRef, step: l.step, confirmations: l.confirmations })) } : null,
+      // LOCK ANTES DO OPEN: com o open adiado, o createTradeV2 pendente precisa estar VISÍVEL no
+      // poll do admin (antes era devolvido só na resposta do approve) — o PM1 envia pela carteira.
+      // O meta registerPending nunca é limpo: a view re-checa on-chain e esconde quando confirmar.
+      registerTx: await (async () => {
+        const m = d.onChain?.ethereum?.meta as Record<string, unknown> | undefined;
+        if (!(m?.registerPending && typeof m.registerTx === 'string')) return null;
+        try { const st = await deps.adapters?.get('ethereum')?.getDealState(d.id); if (st && st.status !== 'NONE') return null; } catch { /* RPC fora: mantém o botão */ }
+        return JSON.parse(m.registerTx) as Record<string, unknown>;
+      })()
     };
   };
   /** Corpo aceito na criação da operação da mesa (legada e v3). */
@@ -568,19 +587,25 @@ export async function buildApi(deps: ApiDeps): Promise<FastifyInstance> {
     // EVM do vendedor-BTC pela carteira multichain da cadeira — a busca é por mesa.dealId(s).
     onCreated(created.id);
     for (const p of input.participants) if (p.role !== 'SELLER') await deps.deals.connectWallet(created.id, p.role as Role, p.address as string, p.address as string);
-    await deps.deals.open(created.id, creator); // registra: createTradeV2 (EVM) + derivação do cofre (BTC)
-    // Funding: a perna de TOKEN deposita no escrow (approve ERC-20 — melhor esforço; a carteira real
-    // completa via /onchain-tx); a perna BTC é o LOCK EXTERNO — o fund devolve o endereço do cofre.
+    // LOCK ANTES DO OPEN (auditoria 2026-10-19): o fund da perna BTC roda em LIQUIDITY_VERIFIED
+    // (deriva o cofre e devolve FUNDING_REQUIRED com o endereço); o open — que registra o
+    // createTradeV2 e FAZ NASCER a janela de 40 min — só acontece com o lock FINAL (aqui, se o
+    // cofre já estiver confirmado; senão, no auto-open do endpoint de depósito do participante).
     const tokenRole: Role = btcBuyer ? 'SELLER' : 'BUYER';
     const btcRole: Role = btcBuyer ? 'BUYER' : 'SELLER';
     let htlcFunding: { address: string; requiredSat: string } | null = null;
-    try { await deps.deals.fund(created.id, tokenRole, tokenEvm as string); } catch (e) { logger.warn({ dealId: created.id, err: (e as Error).message }, 'funding da perna de token pendente (carteira real completa via /onchain-tx)'); }
     try { await deps.deals.fund(created.id, btcRole, btcAddr as string); }
     catch (e) {
       const err = e as DomainError;
       if (err.code === 'FUNDING_REQUIRED' && err.details?.address) htlcFunding = { address: String(err.details.address), requiredSat: String(err.details.requiredSat ?? mesa.config!.amountInBase) };
       else logger.warn({ dealId: created.id, err: err.message }, 'lock BTC pendente');
     }
+    let opened = false;
+    try { await deps.deals.open(created.id, creator); opened = true; }
+    catch (e) { const err = e as DomainError; if (err.code !== 'FUNDING_REQUIRED') throw e; if (!htlcFunding && err.details?.address) htlcFunding = { address: String(err.details.address), requiredSat: String(err.details.requiredSat ?? mesa.config!.amountInBase) }; }
+    // Perna de TOKEN só deposita com a operação ABERTA (approve ERC-20 — melhor esforço; a
+    // carteira real completa via /onchain-tx).
+    if (opened) { try { await deps.deals.fund(created.id, tokenRole, tokenEvm as string); } catch (e) { logger.warn({ dealId: created.id, err: (e as Error).message }, 'funding da perna de token pendente (carteira real completa via /onchain-tx)'); } }
     await deps.audit.append({ actorType: 'user', actorId: mesa.payMasterId, category: 'portal.mesa.deal.created', dealId: created.id, payload: { mode: btcBuyer ? 'htlc-btc-comprador' : 'htlc-btc', vault: htlcFunding?.address ?? null } });
     // Carteira real: o registro on-chain (createTradeV2) é enviado pela carteira do PM1 — o
     // txRequest vem no meta do adapter e vai na resposta para o dashboard disparar a assinatura.
@@ -724,19 +749,25 @@ export async function buildApi(deps: ApiDeps): Promise<FastifyInstance> {
     const created = await deps.deals.create(input, creator);
     onCreated(created.id); // linka ANTES do open: o registro resolve endereços BTC das contrapartes pela mesa
     for (const p of participants) if (p.role !== 'SELLER') await deps.deals.connectWallet(created.id, p.role as Role, p.address as string, p.address as string);
-    await deps.deals.open(created.id, creator); // registra: create_trade (Solana, htlc_hash) + derivação do cofre (BTC)
-    // Funding: a perna de TOKEN é custodiada no seller_sign/buyer_sign (deposit = checagem de saldo);
-    // a perna BTC é o LOCK EXTERNO (P2WSH) — o fund devolve o endereço do cofre.
+    // LOCK ANTES DO OPEN (auditoria 2026-10-19): mesma regra do fluxo EVM — o create_trade Solana
+    // (janela de 40 min) só nasce com o lock BTC FINAL; o fund BTC roda em LIQUIDITY_VERIFIED.
     const tokenRole: Role = btcBuyer ? 'SELLER' : 'BUYER';
     const btcRole: Role = btcBuyer ? 'BUYER' : 'SELLER';
+    // Na rota BTC↔Solana os PARTICIPANTES são endereços Solana (assinam o escrow N-de-N); o fund da
+    // perna BTC usa o endereço Solana do papel — o btcAddr importa só no lock externo real.
+    const btcActorSol = (btcBuyer ? buyerSol : sellerSol) as string;
     let htlcFunding: { address: string; requiredSat: string } | null = null;
-    try { await deps.deals.fund(created.id, tokenRole, (btcBuyer ? sellerSol : buyerSol) as string); } catch (e) { logger.warn({ dealId: created.id, err: (e as Error).message }, 'funding da perna de token Solana pendente'); }
-    try { await deps.deals.fund(created.id, btcRole, btcAddr as string); }
+    try { await deps.deals.fund(created.id, btcRole, btcActorSol); }
     catch (e) {
       const err = e as DomainError;
       if (err.code === 'FUNDING_REQUIRED' && err.details?.address) htlcFunding = { address: String(err.details.address), requiredSat: String(err.details.requiredSat ?? mesa.config!.amountInBase) };
       else logger.warn({ dealId: created.id, err: err.message }, 'lock BTC pendente');
     }
+    let opened = false;
+    try { await deps.deals.open(created.id, creator); opened = true; }
+    catch (e) { const err = e as DomainError; if (err.code !== 'FUNDING_REQUIRED') throw e; if (!htlcFunding && err.details?.address) htlcFunding = { address: String(err.details.address), requiredSat: String(err.details.requiredSat ?? mesa.config!.amountInBase) }; }
+    // Perna de TOKEN só com a operação ABERTA (custódia no seller_sign/buyer_sign; deposit = checagem de saldo).
+    if (opened) { try { await deps.deals.fund(created.id, tokenRole, (btcBuyer ? sellerSol : buyerSol) as string); } catch (e) { logger.warn({ dealId: created.id, err: (e as Error).message }, 'funding da perna de token Solana pendente'); } }
     await deps.audit.append({ actorType: 'user', actorId: mesa.payMasterId, category: 'portal.mesa.deal.created', dealId: created.id, payload: { mode: btcBuyer ? 'btc-solana-comprador' : 'btc-solana', vault: htlcFunding?.address ?? null } });
     const dealNow = await deps.deals.get(created.id);
     if (!htlcFunding) {

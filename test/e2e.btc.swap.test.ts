@@ -79,15 +79,17 @@ describe('E2E — BTC nativo via HTLC com Esplora regtest e carteira financiando
     expect(d.terms!.route.kind).toBe('HTLC');
     const htlcHash = d.terms!.route.htlcHash as string;
 
-    await app.deals.open(d.id, sellerAddr);
-    // Ordem HTLC: contrato primeiro; e sem lock on-chain o fund BTC falha com o endereço do cofre.
-    expect(await code(app.deals.fund(d.id, 'SELLER', sellerAddr))).toBe('FUNDING_REQUIRED');
-    await app.deals.fund(d.id, 'BUYER', parts.BUYER.address);
-    const semLock = await app.deals.fund(d.id, 'SELLER', sellerAddr).then(() => null, e => e as { code: string; details?: { address?: string } });
+    // LOCK ANTES DO OPEN (auditoria 2026-10-19): a janela de 40 min nasce no open/createTrade —
+    // sem o lock BTC confirmado, o open é RECUSADO com o endereço do cofre nos detalhes.
+    const semLock = await app.deals.open(d.id, sellerAddr).then(() => null, e => e as { code: string; details?: { address?: string } });
     expect(semLock?.code).toBe('FUNDING_REQUIRED');
     const witnessScript = htlcWitnessScript(htlcHash, claimPub, refundPub, 144);
     const htlcAddr = p2wshAddress(witnessScript, 'regtest');
     expect(semLock?.details?.address).toBe(htlcAddr); // o adapter aponta exatamente o cofre derivado
+    // O fund BTC PRÉ-OPEN (LIQUIDITY_VERIFIED) também devolve o cofre enquanto não há lock.
+    const semLock2 = await app.deals.fund(d.id, 'SELLER', sellerAddr).then(() => null, e => e as { code: string; details?: { address?: string } });
+    expect(semLock2?.code).toBe('FUNDING_REQUIRED');
+    expect(semLock2?.details?.address).toBe(htlcAddr);
 
     // ---- Verum Wallet do vendedor TRANCA o BTC: transação real assinada e transmitida ----
     const lockHex = buildLockTx(faucetUtxo, sha256(witnessScript), 75_000_000n);
@@ -96,8 +98,10 @@ describe('E2E — BTC nativo via HTLC com Esplora regtest e carteira financiando
     esplora.mine(1);
     expect(esplora.utxosOf(htlcAddr).reduce((s, u) => s + u.value, 0)).toBe(75_000_000);
 
-    // Agora o fund BTC detecta o lock on-chain e marca FINAL.
+    // Fund BTC pré-open detecta o lock e marca FINAL; o open agora passa e abre as assinaturas.
     await app.deals.fund(d.id, 'SELLER', sellerAddr);
+    await app.deals.open(d.id, sellerAddr);
+    await app.deals.fund(d.id, 'BUYER', parts.BUYER.address);
     for (const role of SIGNING_ORDER) { const w = parts[role]; if (w) await signAs(app, d.id, role, w); }
 
     const rec = await app.settlement.settle(d.id);

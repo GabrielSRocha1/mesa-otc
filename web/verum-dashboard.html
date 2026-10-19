@@ -853,6 +853,7 @@ window.addEventListener('unhandledrejection',function(e){try{console.warn('[veru
               <div style="flex:1;font-size:12.5px;color:var(--ink-3)" id="opDealStatus">Nenhuma operação ativa na mesa. Conecte as 4 carteiras e inicie.</div>
               <button class="btn btn-primary" id="opStartDeal" type="button" style="height:38px"><svg viewBox="0 0 24 24"><path d="M4 12h13M11 6l6 6-6 6"/></svg>Iniciar operação</button>
               <button class="btn btn-primary" id="opSignTurn" type="button" style="height:38px;display:none"><svg viewBox="0 0 24 24"><path d="M4 20h4l10-10-4-4L4 16v4z"/><path d="M13.5 6.5l4 4"/></svg>Assinar minha vez</button>
+              <button class="btn btn-primary" id="opRegisterDeal" type="button" style="height:38px;display:none"><svg viewBox="0 0 24 24"><path d="M12 3v12M6 9l6-6 6 6"/><path d="M5 21h14"/></svg>Registrar on-chain (PM1)</button>
               <button class="btn" id="opNewDeal" type="button" style="height:38px;display:none"><svg viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg>Criar nova operação</button>
               <button class="btn" id="opShareDeal" type="button" style="height:38px;display:none" title="Link somente-leitura desta operação"><svg viewBox="0 0 24 24"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V5a2 2 0 012-2h8"/></svg>Copiar link de visualização</button>
             </div>
@@ -1947,6 +1948,13 @@ window.addEventListener('unhandledrejection',function(e){try{console.warn('[veru
     });
     const sd=$('#opStartDeal'); if(sd) sd.addEventListener('click',startMesaDeal);
     const sg=$('#opSignTurn'); if(sg) sg.addEventListener('click',signTurn);
+    const rg=$('#opRegisterDeal'); if(rg) rg.addEventListener('click',async function(){
+      if(!(opDeal&&opDeal.registerTx&&opDeal.registerTx.to)) return;
+      rg.disabled=true; rg.textContent='Registrando (assine na carteira)…';
+      try{ await m3SendTxRequest(opDeal.registerTx); toast('Operação registrada on-chain ✓','ok'); refreshMesaDeal(); }
+      catch(e){ toast(e.message||'Falha ao registrar','err'); }
+      finally{ rg.disabled=false; rg.textContent='Registrar on-chain (PM1)'; }
+    });
     // Criar nova operação com uma deal em andamento: confirma e substitui (o POST /mesa/deal sempre cria outra).
     const nd=$('#opNewDeal'); if(nd) nd.addEventListener('click',async()=>{
       const d=opDeal;
@@ -2094,6 +2102,9 @@ window.addEventListener('unhandledrejection',function(e){try{console.warn('[veru
     const awaiting=d.state==='AWAITING_SIGNATURES';
     const btn=$('#opStartDeal'); if(btn) btn.style.display = awaiting?'none':'';
     const sbtn=$('#opSignTurn'); if(sbtn){ sbtn.style.display = (awaiting&&d.turnRole)?'':'none'; if(!sbtn.disabled) sbtn.textContent = d.demo?'Assinar minha vez':'Assinar com Verum Wallet'; }
+    // LOCK ANTES DO OPEN: createTradeV2 pendente (open adiado até o lock BTC) — o PM1 registra
+    // on-chain pela própria carteira; a janela de 40 min do escrow nasce NESTA transação.
+    const rbtn=$('#opRegisterDeal'); if(rbtn) rbtn.style.display = (d.registerTx&&d.registerTx.to)?'':'none';
     const nbtn=$('#opNewDeal'); if(nbtn) nbtn.style.display = awaiting?'':'none'; // com deal em andamento, permite abandonar e criar outra
     // Link de visualização (somente leitura) da operação — compartilhável; serve p/ operações do fluxo legado também.
     const shbtn=$('#opShareDeal'); if(shbtn){ shbtn.style.display = d.id?'':'none'; shbtn.onclick=()=>{ clip(location.origin+'/op/'+encodeURIComponent(d.id)); toast('Link de visualização copiado (somente leitura)','ok'); }; }
@@ -3222,9 +3233,22 @@ window.addEventListener('unhandledrejection',function(e){try{console.warn('[veru
   }
   /** PM1 com CARTEIRA REAL: passo on-chain (relay do signV2 pelo keeper) + envelope da mesa, ambos
    *  assinados na própria wallet — usado quando o backend não tem chave dev para o admin. */
+  /** Envia um txRequest cru (ex.: createTradeV2 pendente do PM1) pela carteira EVM. */
+  async function m3SendTxRequest(txr){
+    const p=await findVerumEthProvider(); if(!p) throw new Error('Provider EVM da Verum Wallet não foi injetado nesta aba.');
+    const accs=await p.request({method:'eth_requestAccounts'}); const from=accs&&accs[0];
+    const h=await p.request({method:'eth_sendTransaction',params:[{from,to:txr.to,data:txr.data}]});
+    await evmWaitReceipt(p,h);
+  }
   async function m3SignWallet(){
     try{
-      const step=await pmApi('/v1/portal/mesas/'+m3Sel+'/deal/step');
+      let step=await pmApi('/v1/portal/mesas/'+m3Sel+'/deal/step');
+      // LOCK ANTES DO OPEN: com o open adiado, o createTradeV2 do PM1 pode estar pendente ainda —
+      // registra primeiro (a janela on-chain de 40 min nasce aqui) e só então segue para o sign.
+      if(step&&step.kind==='txRequest'&&step.action==='createTradeV2'&&step.txRequest){
+        await m3SendTxRequest(step.txRequest); toast('Operação registrada on-chain ✓','ok');
+        step=await pmApi('/v1/portal/mesas/'+m3Sel+'/deal/step');
+      }
       if(step&&step.kind==='evm') await evmOnchainStep(step, body=>pmApi('/v1/portal/mesas/'+m3Sel+'/deal/step',{method:'POST',body}));
     }catch(e){ if(!/simulado|autom|done/i.test(e.message||'')) throw e; }
     const env=await pmApi('/v1/portal/mesas/'+m3Sel+'/deal/envelope');
@@ -3362,7 +3386,10 @@ window.addEventListener('unhandledrejection',function(e){try{console.warn('[veru
     // cofre P2WSH por fora) — sem este card, o participante batia em FUNDING_REQUIRED na assinatura
     // sem nunca ver o endereço do cofre nem o valor. O botão re-checa o depósito no backend.
     let fundHtml='';
-    const myFund=d&&d.state==='AWAITING_SIGNATURES'?((d.funding||[]).find(f=>f.role===me.role&&f.status!=='FINAL')):null;
+    // LOCK ANTES DO OPEN: em LIQUIDITY_VERIFIED a operação está criada aguardando o lock BTC — o
+    // card de depósito aparece JÁ nessa fase (a janela de 40 min só nasce quando o lock confirma
+    // e a operação abre sozinha). Em AWAITING_SIGNATURES segue valendo para as demais pernas.
+    const myFund=d&&(d.state==='AWAITING_SIGNATURES'||d.state==='LIQUIDITY_VERIFIED')?((d.funding||[]).find(f=>f.role===me.role&&f.status!=='FINAL')):null;
     if(myFund&&d.htlcVault&&d.htlcVault.from===me.role){
       // Sats → BTC decimal com PONTO (formato que a carteira espera no signAndSendPayment).
       const satsToBtc=function(s){ try{ const v=String(BigInt(s)).padStart(9,'0'); const i=v.slice(0,-8)||'0'; const f=v.slice(-8).replace(/0+$/,''); return f?i+'.'+f:i; }catch(e){ return String(s); } };
