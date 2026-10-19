@@ -2072,6 +2072,7 @@ window.addEventListener('unhandledrejection',function(e){try{console.warn('[veru
   }
   /* ---------- Esteira ligada a uma DEAL real (DealEngine) ---------- */
   let opDeal=null, opDealTimer=null, opTurnTimer=null;
+  let m3AutoRegKey=null; // auto-registro do createTradeV2: 1 disparo por operação (retry fica no botão)
   const OP_STEP_LABEL={SELLER:'Vendedor',PAYMASTER_1:'Pay Master 1',PAYMASTER_2:'Pay Master 2',BUYER:'Comprador'};
   const OP_SIGN_ORDER=['SELLER','PAYMASTER_1','PAYMASTER_2','BUYER'];
   function fmtCountdown(exp){ const ms=Math.max(0,exp-srvNow()); if(ms>=3600000){ const h=Math.floor(ms/3600000), m=Math.floor(ms%3600000/60000); return h+'h'+('0'+m).slice(-2)+'m restantes'; } const m=Math.floor(ms/60000), s=Math.floor(ms%60000/1000); return m+'m'+('0'+s).slice(-2)+'s restantes'; }
@@ -2105,6 +2106,17 @@ window.addEventListener('unhandledrejection',function(e){try{console.warn('[veru
     // LOCK ANTES DO OPEN: createTradeV2 pendente (open adiado até o lock BTC) — o PM1 registra
     // on-chain pela própria carteira; a janela de 40 min do escrow nasce NESTA transação.
     const rbtn=$('#opRegisterDeal'); if(rbtn) rbtn.style.display = (d.registerTx&&d.registerTx.to)?'':'none';
+    // AUTO-REGISTRO: assim que o pendente aparece, a carteira abre SOZINHA — o PM só assina
+    // (sem clicar em botão). 1x por operação (m3AutoRegKey); recusou/falhou → o botão fica
+    // como retry manual. O m3Approve também marca a chave para não disparar em dobro.
+    if(d.registerTx&&d.registerTx.to&&m3AutoRegKey!==d.id){
+      m3AutoRegKey=d.id;
+      (async function(){
+        try{ if(rbtn){ rbtn.disabled=true; rbtn.textContent='Registrando (assine na carteira)…'; } await m3SendTxRequest(d.registerTx); toast('Operação registrada on-chain ✓','ok'); refreshMesaDeal(); }
+        catch(e){ toast('Registro on-chain pendente: '+((e&&e.message)||'recusado'),'err'); }
+        finally{ if(rbtn){ rbtn.disabled=false; rbtn.textContent='Registrar on-chain (PM1)'; } }
+      })();
+    }
     const nbtn=$('#opNewDeal'); if(nbtn) nbtn.style.display = awaiting?'':'none'; // com deal em andamento, permite abandonar e criar outra
     // Link de visualização (somente leitura) da operação — compartilhável; serve p/ operações do fluxo legado também.
     const shbtn=$('#opShareDeal'); if(shbtn){ shbtn.style.display = d.id?'':'none'; shbtn.onclick=()=>{ clip(location.origin+'/op/'+encodeURIComponent(d.id)); toast('Link de visualização copiado (somente leitura)','ok'); }; }
@@ -3216,6 +3228,7 @@ window.addEventListener('unhandledrejection',function(e){try{console.warn('[veru
       const ap=await pmApi('/v1/portal/mesas/'+m3Sel+'/approve',{method:'POST',body:{}});
       toast('Operação aprovada — termos congelados','ok');
       const regTx=ap&&((ap.deal&&ap.deal.registerTx)||ap.registerTx);
+      if(regTx&&regTx.to&&ap.deal&&ap.deal.id) m3AutoRegKey=ap.deal.id; // o approve já envia; a esteira não repete
       if(regTx&&regTx.to){
         // Carteira real: o registro on-chain (createTradeV2) sai da carteira do PM1.
         btn.textContent='Registrando a operação on-chain (assine na carteira)…';
