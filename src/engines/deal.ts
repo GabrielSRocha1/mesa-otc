@@ -211,7 +211,7 @@ export class DealEngine {
     return this.withDeal(dealId, async deal => {
       if (deal.state !== 'AWAITING_SIGNATURES') throw new DomainError('SETTLEMENT_NOT_ALLOWED', `Depósito só em AWAITING_SIGNATURES (atual ${deal.state})`);
       const p = deal.participants.find(x => x.role === role); if (!p || !p.fundingRequired) throw new DomainError('NOT_PARTICIPANT', 'papel não deposita');
-      if (p.address.toLowerCase() !== actor.toLowerCase()) throw new DomainError('FORBIDDEN', 'só a carteira do papel deposita');
+      if (p.address.toLowerCase() !== actor.toLowerCase()) throw new DomainError('FORBIDDEN', `só a carteira do papel deposita (${role} espera ${p.address}; autenticado ${actor})`, { role, expected: p.address, actor });
       if (p.funding === 'FINAL') return deal;
       const leg = (deal.terms as Terms).legs[role === 'SELLER' ? 0 : 1] as Leg; const adapter = this.d.adapters.require(leg.escrowChain);
       // Decisão de produto (2026-10-18): depósitos em QUALQUER ordem — o lock BTC pode vir antes da
