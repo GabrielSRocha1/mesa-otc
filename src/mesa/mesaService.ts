@@ -121,6 +121,22 @@ export class MesaService {
     return mesa;
   }
 
+  /** Re-aplica o embrulho canônico (ETH→WETH) em cadeiras NATIVAS de mesas antigas: mesa criada num
+   *  ambiente SEM o escrow EVM configurado (ex.: preview antes das envs) não ganhou o wrap na criação
+   *  e o approve morria com "escrow Verum é só-token". Idempotente — espelha a lógica da criação. */
+  healNativeWraps(mesa: MesaRecord): void {
+    let changed = false;
+    for (const c of mesa.chairs) {
+      if (c.expectedAsset.contractOrMint != null) continue;
+      const other = c.role === 'SELLER' ? mesa.chairs.find(x => x.role === 'BUYER') : c.role === 'BUYER' ? mesa.chairs.find(x => x.role === 'SELLER') : null;
+      const wrap = this.d.nativeWrapOf?.(c.expectedAsset.network, other?.expectedAsset.network ?? null) ?? null;
+      if (!wrap) continue;
+      c.expectedAsset = { ...c.expectedAsset, contractOrMint: wrap.contractOrMint, decimals: wrap.decimals };
+      changed = true;
+    }
+    if (changed) this.d.portal.persistMesas();
+  }
+
   /** Rótulo de redes da mesa (v4): lados na mesma rede → nome dela; redes distintas → "A ↔ B". */
   networksLabel(mesa: MesaRecord): string {
     const name = (n?: string) => (n ? getChain(n)?.displayName ?? n : null);
