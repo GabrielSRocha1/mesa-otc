@@ -3353,6 +3353,10 @@ window.addEventListener('unhandledrejection',function(e){try{console.warn('[veru
   }
   function pRender(){
     const m=pDto; if(!m) return;
+    // AUTO-CURA de layout: a reentrada esconde as seções e, se ela disparar no meio do fluxo
+    // (sessão stale) a restauração pode ficar presa — a página vinha "pelada" (só o card VOCÊ).
+    // Todo render com dados válidos re-exibe as seções (idempotente).
+    ['pChairs','pSummary','pSigns'].forEach(function(id){ var el=$('#'+id); if(el){ var c=el.closest('.card'); if(c) c.style.display=''; } });
     $('#pCode').textContent='Mesa '+m.code;
     $('#pStatus').outerHTML='<span id="pStatus">'+m3Badge(m.status)+'</span>';
     const me=m.viewer||{};
