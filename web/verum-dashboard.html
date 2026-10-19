@@ -3427,10 +3427,17 @@ window.addEventListener('unhandledrejection',function(e){try{console.warn('[veru
         +'<button class="btn btn-primary btn-block" id="pEscrowDep" style="height:44px;margin-top:8px">'+(isBuyerDep?'Autorizar pagamento agora':'Depositar no escrow agora')+'</button>'
         +'</div>';
     }
+    // GATE DE SEQUÊNCIA: turnos adiados até o PM1 registrar o contrato on-chain — o participante
+    // vê o porquê da espera (sem isso parecia travado). Some sozinho quando os turnos começam.
+    const regWait=(d&&d.state==='AWAITING_SIGNATURES'&&!d.turnRole&&(d.validSignatures||0)<(d.requiredSignatures||9))
+      ?'<div style="margin-top:12px;padding:10px 12px;border:1px solid var(--line);border-radius:10px;font-size:12.5px;color:var(--ink-2)">⏳ Aguardando o <b>Pay Master 1</b> registrar a operação on-chain (createTradeV2). As assinaturas abrem em seguida — esta tela atualiza sozinha.</div>':'';
     $('#pSigns').innerHTML=(d?('Ordem: Vendedor → Pay Master 1'+((m.chairs||[]).some(c=>c.role==='PAYMASTER_2')?' → Pay Master 2':'')+' → Comprador'
       +(d.turnRole?('<br>Vez atual: <b>'+esc(M3_ROLE[d.turnRole]||d.turnRole)+'</b>'):'')) : 'A coleta de assinaturas começa após a aprovação do Pay Master.')
       +(m.irreversible?'<br><span style="color:var(--amber)">🔒 Operação irreversível — fundos trancados; o contrato roda até a liquidação (preimage) ou o reembolso após o timelock.</span>':'')
-      +fundHtml;
+      +regWait
+      +fundHtml
+      +'<div id="pChainHeal"></div>';
+    pChainHealCheck(d,me);
     if(fundHtml&&d&&d.htlcVault){
       const bp=$('#pVaultPay'); if(bp) bp.addEventListener('click',async function(){
         bp.disabled=true; bp.textContent='Confirme na Verum Wallet…';
@@ -3537,6 +3544,31 @@ window.addEventListener('unhandledrejection',function(e){try{console.warn('[veru
       if(Date.now()-pBalAt>15000){ pBalAt=Date.now(); pApi('/v1/mesas/'+encodeURIComponent(P_MESA)+'/precheck').then(b=>{ pBal=b; pRender(); }).catch(()=>{}); }
       pRender(); pTick();
     }catch(e){ if(e.status===401||e.status===403){ try{ sessionStorage.removeItem('verum_mesa_pt_'+P_MESA); localStorage.removeItem('verum_mesa_pt_'+P_MESA); }catch(x){} P_TOK=''; pReentry('Sessão expirada — reconecte para continuar vendo a operação.'); } }
+  }
+  // AUTO-CURA do passo ON-CHAIN órfão: quem assinou a MESA enquanto o contrato ainda não existia
+  // (operações antigas / corrida rara) fica com o signV2 pendente — a liquidação morreria na
+  // validação. Detecta via /onchain-tx (throttle 30 s) e oferece concluir com um toque.
+  let pHealAt=0, pHealBusy=false;
+  async function pChainHealCheck(d,me){
+    const box=document.getElementById('pChainHeal'); if(!box) return;
+    if(!(d&&d.state==='AWAITING_SIGNATURES'&&(d.signed||[]).includes(me.role))){ box.innerHTML=''; return; }
+    if(pHealBusy||Date.now()-pHealAt<30000) return;
+    pHealAt=Date.now();
+    let step=null;
+    try{ step=await pApi('/v1/deals/'+encodeURIComponent(d.id)+'/onchain-tx'); }catch(e){ return; }
+    const actionable=step&&((step.kind==='evm'&&step.typedData)||(step.kind==='txRequest'&&step.txRequest)||(step.kind==='solana'&&step.transactionBase64));
+    if(!actionable){ box.innerHTML=''; return; }
+    box.innerHTML='<div style="margin-top:12px;padding:12px;border:1px solid var(--amber);border-radius:10px">'
+      +'<b style="color:var(--amber)">Passo on-chain pendente</b>'
+      +'<div style="font-size:12.5px;color:var(--ink-2);margin-top:4px">Sua assinatura da mesa foi registrada, mas o passo on-chain correspondente ainda não foi enviado (o contrato não existia na hora). Conclua agora pela carteira.</div>'
+      +'<button class="btn btn-primary btn-block" id="pChainHealBtn" style="height:44px;margin-top:8px">Concluir passo on-chain</button></div>';
+    const b=document.getElementById('pChainHealBtn');
+    if(b) b.addEventListener('click',async function(){
+      b.disabled=true; pHealBusy=true;
+      try{ await pOnchainStep(d,function(t){ b.textContent=t; }); toast('Passo on-chain concluído ✓','ok'); box.innerHTML=''; pHealAt=0; pRefresh(); }
+      catch(e){ if(!pStaleSession(e)) pErrBox('Passo on-chain',((e&&e.code)?('['+e.code+'] '):'')+((e&&e.message)||String(e))); b.disabled=false; b.textContent='Concluir passo on-chain'; }
+      finally{ pHealBusy=false; }
+    });
   }
   function pReview(){
     const m=pDto, me=m.viewer||{}, d=m.deal; if(!d) return;

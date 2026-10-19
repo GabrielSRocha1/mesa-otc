@@ -70,6 +70,26 @@ describe('Deal Engine — criação e verificações', () => {
   });
 });
 
+describe('Turnos adiados (registro on-chain pendente)', () => {
+  it('retomam quando o registro confirma on-chain (startTurnsIfRegistered)', async () => {
+    const { app } = await makeApp({ autoSettle: false });
+    const parts: Parts = { SELLER: solWallet(), BUYER: solWallet(), PAYMASTER_1: solWallet() };
+    const d = await prepareDeal(app, parts);
+    await app.deals.open(d.id, parts.SELLER.address);
+    // Simula o estado "registro pendente de carteira real": turnos zerados + meta registerPending
+    // (no simulador o registro é imediato, então o estado é forjado direto no objeto persistido).
+    const deal = await app.deals.get(d.id);
+    deal.turnRole = null; deal.turnExpiresAt = null;
+    const oc = deal.onChain.solana as { meta?: Record<string, unknown> };
+    oc.meta = { ...(oc.meta ?? {}), registerPending: 1 };
+    // Registro JÁ confirmado no simulador (getDealState ≠ NONE) → a retomada inicia a vez do Vendedor.
+    const after = await app.deals.startTurnsIfRegistered(d.id);
+    expect(after.turnRole).toBe('SELLER');
+    expect(after.turnExpiresAt).not.toBeNull();
+    await app.close();
+  }, 30_000);
+});
+
 describe('Signature Engine', () => {
   it('assinatura inválida (bytes aleatórios) é rejeitada', async () => {
     const { app } = await makeApp(); const parts = solParts(); const d = await prepareDeal(app, parts); await app.deals.open(d.id, parts.SELLER.address); await app.deals.fund(d.id, 'SELLER', parts.SELLER.address);
