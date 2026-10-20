@@ -3517,7 +3517,7 @@ window.addEventListener('unhandledrejection',function(e){try{console.warn('[veru
           catch(e2){ if(/mempool|confirma/i.test((e2&&e2.message)||'')) toast('No mempool — aguarde a confirmação do bloco e toque "Já enviei — verificar".','ok'); else if(!pStaleSession(e2)) pErrBox('Verificação do depósito',((e2&&e2.code)?('['+e2.code+'] '):'')+((e2&&e2.message)||String(e2))); }
         }catch(e){
           // UNSUPPORTED/flag off/toggle de rede errado → cai no fluxo manual (endereço continua no card).
-          pErrBox('Pagamento pela carteira falhou',(((e&&e.code)?('['+e.code+'] '):'')+((e&&e.message)||String(e)))+'\n\nAlternativa: envie manualmente os sats pelo caminho 'Prefere enviar manualmente?' do card e toque "Já enviei — verificar". Se o erro citar rede/ambiente, confira se a Verum Wallet está no modo testnet.');
+          pErrBox('Pagamento pela carteira falhou',(((e&&e.code)?('['+e.code+'] '):'')+((e&&e.message)||String(e)))+'\n\nAlternativa: envie manualmente os sats pelo caminho "Prefere enviar manualmente?" do card e toque "Já enviei — verificar". Se o erro citar rede/ambiente, confira se a Verum Wallet está no modo testnet.');
         }
         finally{ bp.disabled=false; bp.textContent='Pagar com a carteira'; }
       });
@@ -3780,7 +3780,7 @@ window.addEventListener('unhandledrejection',function(e){try{console.warn('[veru
     catch(e0){ if(/mempool|confirma/i.test((e0&&e0.message)||'')) needSend=false; else if(!(e0&&e0.code==='FUNDING_REQUIRED')) throw e0; }
     if(needSend){
       const prov=solProvider();
-      if(!prov||typeof prov.signAndSendPayment!=='function') throw new Error('Esta Verum Wallet não envia BTC pelo dApp. Alternativa: abra 'Prefere enviar manualmente?' no card, envie os sats ao endereço e toque "Já enviei — verificar".');
+      if(!prov||typeof prov.signAndSendPayment!=='function') throw new Error('Esta Verum Wallet não envia BTC pelo dApp. Alternativa: abra "Prefere enviar manualmente?" no card, envie os sats ao endereço e toque "Já enviei — verificar".');
       try{ await prov.connect(); }catch(e){}
       st('Confirme o envio do BTC na carteira…');
       const v=String(BigInt(String(d.htlcVault.requiredSat))).padStart(9,'0'); const fr=v.slice(-8).replace(/0+$/,''); const amount=(v.slice(0,-8)||'0')+(fr?'.'+fr:'');
