@@ -87,6 +87,30 @@ describe('Perna BTC — abandono e reorg', () => {
   }, 120_000);
 });
 
+describe('Perna BTC — auto-open (Frente C): lock confirmado abre a operação sem tocar a tela', () => {
+  const esplora = new EsploraRegtest();
+  let closeApp: (() => Promise<void>) | null = null;
+  afterAll(async () => { await closeApp?.(); await esplora.stop(); });
+
+  it('deal em LIQUIDITY_VERIFIED com lock BTC confirmado → open() detecta sozinho e vai a AWAITING_SIGNATURES', async () => {
+    const url = await esplora.start();
+    const { app } = await makeApp({ autoSettle: false, env: btcEnv(url), btcAddressOf: async (_d, role) => (role === 'BUYER' ? buyerBtcAddr : null) });
+    closeApp = () => app.close();
+    const u = esplora.faucet(sellerAddr, 200_000_000);
+    const parts: Parts = { SELLER: sellerWallet(), BUYER: solWallet(), PAYMASTER_1: solWallet() };
+    const d = await prepareDeal(app, parts, { assetIn: ASSETS.BTC, assetOut: ASSETS.USDC_SOL, amountInBase: SATS.toString() });
+    expect(d.state).toBe('LIQUIDITY_VERIFIED');
+    const script = htlcWitnessScript(d.terms!.route.htlcHash as string, claimPub, refundPub, 144);
+    await (await fetch(`${url}/tx`, { method: 'POST', body: buildLockTx(u, sha256(script), SATS) })).text();
+    esplora.mine(1);                                                        // lock confirma on-chain
+
+    // O SCHEDULER chama exatamente isto (deals.open com o criador) — ninguém tocou o endpoint de depósito.
+    const opened = await app.deals.open(d.id, d.createdBy);
+    expect(opened.state).toBe('AWAITING_SIGNATURES');
+    expect(opened.participants.find(p => p.role === 'SELLER')!.funding).toBe('FINAL');
+  }, 120_000);
+});
+
 describe('Perna BTC — refund pós-timelock (CSV) e guard de dupla execução', () => {
   const esplora = new EsploraRegtest();
   let closeApp: (() => Promise<void>) | null = null;
