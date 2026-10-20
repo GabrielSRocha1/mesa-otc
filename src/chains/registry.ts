@@ -58,7 +58,7 @@ export const CHAINS: readonly ChainDef[] = [
 
 /**
  * Override de endpoint por env (testnets): CHAIN_ENDPOINT_<CHAVE> troca o endpoint de LEITURA
- * da rede — ex.: CHAIN_ENDPOINT_BITCOIN=https://mempool.space/testnet4/api e
+ * da rede — ex.: CHAIN_ENDPOINT_BITCOIN=https://mempool.space/signet/api e
  * CHAIN_ENDPOINT_ETHEREUM=https://ethereum-sepolia-rpc.publicnode.com fazem o precheck/saldos
  * da mesa lerem as testnets em vez da mainnet. Sem a env, vale o endpoint público mainnet.
  */

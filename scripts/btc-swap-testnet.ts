@@ -100,7 +100,7 @@ const pm1Evm = keyring.accountFor('swap-pm1');
 
 // ---- 1. faucet → endereço do vendedor ----
 log(`VENDEDOR (BTC ${net}): ${sellerBtcAddr}`);
-console.log(`  Mande ≥ ${SATS + 3000n} sats do faucet (https://mempool.space/testnet4/faucet) para o endereço acima.`);
+console.log(`  Mande ≥ ${SATS + 3000n} sats do faucet (https://signetfaucet.com) para o endereço acima.`);
 for (;;) {
   const sats = await esplora.addressSats(sellerBtcAddr).catch(() => 0n);
   if (sats >= SATS + 3000n) { log(`Saldo do vendedor confirmado: ${sats} sats.`); break; }

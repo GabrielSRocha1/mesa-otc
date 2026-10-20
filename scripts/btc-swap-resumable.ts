@@ -90,7 +90,7 @@ if (PHASE === 'lock') {
   const locked = (await esplora.utxos(vault).catch(() => [])).reduce((s, u) => s + BigInt(u.value), 0n);
   if (locked >= SATS) { log(`cofre já tem ${locked} sats — lock pronto. Rode a FASE settle quando confirmar.`); process.exit(0); }
   const sellerSats = await esplora.addressSats(sellerBtcAddr).catch(() => 0n);
-  if (sellerSats < SATS + 3000n) { console.error(`  vendedor sem saldo (${sellerSats} sats). Faucet: https://mempool.space/testnet4/faucet → ${sellerBtcAddr}`); process.exit(1); }
+  if (sellerSats < SATS + 3000n) { console.error(`  vendedor sem saldo (${sellerSats} sats). Faucet: https://signetfaucet.com → ${sellerBtcAddr}`); process.exit(1); }
   const utxos: HtlcUtxo[] = (await esplora.utxos(sellerBtcAddr)).map(u => ({ txid: u.txid, vout: u.vout, valueSat: BigInt(u.value), confirmations: 1 }));
   const lockTxid = await esplora.broadcast(buildLockTx(utxos, sha256(witnessScript), SATS, 1500n));
   st.lockTxid = lockTxid; saveState(st);
