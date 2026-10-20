@@ -3416,14 +3416,18 @@ window.addEventListener('unhandledrejection',function(e){try{console.warn('[veru
       const provPay=solProvider(); const canPay=!!(provPay&&typeof provPay.signAndSendPayment==='function');
       // Banner obrigatório de ambiente (auditoria): perna BTC no SIMULADOR nunca se passa por real.
       const simBanner=d.htlcVault.simulated?'<div style="margin-bottom:8px;padding:6px 10px;border-radius:8px;background:rgba(245,158,11,.14);border:1px solid var(--amber);color:var(--amber);font-size:12px;font-weight:700">⚠ AMBIENTE DE TESTE — BTC SIMULADO (nenhum BTC real se move)</div>':'';
+      // UM CAMINHO SÓ: botão primário "Pagar com a carteira"; o manual (endereço + copiar +
+      // verificar) fica recolhido num "Prefere enviar manualmente?". Sem canPay (carteira antiga)
+      // o manual abre sozinho e vira o caminho único. IDs/listeners inalterados.
+      const manualBody='<div class="mono" style="word-break:break-all;font-size:12px;background:var(--bg-2);border:1px solid var(--line);border-radius:8px;padding:8px;margin:8px 0">'+esc(d.htlcVault.address)+'</div>'
+        +'<div style="display:flex;gap:8px"><button class="btn" id="pVaultCopy" style="flex:1;height:40px">Copiar endereço</button><button class="btn'+(canPay?'':' btn-primary')+'" id="pVaultCheck" style="flex:1;height:40px">Já enviei — verificar</button></div>';
       fundHtml='<div style="margin-top:12px;padding:12px;border:1px solid var(--amber);border-radius:10px">'
         +simBanner
         +'<b style="color:var(--amber)">Depósito BTC pendente</b>'
-        +'<div style="font-size:12.5px;color:var(--ink-2);margin-top:4px">Tranque <b class="mono">'+esc(btcHuman)+' BTC</b> ('+esc(String(d.htlcVault.requiredSat))+' sats) no cofre HTLC desta operação:</div>'
-        +'<div class="mono" style="word-break:break-all;font-size:12px;background:var(--bg-2);border:1px solid var(--line);border-radius:8px;padding:8px;margin:8px 0">'+esc(d.htlcVault.address)+'</div>'
-        +(canPay?'<button class="btn btn-primary btn-block" id="pVaultPay" style="height:44px;margin-bottom:8px">Pagar com a carteira ('+esc(btcHuman)+' BTC)</button>':'')
-        +'<div style="display:flex;gap:8px"><button class="btn" id="pVaultCopy" style="flex:1;height:40px">Copiar endereço</button><button class="btn'+(canPay?'':' btn-primary')+'" id="pVaultCheck" style="flex:1;height:40px">Já enviei — verificar</button></div>'
-        +'<div style="font-size:11.5px;color:var(--ink-3);margin-top:6px">Você pode trancar a qualquer momento (independe da contraparte). Se a operação não se completar, o reembolso fica disponível após o timelock.</div>'
+        +'<div style="font-size:12.5px;color:var(--ink-2);margin-top:4px">Envie <b class="mono">'+esc(btcHuman)+' BTC</b> ('+esc(String(d.htlcVault.requiredSat))+' sats) ao cofre desta operação.</div>'
+        +(canPay?'<button class="btn btn-primary btn-block" id="pVaultPay" style="height:44px;margin:8px 0">Pagar com a carteira ('+esc(btcHuman)+' BTC)</button>':'')
+        +'<details'+(canPay?'':' open')+' style="margin-top:4px"><summary style="cursor:pointer;font-size:12px;color:var(--ink-3)">'+(canPay?'Prefere enviar manualmente?':'Enviar manualmente')+'</summary>'+manualBody+'</details>'
+        +'<div style="font-size:11.5px;color:var(--ink-3);margin-top:6px">Você pode enviar a qualquer momento (independe da contraparte). Se a operação não se completar, o valor volta para você após o prazo de segurança.</div>'
         +'</div>';
     } else if(myFund){
       // Perna de TOKEN (escrow EVM/Solana/Tron ou lock HTLC Solana): a carteira consegue depositar
@@ -3466,7 +3470,7 @@ window.addEventListener('unhandledrejection',function(e){try{console.warn('[veru
           catch(e2){ if(/mempool|confirma/i.test((e2&&e2.message)||'')) toast('No mempool — aguarde a confirmação do bloco e toque "Já enviei — verificar".','ok'); else if(!pStaleSession(e2)) pErrBox('Verificação do depósito',((e2&&e2.code)?('['+e2.code+'] '):'')+((e2&&e2.message)||String(e2))); }
         }catch(e){
           // UNSUPPORTED/flag off/toggle de rede errado → cai no fluxo manual (endereço continua no card).
-          pErrBox('Pagamento pela carteira falhou',(((e&&e.code)?('['+e.code+'] '):'')+((e&&e.message)||String(e)))+'\n\nAlternativa: envie manualmente os sats ao endereço do cofre (copie no card) e toque "Já enviei — verificar". Se o erro citar rede/ambiente, confira se a Verum Wallet está no modo testnet.');
+          pErrBox('Pagamento pela carteira falhou',(((e&&e.code)?('['+e.code+'] '):'')+((e&&e.message)||String(e)))+'\n\nAlternativa: envie manualmente os sats pelo caminho 'Prefere enviar manualmente?' do card e toque "Já enviei — verificar". Se o erro citar rede/ambiente, confira se a Verum Wallet está no modo testnet.');
         }
         finally{ bp.disabled=false; bp.textContent='Pagar com a carteira'; }
       });
@@ -3729,7 +3733,7 @@ window.addEventListener('unhandledrejection',function(e){try{console.warn('[veru
     catch(e0){ if(/mempool|confirma/i.test((e0&&e0.message)||'')) needSend=false; else if(!(e0&&e0.code==='FUNDING_REQUIRED')) throw e0; }
     if(needSend){
       const prov=solProvider();
-      if(!prov||typeof prov.signAndSendPayment!=='function') throw new Error('Esta Verum Wallet não envia BTC pelo dApp. Alternativa: copie o endereço do cofre no card, envie os sats manualmente e toque "Já enviei — verificar".');
+      if(!prov||typeof prov.signAndSendPayment!=='function') throw new Error('Esta Verum Wallet não envia BTC pelo dApp. Alternativa: abra 'Prefere enviar manualmente?' no card, envie os sats ao endereço e toque "Já enviei — verificar".');
       try{ await prov.connect(); }catch(e){}
       st('Confirme o envio do BTC na carteira…');
       const v=String(BigInt(String(d.htlcVault.requiredSat))).padStart(9,'0'); const fr=v.slice(-8).replace(/0+$/,''); const amount=(v.slice(0,-8)||'0')+(fr?'.'+fr:'');
