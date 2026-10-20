@@ -3380,7 +3380,7 @@ window.addEventListener('unhandledrejection',function(e){try{console.warn('[veru
     if(!res.ok){ const e=new Error((data&&(data.message||data.error))||('Erro '+res.status)); e.status=res.status; e.code=data&&data.error; throw e; }
     return data;
   }
-  let pDto=null, pBalAt=0, pBal=null;
+  let pDto=null, pBalAt=0, pBal=null, pDepChkAt=0;
   function pBadgePart(c){
     if(!c.connected) return '<span class="badge wait">Aguardando conexão</span>';
     const d=pDto&&pDto.deal;
@@ -3445,12 +3445,22 @@ window.addEventListener('unhandledrejection',function(e){try{console.warn('[veru
       // o manual abre sozinho e vira o caminho único. IDs/listeners inalterados.
       const manualBody='<div class="mono" style="word-break:break-all;font-size:12px;background:var(--bg-2);border:1px solid var(--line);border-radius:8px;padding:8px;margin:8px 0">'+esc(d.htlcVault.address)+'</div>'
         +'<div style="display:flex;gap:8px"><button class="btn" id="pVaultCopy" style="flex:1;height:40px">Copiar endereço</button><button class="btn'+(canPay?'':' btn-primary')+'" id="pVaultCheck" style="flex:1;height:40px">Já enviei — verificar</button></div>';
+      // Estado "ENVIADO — aguardando a rede": substitui o botão de pagar por um status com
+      // cronômetro (pTick atualiza) + "Verificar agora". A retomada da assinatura é automática.
+      const sentAt=pBtcSentAt(d);
+      const sentMin=sentAt?Math.max(0,Math.floor((Date.now()-sentAt)/60000)):0;
+      const sentHtml=sentAt
+        ?('<div style="margin:8px 0;padding:10px;border:1px solid var(--line);border-radius:10px;font-size:13px">✅ Depósito enviado — aguardando a confirmação da rede (~10 min na testnet) · ⏱ há <span id="pVaultElapsed" data-sent="'+sentAt+'">'+sentMin+'</span> min'
+          +(sentMin>=40?'<div style="font-size:11.5px;color:var(--ink-3);margin-top:4px">Está demorando mais que o normal — o depósito continua valendo; a tela retoma sozinha quando confirmar.</div>':'')
+          +'</div><button class="btn btn-block" id="pVaultCheck" style="height:40px">Verificar agora</button>')
+        :'';
       fundHtml='<div style="margin-top:12px;padding:12px;border:1px solid var(--amber);border-radius:10px">'
         +simBanner
         +'<b style="color:var(--amber)">Depósito BTC pendente</b>'
         +'<div style="font-size:12.5px;color:var(--ink-2);margin-top:4px">Envie <b class="mono">'+esc(btcHuman)+' BTC</b> ('+esc(String(d.htlcVault.requiredSat))+' sats) ao cofre desta operação.</div>'
-        +(canPay?'<button class="btn btn-primary btn-block" id="pVaultPay" style="height:44px;margin:8px 0">Pagar com a carteira ('+esc(btcHuman)+' BTC)</button>':'')
-        +'<details'+(canPay?'':' open')+' style="margin-top:4px"><summary style="cursor:pointer;font-size:12px;color:var(--ink-3)">'+(canPay?'Prefere enviar manualmente?':'Enviar manualmente')+'</summary>'+manualBody+'</details>'
+        +sentHtml
+        +(!sentAt&&canPay?'<button class="btn btn-primary btn-block" id="pVaultPay" style="height:44px;margin:8px 0">Pagar com a carteira ('+esc(btcHuman)+' BTC)</button>':'')
+        +(sentAt?'':'<details'+(canPay?'':' open')+' style="margin-top:4px"><summary style="cursor:pointer;font-size:12px;color:var(--ink-3)">'+(canPay?'Prefere enviar manualmente?':'Enviar manualmente')+'</summary>'+manualBody+'</details>')
         +'<div style="font-size:11.5px;color:var(--ink-3);margin-top:6px">Você pode enviar a qualquer momento (independe da contraparte). Se a operação não se completar, o valor volta para você após o prazo de segurança.</div>'
         +'</div>';
     } else if(myFund){
@@ -3509,6 +3519,7 @@ window.addEventListener('unhandledrejection',function(e){try{console.warn('[veru
           const prov=solProvider(); try{ await prov.connect(); }catch(e){}
           const sats=String(d.htlcVault.requiredSat); const v=String(BigInt(sats)).padStart(9,'0'); const fr=v.slice(-8).replace(/0+$/,''); const amount=(v.slice(0,-8)||'0')+(fr?'.'+fr:'');
           const r=await withSigTimeout(prov.signAndSendPayment({ network:'bitcoin', outputs:[{ address:d.htlcVault.address, amount:amount, asset:{kind:'native'} }], memo:null }),'bitcoin');
+          pBtcSentMark(d, r&&r.txHash); // card passa ao estado "enviado — aguardando" no próximo render
           toast('BTC enviado ao cofre ✓ '+((r&&r.txHash)?shortAddr(r.txHash):''),'ok');
           bp.textContent='Enviado — aguardando confirmação…';
           // Verificação imediata: normalmente ainda está no mempool (aguardando bloco) — informa
@@ -3591,6 +3602,8 @@ window.addEventListener('unhandledrejection',function(e){try{console.warn('[veru
   }
   function pTick(){
     const m=pDto; if(!m) return;
+    // Cronômetro do depósito BTC enviado (estado "aguardando a rede" no card).
+    try{ const elx=document.getElementById('pVaultElapsed'); if(elx){ const t0=Number(elx.getAttribute('data-sent')||'0'); if(t0) elx.textContent=String(Math.max(0,Math.floor((Date.now()-t0)/60000))); } }catch(e){}
     $('#pTtl').textContent='Mesa: '+fmtCountdown(m.expiresAt).replace(' restantes','');
     const tt=$('#pTurnTtl'); const d=m.deal;
     if(d&&d.turnExpiresAt&&d.state==='AWAITING_SIGNATURES'){ tt.style.display=''; tt.textContent='Assinaturas: '+fmtCountdown(d.turnExpiresAt).replace(' restantes',''); }
@@ -3606,6 +3619,23 @@ window.addEventListener('unhandledrejection',function(e){try{console.warn('[veru
         try{ const r=await pApi('/v1/mesas/'+encodeURIComponent(P_MESA)+'/deal/'+encodeURIComponent(P_OP)); if(r&&r.deal){ pDto.deal=r.deal; if(r.irreversible!=null) pDto.irreversible=r.irreversible; } }catch(e){}
       }
       if(Date.now()-pBalAt>15000){ pBalAt=Date.now(); pApi('/v1/mesas/'+encodeURIComponent(P_MESA)+'/precheck').then(b=>{ pBal=b; pRender(); }).catch(()=>{}); }
+      // WATCH do depósito BTC enviado: com a marca local e o funding ainda pendente, re-checa o
+      // backend a cada ≥30 s (idem key idêntica — idempotente). Ao confirmar, o auto-pull/auto-sign
+      // retomam a assinatura sozinhos. Marca é limpa no FINAL ou em estado terminal.
+      try{
+        const d0=pDto&&pDto.deal, me0=pDto&&pDto.viewer;
+        if(d0&&me0&&d0.htlcVault&&d0.htlcVault.from===me0.role){
+          const mf0=(d0.funding||[]).find(f=>f.role===me0.role);
+          const pend=mf0&&mf0.status!=='FINAL'&&!['SETTLED','REFUNDED','EXPIRED','BLOCKED','CANCELLED'].includes(d0.state);
+          if(!pend){ if(pBtcSentAt(d0)) pBtcSentClear(d0); }
+          else if(pBtcSentAt(d0)&&Date.now()-pDepChkAt>30000){
+            pDepChkAt=Date.now();
+            pApi('/v1/deals/'+encodeURIComponent(d0.id)+'/legs/'+d0.htlcVault.legIndex+'/deposit',{method:'POST',idem:'fund-'+d0.id+'-'+me0.role})
+              .then(function(){ pBtcSentClear(d0); toast('Depósito confirmado ✓','ok'); pRefresh(); })
+              .catch(function(){ /* ainda na fila da rede — próxima rodada */ });
+          }
+        }
+      }catch(e){}
       pRender(); pTick();
     }catch(e){ if(e.status===401||e.status===403){ try{ sessionStorage.removeItem('verum_mesa_pt_'+P_MESA); localStorage.removeItem('verum_mesa_pt_'+P_MESA); }catch(x){} P_TOK=''; pReentry('Sessão expirada — reconecte para continuar vendo a operação.'); } }
   }
@@ -3771,14 +3801,24 @@ window.addEventListener('unhandledrejection',function(e){try{console.warn('[veru
   // declarativo), espera a confirmação do bloco re-checando o backend, e devolve o controle ao
   // pSign para a assinatura. A vez NÃO expira durante a confirmação (motor pausa a janela do
   // assinante com depósito pendente e a reinicia ao confirmar).
+  // Marca local "BTC enviado": gravada SÓ depois do signAndSendPayment resolver (cancelou na
+  // carteira = não grava). Serve para (a) nunca reenviar na janela broadcast→mempool em que o
+  // backend ainda não vê a tx, e (b) mostrar o estado "aguardando confirmação" no card.
+  function pBtcSentKey(d){ return 'verum_btcsent_'+d.id+'_'+((pDto&&pDto.viewer&&pDto.viewer.role)||''); }
+  function pBtcSentAt(d){ try{ const v=localStorage.getItem(pBtcSentKey(d)); return v?Number(String(v).split('|')[0]):null; }catch(e){ return null; } }
+  function pBtcSentMark(d,txHash){ try{ localStorage.setItem(pBtcSentKey(d), Date.now()+'|'+(txHash||'')); }catch(e){} }
+  function pBtcSentClear(d){ try{ localStorage.removeItem(pBtcSentKey(d)); }catch(e){} }
   async function pFundBtcVault(d,st){
     st=st||function(){};
     const role=pDto.viewer&&pDto.viewer.role;
     const check=function(){ return pApi('/v1/deals/'+encodeURIComponent(d.id)+'/legs/'+d.htlcVault.legIndex+'/deposit',{method:'POST',idem:'fund-'+d.id+'-'+role}); };
     // Já confirmado (depósito manual anterior)? Já no mempool (envio anterior — NUNCA reenvia)?
     let needSend=true;
-    try{ await check(); return; }
+    try{ await check(); pBtcSentClear(d); return; }
     catch(e0){ if(/mempool|confirma/i.test((e0&&e0.message)||'')) needSend=false; else if(!(e0&&e0.code==='FUNDING_REQUIRED')) throw e0; }
+    // Enviado há <60 min por esta tela: NÃO reenvia mesmo que o backend ainda não veja o mempool.
+    const sentAt=pBtcSentAt(d);
+    if(needSend&&sentAt&&Date.now()-sentAt<60*60000) needSend=false;
     if(needSend){
       const prov=solProvider();
       if(!prov||typeof prov.signAndSendPayment!=='function') throw new Error('Esta Verum Wallet não envia BTC pelo dApp. Alternativa: abra "Prefere enviar manualmente?" no card, envie os sats ao endereço e toque "Já enviei — verificar".');
@@ -3786,19 +3826,19 @@ window.addEventListener('unhandledrejection',function(e){try{console.warn('[veru
       st('Confirme o envio do BTC na carteira…');
       const v=String(BigInt(String(d.htlcVault.requiredSat))).padStart(9,'0'); const fr=v.slice(-8).replace(/0+$/,''); const amount=(v.slice(0,-8)||'0')+(fr?'.'+fr:'');
       const r=await withSigTimeout(prov.signAndSendPayment({ network:'bitcoin', outputs:[{ address:d.htlcVault.address, amount:amount, asset:{kind:'native'} }], memo:null }),'bitcoin');
+      pBtcSentMark(d, r&&r.txHash);
       toast('BTC enviado ao cofre ✓ '+((r&&r.txHash)?shortAddr(r.txHash):''),'ok');
     }
-    // Espera a confirmação do bloco (testnet ~10 min; teto 30), re-checando a cada 20 s.
-    const t0=Date.now();
-    for(;;){
-      st('Aguardando confirmação do bloco… ('+Math.floor((Date.now()-t0)/60000)+' min — testnet ~10 min)');
-      await new Promise(function(r){ setTimeout(r,20000); });
-      try{ await check(); st('Depósito confirmado ✓'); return; }
-      catch(e){
-        if(!/mempool|confirma|financiado|envie/i.test((e&&e.message)||'')) throw e;
-        if(Date.now()-t0>30*60000) throw new Error('A confirmação do bloco passou de 30 min. O depósito continua valendo — volte depois e toque "Revisar e assinar" de novo: o fluxo retoma de onde parou (não reenvia).');
-      }
+    // SEM espera bloqueante (antes: loop de até 30 min preso no modal). Até 3 re-checagens rápidas
+    // cobrem o simulador/bloco imediato; seguindo pendente, devolve {pending} — o chamador fecha o
+    // modal e a retomada é AUTOMÁTICA (watch no pRefresh + auto-pull/auto-sign quando confirmar).
+    for(let i=0;i<3;i++){
+      st('Aguardando confirmação do bloco… (testnet ~10 min)');
+      await new Promise(function(r){ setTimeout(r,i?20000:4000); });
+      try{ await check(); pBtcSentClear(d); st('Depósito confirmado ✓'); return; }
+      catch(e){ if(!/mempool|confirma|financiado|envie/i.test((e&&e.message)||'')) throw e; }
     }
+    return { pending:true };
   }
   // Lista de PASSOS no modal (✓/⏳/·) — o usuário vê onde está dentro do "Assinar e continuar"
   // (antes o progresso era só o texto do botão). Guardas de existência: o modal pode fechar no meio.
@@ -3824,7 +3864,15 @@ window.addEventListener('unhandledrejection',function(e){try{console.warn('[veru
       const stepBase=btcFirst?2:0;
       pStepsInit((btcFirst?['Enviar o BTC ao cofre','Confirmação da rede Bitcoin']:[]).concat(['Confirmação no contrato (carteira)','Assinatura final']));
       if(btcFirst){
-        await pFundBtcVault(d,function(t){ if(btn) btn.textContent=t; if(/Aguardando confirmação/i.test(t||'')) pStepsAt(1); });
+        const fr=await pFundBtcVault(d,function(t){ if(btn) btn.textContent=t; if(/Aguardando confirmação/i.test(t||'')) pStepsAt(1); });
+        // ESPERA NÃO-BLOQUEANTE: bloco ainda não confirmou → solta o usuário. O card mostra o
+        // estado com cronômetro, o pRefresh re-checa sozinho e, ao confirmar, o modal reabre e
+        // assina automaticamente (auto-pull/auto-sign). Nada se perde e nada reenvia.
+        if(fr&&fr.pending){
+          closeModal();
+          toast('BTC enviado ✓ — aguardando a confirmação da rede (~10 min). Esta tela acompanha e retoma sozinha.','ok');
+          pRefresh(); return;
+        }
         // LOCK ANTES DO OPEN: o depósito confirmado ABRIU a operação no backend (auto-open). Se a
         // vez de assinar ainda não é deste papel (ex.: comprador trancou BTC e a ordem começa no
         // Vendedor), encerra aqui com sucesso — a assinatura vem quando chegar a vez dele.
