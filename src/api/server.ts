@@ -1431,14 +1431,19 @@ export async function buildApi(deps: ApiDeps): Promise<FastifyInstance> {
     const claim = req.session?.mesa;
     if (!claim || claim.mesaId !== mesaId) throw new DomainError('FORBIDDEN', 'Sessão de participante necessária');
     if (!deps.lightning) throw new DomainError('SETTLEMENT_NOT_ALLOWED', 'Rota Lightning indisponível nesta mesa');
-    const b = parse(z.object({ bolt11: z.string().min(10).max(2000) }), req.body);
+    const b = parse(z.object({ bolt11: z.string().min(10).max(2000).optional() }), req.body ?? {});
     const mesa = deps.mesa.mesaById(mesaId); const chair = mesa?.chairs.find(c => c.chairId === claim.chairId);
     if (!mesa || !chair) throw new DomainError('INVALID_INPUT', 'Cadeira não encontrada');
     if (chair.role !== 'BUYER') throw new DomainError('FORBIDDEN', 'Só o Comprador fornece a invoice Lightning');
-    const inv = await deps.lightning.decodeInvoice(b.bolt11).catch(() => { throw new DomainError('INVALID_INPUT', 'Invoice Lightning inválida ou não decodificável'); });
+    // Sem bolt11 E nó SIMULADO (preview/dev): gera a invoice "do Comprador" (não há 2º nó LN). No nó
+    // real o bolt11 é obrigatório (o Comprador o gera na própria carteira).
+    const amountWant = BigInt(mesa.config?.amountInBase ?? '0');
+    const inv = !b.bolt11 && deps.lightning.simulateBuyerInvoice
+      ? await deps.lightning.simulateBuyerInvoice(amountWant, `mesa ${mesa.code}`)
+      : await deps.lightning.decodeInvoice(b.bolt11 ?? '').catch(() => { throw new DomainError('INVALID_INPUT', 'Invoice Lightning inválida ou não decodificável (informe o bolt11)'); });
     const want = mesa.config?.amountInBase;
     if (want && inv.amountSat.toString() !== want) throw new DomainError('INVALID_INPUT', `O valor da invoice (${inv.amountSat} sats) difere do acordado na mesa (${want} sats)`);
-    chair.lightningInvoice = { bolt11: b.bolt11, paymentHash: inv.paymentHash, amountSat: inv.amountSat.toString() };
+    chair.lightningInvoice = { bolt11: inv.bolt11, paymentHash: inv.paymentHash, amountSat: inv.amountSat.toString() };
     deps.portal.persistMesas();
     await deps.audit.append({ actorType: 'user', actorId: mesaId, category: 'mesa.lightning.invoice', dealId: null, payload: { chairId: chair.chairId, paymentHash: inv.paymentHash, amountSat: inv.amountSat.toString() } });
     return { ok: true, paymentHash: inv.paymentHash, amountSat: inv.amountSat.toString() };

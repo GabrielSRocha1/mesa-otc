@@ -54,4 +54,9 @@ export interface LightningService {
   payInvoice(bolt11: string, opts?: { timeoutSec?: number; maxFeeSat?: bigint }): Promise<LnPayment>;
   /** Consulta o estado de um pagamento por payment_hash (idempotência / recuperação). */
   lookupPayment(paymentHash: string): Promise<LnPayment>;
+  /**
+   * SÓ SIMULADOR (preview/dev): gera uma invoice "do Comprador" — preimage aleatória, hash, invoice —
+   * para exercitar o fluxo sem um segundo nó LN. No nó REAL é undefined (o Comprador traz a própria).
+   */
+  simulateBuyerInvoice?(amountSat: bigint, memo: string): Promise<LnInvoice>;
 }

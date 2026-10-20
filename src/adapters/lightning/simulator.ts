@@ -10,7 +10,7 @@
  * espelhando uma invoice que o recebedor nunca liquida.
  */
 import { sha256Hex } from '../../domain/types.js';
-import { hexToBytes } from '@noble/hashes/utils.js';
+import { hexToBytes, bytesToHex } from '@noble/hashes/utils.js';
 import type { LightningService, LnInvoice, LnPayment, LnNodeInfo, LnBalance } from './types.js';
 
 export class LightningSimulator implements LightningService {
@@ -53,5 +53,11 @@ export class LightningSimulator implements LightningService {
   }
   async lookupPayment(paymentHash: string): Promise<LnPayment> {
     return this.payments.get(paymentHash.toLowerCase()) ?? { status: 'pending', paymentHash: paymentHash.toLowerCase(), preimage: null, feeSat: 0n };
+  }
+  /** SÓ SIMULADOR: gera a invoice "do Comprador" (preimage aleatória semeada → o pagamento a revela). */
+  async simulateBuyerInvoice(amountSat: bigint, memo: string): Promise<LnInvoice> {
+    const pre = bytesToHex(globalThis.crypto.getRandomValues(new Uint8Array(32)));
+    const h = this.seedPreimage(pre);
+    return this.addInvoice(h, amountSat, memo);
   }
 }
