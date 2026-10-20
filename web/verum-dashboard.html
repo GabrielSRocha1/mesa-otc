@@ -1562,6 +1562,13 @@ window.addEventListener('unhandledrejection',function(e){try{console.warn('[veru
     const p=await findVerumEthProvider(); if(!p) throw new Error('Provider EVM da Verum Wallet não foi injetado nesta aba.');
     const accs=await p.request({method:'eth_requestAccounts'}); const from=accs&&accs[0];
     if(!from) throw new Error('Nenhuma conta EVM na carteira.');
+    // EMBRULHO ETH→WETH automático: o backend diz quanto falta (step.wrap) — sem isso o contrato
+    // reverte ao puxar WETH de quem só tem ETH nativo. Uma confirmação a mais na carteira.
+    if(step.wrap&&step.wrap.to){
+      const h0=await p.request({method:'eth_sendTransaction',params:[{from,to:step.wrap.to,value:'0x'+BigInt(step.wrap.valueWei||'0').toString(16),data:step.wrap.data||'0xd0e30db0'}]});
+      await evmWaitReceipt(p,h0);
+      toast('ETH embrulhado para o pagamento ✓','ok');
+    }
     if(step.approve){
       const data='0x095ea7b3'+step.approve.spender.slice(2).toLowerCase().padStart(64,'0')+BigInt(step.approve.amount).toString(16).padStart(64,'0');
       const h=await p.request({method:'eth_sendTransaction',params:[{from,to:step.approve.token,data}]});
