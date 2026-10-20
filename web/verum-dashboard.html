@@ -3954,6 +3954,7 @@ window.addEventListener('unhandledrejection',function(e){try{console.warn('[veru
     if(/FUNDING_REQUIRED|ainda não financiado|sem depósito|Deposite no escrow/i.test(m)) return 'O depósito ainda não foi confirmado na rede. Assim que confirmar, o passo seguinte abre sozinho.';
     if(/não registrada on-chain|createTradeV2|registerPending/i.test(m)) return 'O contrato da operação ainda está sendo registrado na rede pelo Pay Master (~1–2 min). Tente de novo em instantes.';
     if(/allowance|approve|Autorize o token/i.test(m)) return 'Falta autorizar o valor na sua carteira. Toque de novo e confirme a autorização quando a carteira abrir.';
+    if(/EXTENSION_RELOADED|context invalidated|4100/i.test(m)) return 'A extensão da Verum Wallet foi recarregada/atualizada. Recarregue esta página (Ctrl+Shift+R) e tente de novo.';
     if(/TIMEOUT|não respondeu|não devolveu a assinatura/i.test(m)) return 'A Verum Wallet não respondeu. Abra a carteira, confira se está desbloqueada e tente de novo.';
     if(/USER_REJECTED|rejected|recusad/i.test(m)) return 'A ação foi recusada na carteira. Quando quiser continuar, toque de novo.';
     if(/Sessão necessária|sessão|401/i.test(m)) return 'Sua sessão venceu. Reconecte a Verum Wallet para continuar.';
