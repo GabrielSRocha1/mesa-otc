@@ -702,6 +702,15 @@ export class MesaService {
         // exigência da auditoria: nenhum ambiente de teste pode se passar por BTC real.
         return typeof meta?.htlcAddress === 'string' ? { address: meta.htlcAddress, requiredSat: leg.amountBase, from: leg.from, legIndex: leg.index, simulated: this.d.btcSimulated?.() ?? false } : null;
       })(),
+      // REGISTRO on-chain pendente (createTradeV2 do PM1): o auto-envio do approve é one-shot e
+      // se perde em recusa/reload — sem este campo no poll a mesa ficava SEM retry, presa em
+      // "Registrando o contrato na rede". Só enquanto os turnos estão adiados (turnRole null):
+      // quando o registro confirma, healDeferredTurns inicia os turnos e o campo some sozinho.
+      registerTx: (() => {
+        if (deal.state !== 'AWAITING_SIGNATURES' || deal.turnRole != null) return null;
+        const meta = deal.onChain?.ethereum?.meta as Record<string, unknown> | undefined;
+        return meta?.registerPending && typeof meta.registerTx === 'string' ? JSON.parse(meta.registerTx) as Record<string, unknown> : null;
+      })(),
       // REEMBOLSOS por perna (REFUNDED/PENDING): a UI mostra "aguardando timelock" em vez de
       // sumir com o estado — exigência da auditoria (recuperação explicável por operação).
       // (?? []: dado antigo/fake persistido pode não ter o campo — a view nunca pode quebrar)

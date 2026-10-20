@@ -1123,6 +1123,10 @@ export async function buildApi(deps: ApiDeps): Promise<FastifyInstance> {
   app.get('/v1/portal/mesas/:mesaId', async req => {
     const { mesaId } = req.params as { mesaId: string };
     const { mesa } = adminMesa(req, mesaId, false);
+    // Turnos adiados (registro pendente do PM1): este é o poll que o ADMIN da mesa v3 fica
+    // olhando — sem a cura aqui, o registro confirmava on-chain e a tela seguia presa em
+    // "Registrando o contrato na rede" até alguém abrir a esteira legada ou o link público.
+    await healDeferredTurns(mesa.dealId);
     return deps.mesa.mesaViewFor(mesa, { kind: 'admin' });
   });
   // Troca o ativo (token) de uma cadeira — antes de aprovar. Reusa o modal de moedas do wizard no front.

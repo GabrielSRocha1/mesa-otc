@@ -3108,6 +3108,18 @@ window.addEventListener('unhandledrejection',function(e){try{console.warn('[veru
           else if(!m.config||!m.config.amountInBase) txt='Definir os valores da operação e salvar.';
           else if(!m.approvedAt) txt='Conferir os valores e tocar em "Aprovar e liberar assinaturas".';
           ns.style.display=txt?'':'none'; ns.innerHTML=txt?('<b>Próximo passo:</b> '+esc(txt)):'';
+          // Registro on-chain pendente (createTradeV2 do PM1): o poll agora traz o registerTx —
+          // a carteira abre sozinha 1x por operação; recusou/recarregou → botão de retry aqui.
+          const regTx=dl&&dl.registerTx;
+          if(regTx&&regTx.to){
+            ns.style.display='';
+            const b=document.createElement('button');
+            b.type='button'; b.className='btn btn-primary'; b.style.cssText='display:block;height:34px;margin-top:8px';
+            b.textContent='Registrar on-chain (PM1)';
+            b.addEventListener('click',function(){ m3SendRegister(regTx,b); });
+            ns.appendChild(b);
+            if(dl.id&&m3AutoRegKey!==dl.id){ m3AutoRegKey=dl.id; m3SendRegister(regTx,b); }
+          }
         }
       }catch(e){}
       const chairs=$('#m3dChairs');
@@ -3324,6 +3336,12 @@ window.addEventListener('unhandledrejection',function(e){try{console.warn('[veru
   }
   /** PM1 com CARTEIRA REAL: passo on-chain (relay do signV2 pelo keeper) + envelope da mesa, ambos
    *  assinados na própria wallet — usado quando o backend não tem chave dev para o admin. */
+  /** Registro pendente pela tela da mesa: envia o createTradeV2 e re-sincroniza a mesa. */
+  async function m3SendRegister(txr,btn){
+    if(btn){ btn.disabled=true; btn.textContent='Registrando (assine na carteira)…'; }
+    try{ await m3SendTxRequest(txr); toast('Operação registrada no contrato ✓','ok'); m3BalAt=0; m3Refresh(); }
+    catch(e){ toast('Registro on-chain pendente: '+((e&&e.message)||'recusado'),'err'); if(btn){ btn.disabled=false; btn.textContent='Registrar on-chain (PM1)'; } }
+  }
   /** Envia um txRequest cru (ex.: createTradeV2 pendente do PM1) pela carteira EVM. */
   async function m3SendTxRequest(txr){
     const p=await findVerumEthProvider(); if(!p) throw new Error('Provider EVM da Verum Wallet não foi injetado nesta aba.');
