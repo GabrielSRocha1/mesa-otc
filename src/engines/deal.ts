@@ -30,8 +30,8 @@ import type { DealMutator } from './settlement.js';
 import { metrics, logger } from '../monitoring/metrics.js';
 
 export const CreateDealInput = z.object({
-  assetIn: z.object({ network: z.enum(['bitcoin', 'ethereum', 'solana', 'zcash', 'tron']), chainId: z.string().min(1), contractOrMint: z.string().nullable() }),
-  assetOut: z.object({ network: z.enum(['bitcoin', 'ethereum', 'solana', 'zcash', 'tron']), chainId: z.string().min(1), contractOrMint: z.string().nullable() }),
+  assetIn: z.object({ network: z.enum(['bitcoin', 'ethereum', 'solana', 'zcash', 'tron', 'lightning']), chainId: z.string().min(1), contractOrMint: z.string().nullable() }),
+  assetOut: z.object({ network: z.enum(['bitcoin', 'ethereum', 'solana', 'zcash', 'tron', 'lightning']), chainId: z.string().min(1), contractOrMint: z.string().nullable() }),
   amountInBase: z.string().regex(/^[1-9][0-9]*$/, 'inteiro positivo em unidades base'),
   discountBps: z.number().int().min(0).max(2000).default(0),
   commissionBps: z.number().int().min(0).max(5000).default(0),
@@ -39,7 +39,7 @@ export const CreateDealInput = z.object({
   maxSlippageBps: z.number().int().min(1).max(1000).default(50),
   maxPriceDriftBps: z.number().int().min(10).max(1000).default(100),
   expiresInSec: z.number().int().min(900).max(10 * 86400).default(3600), // até 10 dias: cobre a assinatura sequencial (Nº participantes × janela de 5 min)
-  participants: z.array(z.object({ role: z.enum(['SELLER', 'BUYER', 'PAYMASTER_1', 'PAYMASTER_2']), network: z.enum(['bitcoin', 'ethereum', 'solana', 'zcash', 'tron']), chainId: z.string().min(1), address: z.string().min(20).max(120) })).min(3).max(4)
+  participants: z.array(z.object({ role: z.enum(['SELLER', 'BUYER', 'PAYMASTER_1', 'PAYMASTER_2']), network: z.enum(['bitcoin', 'ethereum', 'solana', 'zcash', 'tron', 'lightning']), chainId: z.string().min(1), address: z.string().min(20).max(120) })).min(3).max(4)
 });
 export type CreateDealInputT = z.infer<typeof CreateDealInput>;
 
