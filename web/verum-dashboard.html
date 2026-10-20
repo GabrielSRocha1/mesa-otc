@@ -1178,6 +1178,7 @@ window.addEventListener('unhandledrejection',function(e){try{console.warn('[veru
       <div id="pSigns" style="font-size:13px;color:var(--ink-2)"></div>
       <button class="btn btn-primary btn-block" id="pSignBtn" type="button" style="display:none;margin-top:12px;height:50px">Revisar e assinar</button>
       <button class="btn btn-block" id="pUnwrapBtn" type="button" style="display:none;margin-top:8px;height:44px">Desembrulhar wSOL → SOL</button>
+      <button class="btn btn-block" id="pUnwrapWeth" type="button" style="display:none;margin-top:8px;height:44px">Desembrulhar WETH → ETH</button>
     </section>
   </div>
 </div>
@@ -3630,6 +3631,9 @@ window.addEventListener('unhandledrejection',function(e){try{console.warn('[veru
     // wSOL → SOL: visível em mesa Solana após o fim da operação (liquidada/reembolsada) — é
     // quando alguém fica com wSOL na mão (comprador no settle; vendedor no refund).
     const pud=$('#pUnwrapBtn'); if(pud) pud.style.display=(m.network==='solana'&&d&&['SETTLED','REFUNDED','EXPIRED'].includes(d.state))?'':'none';
+    // WETH→ETH: aparece após a operação terminar (reembolso/liquidação) numa perna EVM — quem
+    // ficou com WETH na mão (comprador no refund, vendedor no settle) converte com um toque.
+    const puw=$('#pUnwrapWeth'); if(puw){ const evmSide=(m.chairs||[]).some(c=>c.expectedAsset&&c.expectedAsset.network==='ethereum'); puw.style.display=(evmSide&&d&&['SETTLED','REFUNDED','EXPIRED','REFUNDING'].includes(d.state))?'':'none'; }
     // "SER PUXADO PARA ASSINAR": na SUA vez (QUALQUER papel — Vendedor/PM/Comprador — em QUALQUER
     // rede), abre automaticamente a tela de revisão/assinatura em vez de só o aviso de turno. O modal
     // é apenas revisão; a carteira só é acionada no clique "Assinar e continuar" (pSign cobre
@@ -4047,7 +4051,28 @@ window.addEventListener('unhandledrejection',function(e){try{console.warn('[veru
     }catch(e){ toast(e.message||'Falha ao desembrulhar','err'); }
     finally{ if(btn){ btn.disabled=false; btn.textContent='Desembrulhar wSOL → SOL'; } }
   }
-  function pStart(){ if(pStarted) return; pStarted=true; const sb=$('#pSignBtn'); if(sb) sb.addEventListener('click',pReview); const ub=$('#pUnwrapBtn'); if(ub) ub.addEventListener('click',pUnwrap); pRefresh(); setInterval(pRefresh,5000); setInterval(pTick,1000);
+  // WETH → ETH: withdraw(saldo) direto no contrato WETH pela carteira do participante. Sem backend —
+  // o WETH virou ETH na própria carteira. Usado após reembolso/liquidação em perna EVM.
+  const WETH_SEPOLIA='0xfFf9976782d46CC05630D1f6eBAb18b2324d6B14';
+  async function pUnwrapWeth(){
+    const btn=$('#pUnwrapWeth'); if(btn){ btn.disabled=true; btn.textContent='Verificando WETH…'; }
+    try{
+      const p=await findVerumEthProvider(); if(!p) throw new Error('Provider EVM da Verum Wallet não está nesta aba. Recarregue a página e tente de novo.');
+      const accs=await p.request({method:'eth_requestAccounts'}); const from=accs&&accs[0]; if(!from) throw new Error('Nenhuma conta EVM na carteira.');
+      // balanceOf(from) no WETH
+      const bal=await p.request({method:'eth_call',params:[{to:WETH_SEPOLIA,data:'0x70a08231'+from.slice(2).toLowerCase().padStart(64,'0')},'latest']});
+      const wei=BigInt(bal||'0x0');
+      if(wei===0n){ toast('Nenhum WETH para desembrulhar nesta carteira.','ok'); return; }
+      const human=(Number(wei)/1e18).toLocaleString('pt-BR',{maximumFractionDigits:6});
+      if(btn) btn.textContent='Confirme na carteira ('+human+' WETH → ETH)…';
+      // withdraw(wei) — selector 0x2e1a7d4d
+      const h=await p.request({method:'eth_sendTransaction',params:[{from,to:WETH_SEPOLIA,data:'0x2e1a7d4d'+wei.toString(16).padStart(64,'0')}]});
+      await evmWaitReceipt(p,h);
+      toast('WETH convertido em ETH ✓ '+human+' ETH','ok'); pRefresh();
+    }catch(e){ if(!pStaleSession(e)) pErrBox('Desembrulhar WETH',((e&&e.code)?('['+e.code+'] '):'')+((e&&e.message)||String(e))); }
+    finally{ if(btn){ btn.disabled=false; btn.textContent='Desembrulhar WETH → ETH'; } }
+  }
+  function pStart(){ if(pStarted) return; pStarted=true; const sb=$('#pSignBtn'); if(sb) sb.addEventListener('click',pReview); const ub=$('#pUnwrapBtn'); if(ub) ub.addEventListener('click',pUnwrap); const uw=$('#pUnwrapWeth'); if(uw) uw.addEventListener('click',pUnwrapWeth); pRefresh(); setInterval(pRefresh,5000); setInterval(pTick,1000);
     // tenta ativar avisos já; e também no 1º toque (browsers que exigem gesto p/ permissão).
     pEnablePush(); window.addEventListener('pointerdown',pEnablePush,{once:true}); }
   function pInit(){
