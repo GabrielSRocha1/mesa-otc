@@ -982,6 +982,7 @@ window.addEventListener('unhandledrejection',function(e){try{console.warn('[veru
       <!-- ===== Mesas v3: detalhe da mesa selecionada ===== -->
       <section class="card" id="m3Detail" style="display:none;margin-bottom:16px">
         <div class="card-h"><div class="t" id="m3dTitle">Mesa</div><span class="badge info" id="m3dStatus">—</span></div>
+        <div id="m3dNextStep" style="display:none;margin:2px 0 10px;padding:10px 12px;border-radius:10px;background:rgba(201,168,76,.10);border:1px solid rgba(201,168,76,.35);font-size:13px"></div>
         <div style="display:flex;gap:14px;flex-wrap:wrap;align-items:center;margin-bottom:12px">
           <span class="mono" id="m3dCode" style="font-size:13px"></span>
           <span class="mono" id="m3dOpCode" style="font-size:13px;color:var(--blue)" title="Código único da operação"></span>
@@ -3056,6 +3057,29 @@ window.addEventListener('unhandledrejection',function(e){try{console.warn('[veru
       $('#m3dTitle').textContent='Mesa '+(m.label||m.code);
       $('#m3dCode').textContent=m.code;
       $('#m3dStatus').outerHTML='<span id="m3dStatus">'+m3Badge(m.status)+'</span>';
+      // PRÓXIMO PASSO (admin): frase fixa dizendo a ação pendente e de quem — try/catch próprio
+      // para nunca derrubar o resto do refresh.
+      try{
+        const ns=$('#m3dNextStep');
+        if(ns){
+          const nm=function(r){ const c=(m.chairs||[]).find(x=>x.role===r); return (M3_ROLE[r]||r)+(c&&c.firstName?(' ('+c.firstName+')'):''); };
+          const dl=m.deal; let txt='';
+          const semConvite=(m.chairs||[]).find(c=>!c.wallet&&!c.invite&&c.role!=='PAYMASTER_1');
+          const semConexao=(m.chairs||[]).find(c=>!c.wallet&&c.role!=='PAYMASTER_1');
+          if(dl){
+            if(dl.state==='SETTLED') txt='Operação concluída ✓';
+            else if(['FULLY_SIGNED','SETTLEMENT_VALIDATION','SETTLING'].includes(dl.state)) txt='Tudo assinado — liquidando no contrato…';
+            else if(['EXPIRED','REFUNDING','REFUNDED','BLOCKED','CANCELLED'].includes(dl.state)) txt='Operação não concluída — depósitos confirmados são devolvidos automaticamente.';
+            else if(dl.state==='LIQUIDITY_VERIFIED') txt=dl.htlcVault?('Aguardando '+nm(dl.htlcVault.from)+' enviar o BTC ao cofre — avise-o.'):'Aguardando os depósitos.';
+            else if(dl.state==='AWAITING_SIGNATURES'&&!dl.turnRole&&(dl.validSignatures||0)<(dl.requiredSignatures||9)) txt='Registrando o contrato na rede (~1–2 min) — sua carteira abre sozinha se faltar assinar o registro.';
+            else if(dl.state==='AWAITING_SIGNATURES'&&dl.turnRole==='PAYMASTER_1') txt='Sua vez: toque em "Assinar a vez".';
+            else if(dl.state==='AWAITING_SIGNATURES'&&dl.turnRole) txt='Aguardando '+nm(dl.turnRole)+' assinar ('+(dl.validSignatures||0)+'/'+(dl.requiredSignatures||0)+') — avise-o.';
+          } else if(semConexao) txt=semConvite?('Convidar '+nm(semConvite.role)+' (botão "Convidar participante").'):('Aguardando '+nm(semConexao.role)+' conectar a carteira pelo convite.');
+          else if(!m.config||!m.config.amountInBase) txt='Definir os valores da operação e salvar.';
+          else if(!m.approvedAt) txt='Conferir os valores e tocar em "Aprovar e liberar assinaturas".';
+          ns.style.display=txt?'':'none'; ns.innerHTML=txt?('<b>Próximo passo:</b> '+esc(txt)):'';
+        }
+      }catch(e){}
       const chairs=$('#m3dChairs');
       // Saldos do precheck (por papel) p/ exibir no card, como na aba Operações.
       const balByRole={}; ((m3Bal&&m3Bal.chairs)||[]).forEach(b=>{ balByRole[b.role]=b; });
@@ -3444,11 +3468,34 @@ window.addEventListener('unhandledrejection',function(e){try{console.warn('[veru
         +'<button class="btn btn-primary btn-block" id="pEscrowDep" style="height:44px;margin-top:8px">'+(isBuyerDep?'Autorizar pagamento agora':'Depositar no escrow agora')+'</button>'
         +'</div>';
     }
+    // PRÓXIMO PASSO SEMPRE VISÍVEL: uma frase derivada do estado dizendo o que falta e de quem —
+    // acaba com tela "parada" sem instrução. Puro derive (try/catch no chamador; nunca mata o render).
+    function pNextStepTxt(){
+      const nm=function(r){ const c=(m.chairs||[]).find(x=>x.role===r); return (M3_ROLE[r]||r)+(c&&c.firstName?(' ('+c.firstName+')'):''); };
+      if(!d) return m.config?'Aguardando o Pay Master aprovar a operação.':'Aguardando o Pay Master configurar a operação.';
+      if(d.state==='SETTLED') return 'Operação concluída ✓';
+      if(['FULLY_SIGNED','SETTLEMENT_VALIDATION','SETTLING'].includes(d.state)) return 'Tudo assinado — o contrato está executando a troca…';
+      if(['EXPIRED','REFUNDING','REFUNDED','BLOCKED','CANCELLED'].includes(d.state)) return 'Operação não concluída — depósitos confirmados são devolvidos automaticamente.';
+      if(d.state==='LIQUIDITY_VERIFIED'){
+        if(d.htlcVault&&d.htlcVault.from===(me.role)&&myFund) return 'Seu próximo passo: enviar o BTC ao cofre — toque em "Revisar e assinar".';
+        if(d.htlcVault) return 'Aguardando '+nm(d.htlcVault.from)+' enviar o BTC ao cofre.';
+        return 'Aguardando os depósitos.';
+      }
+      if(d.state==='AWAITING_SIGNATURES'){
+        if(!d.turnRole&&(d.validSignatures||0)<(d.requiredSignatures||9)) return 'O Pay Master está registrando o contrato na rede (~1–2 min) — as assinaturas abrem em seguida.';
+        if(d.turnRole===me.role) return (d.signed||[]).includes(me.role)?'Você já assinou — acompanhe.':'Sua vez: revisar e assinar.';
+        if(d.turnRole) return 'Aguardando '+nm(d.turnRole)+' assinar ('+(d.validSignatures||0)+'/'+(d.requiredSignatures||0)+').';
+      }
+      return '';
+    }
+    let nextStep=''; try{ nextStep=pNextStepTxt(); }catch(e){}
+    const nextStepHtml=nextStep?'<div style="margin-bottom:10px;padding:10px 12px;border-radius:10px;background:rgba(201,168,76,.10);border:1px solid rgba(201,168,76,.35);font-size:13px"><b>Próximo passo:</b> '+esc(nextStep)+'</div>':'';
     // GATE DE SEQUÊNCIA: turnos adiados até o PM1 registrar o contrato on-chain — o participante
     // vê o porquê da espera (sem isso parecia travado). Some sozinho quando os turnos começam.
     const regWait=(d&&d.state==='AWAITING_SIGNATURES'&&!d.turnRole&&(d.validSignatures||0)<(d.requiredSignatures||9))
       ?'<div style="margin-top:12px;padding:10px 12px;border:1px solid var(--line);border-radius:10px;font-size:12.5px;color:var(--ink-2)">⏳ O <b>Pay Master</b> está registrando o contrato da operação na rede (~1–2 min). As assinaturas abrem em seguida — esta tela atualiza sozinha.</div>':'';
-    $('#pSigns').innerHTML=(d?('Ordem: Vendedor → Pay Master 1'+((m.chairs||[]).some(c=>c.role==='PAYMASTER_2')?' → Pay Master 2':'')+' → Comprador'
+    $('#pSigns').innerHTML=nextStepHtml
+      +(d?('Ordem: Vendedor → Pay Master 1'+((m.chairs||[]).some(c=>c.role==='PAYMASTER_2')?' → Pay Master 2':'')+' → Comprador'
       +(d.turnRole?('<br>Vez atual: <b>'+esc(M3_ROLE[d.turnRole]||d.turnRole)+'</b>'):'')) : 'A coleta de assinaturas começa após a aprovação do Pay Master.')
       +(m.irreversible?'<br><span style="color:var(--amber)">🔒 Operação irreversível — fundos trancados; o contrato roda até a liquidação (preimage) ou o reembolso após o timelock.</span>':'')
       +regWait
