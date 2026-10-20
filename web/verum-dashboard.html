@@ -3479,6 +3479,18 @@ window.addEventListener('unhandledrejection',function(e){try{console.warn('[veru
     // cofre P2WSH por fora) — sem este card, o participante batia em FUNDING_REQUIRED na assinatura
     // sem nunca ver o endereço do cofre nem o valor. O botão re-checa o depósito no backend.
     let fundHtml='';
+    // LIGHTNING_SWAP: o Comprador informa a invoice (gerada na própria carteira LN) ANTES do approve.
+    // O nó da mesa a paga na liquidação (entrega BTC em segundos). Selo + campo no card.
+    const isLn=(m.settlement&&m.settlement.mode==='LIGHTNING_SWAP');
+    if(isLn&&me.lnInvoiceNeeded){
+      fundHtml+='<div style="margin-top:12px;padding:12px;border:1px solid var(--blue);border-radius:10px">'
+        +'<div style="font-size:12px;font-weight:700;color:var(--blue);margin-bottom:4px">⚡ BTC via Lightning — entrega em segundos</div>'
+        +'<div style="font-size:12.5px;color:var(--ink-2)">Gere uma <b>invoice Lightning</b> na sua carteira (BTC, valor exato acordado) e cole aqui. O vendedor paga na liquidação — você recebe o BTC na hora.</div>'
+        +'<textarea class="inp" id="pLnInvoice" placeholder="lnbc..." style="width:100%;height:80px;margin-top:8px;font-size:12px;font-family:var(--f-mono)"></textarea>'
+        +'<button class="btn btn-primary btn-block" id="pLnInvoiceBtn" style="height:44px;margin-top:8px">Enviar invoice</button></div>';
+    } else if(isLn&&me.lnInvoiceProvided){
+      fundHtml+='<div style="margin-top:12px;padding:10px 12px;border:1px solid var(--line);border-radius:10px;font-size:12.5px;color:var(--ink-2)">⚡ Invoice Lightning recebida ✓ — o vendedor paga o BTC na liquidação (entrega em segundos).</div>';
+    }
     // LOCK ANTES DO OPEN: em LIQUIDITY_VERIFIED a operação está criada aguardando o lock BTC — o
     // card de depósito aparece JÁ nessa fase (a janela de 40 min só nasce quando o lock confirma
     // e a operação abre sozinha). Em AWAITING_SIGNATURES segue valendo para as demais pernas.
@@ -3564,6 +3576,14 @@ window.addEventListener('unhandledrejection',function(e){try{console.warn('[veru
       +fundHtml
       +'<div id="pChainHeal"></div>';
     pChainHealCheck(d,me);
+    // LIGHTNING: envio da invoice do Comprador (antes do approve — guardada na cadeira).
+    const lnb=$('#pLnInvoiceBtn'); if(lnb) lnb.addEventListener('click',async function(){
+      const ta=$('#pLnInvoice'); const bolt11=(ta&&ta.value||'').trim();
+      if(!bolt11){ toast('Cole a invoice Lightning (lnbc…).','err'); return; }
+      lnb.disabled=true; lnb.textContent='Enviando…';
+      try{ const r=await pApi('/v1/mesas/'+encodeURIComponent(P_MESA)+'/lightning-invoice',{method:'POST',body:{bolt11}}); toast('Invoice recebida ✓ ('+r.amountSat+' sats)','ok'); pRefresh(); }
+      catch(e){ if(!pStaleSession(e)) pErrBox('Invoice Lightning',((e&&e.code)?('['+e.code+'] '):'')+((e&&e.message)||String(e))); lnb.disabled=false; lnb.textContent='Enviar invoice'; }
+    });
     if(fundHtml&&d&&d.htlcVault){
       const bp=$('#pVaultPay'); if(bp) bp.addEventListener('click',async function(){
         bp.disabled=true; bp.textContent='Confirme na Verum Wallet…';
