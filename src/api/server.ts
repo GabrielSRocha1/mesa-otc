@@ -53,7 +53,7 @@ export interface DevDemo { keyring: import('../portal/demo.js').DemoMesaKeyring;
 /** Modo EVM dev: contrato real (Sepolia/anvil), keyring de EOAs dev e mint dos tokens mock. */
 export interface DevEvmKeyring { addressFor(owner: string): string; accountByAddress(address: string): import('viem/accounts').PrivateKeyAccount | null }
 export interface DevEvm { chainId: string; escrow: string; tbtc: `0x${string}`; tusdt: `0x${string}`; explorerBase: string | null; keyring: DevEvmKeyring; mintToken: (token: `0x${string}`, to: string, amount: bigint) => Promise<void> }
-export interface ApiDeps { deals: DealEngine; settlement: SettlementEngine; price: PriceEngine; liquidity: LiquidityEngine; router: RouterEngine; registry: AssetRegistry; adapters?: AdapterRegistry; platformFeeBps: number; networkCostUsd: (n: Network) => Promise<string>; auth: WalletAuth; portal: PortalService; identity: IdentityService; identityDev?: { email: FakeEmailChannel; sms: FakeSmsChannel }; rooms: RoomService; proposals: ProposalService; mesa: MesaService; push?: PushService; escrowAddToken?: (token: `0x${string}`, decimals: number, symbol: string) => Promise<{ txHash: string }>; balanceReaders?: BalanceReaders; store: Store; audit: AuditLog; mesaHtmlPath?: string; portalHtmlPath?: string; conviteHtmlPath?: string; operacaoHtmlPath?: string; env: string; rateLimit?: { windowMs: number; max: number }; dev?: DevMint; demoDeferFunding?: boolean }
+export interface ApiDeps { deals: DealEngine; settlement: SettlementEngine; price: PriceEngine; liquidity: LiquidityEngine; router: RouterEngine; registry: AssetRegistry; adapters?: AdapterRegistry; platformFeeBps: number; networkCostUsd: (n: Network) => Promise<string>; auth: WalletAuth; portal: PortalService; identity: IdentityService; identityDev?: { email: FakeEmailChannel; sms: FakeSmsChannel }; rooms: RoomService; proposals: ProposalService; mesa: MesaService; lightning?: import('../adapters/lightning/types.js').LightningService; push?: PushService; escrowAddToken?: (token: `0x${string}`, decimals: number, symbol: string) => Promise<{ txHash: string }>; balanceReaders?: BalanceReaders; store: Store; audit: AuditLog; mesaHtmlPath?: string; portalHtmlPath?: string; conviteHtmlPath?: string; operacaoHtmlPath?: string; env: string; rateLimit?: { windowMs: number; max: number }; dev?: DevMint; demoDeferFunding?: boolean }
 declare module 'fastify' { interface FastifyRequest { session: Session | null } }
 
 const NetworkZ = z.enum(['bitcoin', 'ethereum', 'solana', 'zcash', 'tron']); const RoleZ = z.enum(['SELLER', 'BUYER', 'PAYMASTER_1', 'PAYMASTER_2']);
@@ -838,6 +838,54 @@ export async function buildApi(deps: ApiDeps): Promise<FastifyInstance> {
     return { ...await mesaDealView(dealNow), registerTx };
   };
 
+  /** Operação LIGHTNING_SWAP (ADR Lightning): Vendedor = TESOURARIA da mesa (market-maker, entrega
+   *  BTC pelo nó LN e recebe o token); Comprador paga TOKEN no escrow V2 e fornece a INVOICE
+   *  (payment_hash = hashlock). O nó paga a invoice na liquidação (revela a preimage → settleV2). */
+  const createMesaLightningDeal = async (mesa: MesaRecord, b: MesaDealBody, onCreated: (dealId: string) => void) => {
+    const adapters = deps.adapters;
+    if (!adapters) throw new DomainError('SETTLEMENT_NOT_ALLOWED', 'Lightning indisponível: adaptadores não configurados');
+    const evm = adapters.get('ethereum'); if (!evm) throw new DomainError('SETTLEMENT_NOT_ALLOWED', 'Adaptador Ethereum ausente');
+    const chainId = evm.chain.chainId;
+    const sellerChair = mesa.chairs.find(c => c.role === 'SELLER') as MesaChair;
+    const buyerChair = mesa.chairs.find(c => c.role === 'BUYER') as MesaChair;
+    const pm1Chair = mesa.chairs.find(c => c.role === 'PAYMASTER_1');
+    const motivos: string[] = [];
+    if (!buyerChair?.lightningInvoice) motivos.push('Comprador: falta a invoice Lightning (gere no app e informe à mesa)');
+    const tusdt = buyerChair?.expectedAsset.contractOrMint; if (!tusdt) motivos.push('Comprador: o ativo precisa ser um token (USDT/USDC) no escrow');
+    // Vendedor (tesouraria) e Comprador: endereços EVM (recebem/depositam o token). PM1 EVM.
+    const sellerEvm = addressOn(sellerChair, 'ethereum'); if (!sellerEvm || !evm.validateAddress(sellerEvm)) motivos.push('Vendedor (tesouraria): carteira sem endereço Ethereum válido');
+    const buyerEvm = addressOn(buyerChair, 'ethereum'); if (!buyerEvm || !evm.validateAddress(buyerEvm)) motivos.push('Comprador: carteira sem endereço Ethereum válido');
+    const pm1Evm = pm1Chair?.wallet ? addressOn(pm1Chair, 'ethereum') : null; if (!pm1Chair?.wallet || !pm1Evm || !evm.validateAddress(pm1Evm)) motivos.push('Pay Master 1: carteira sem endereço Ethereum válido');
+    if (!mesa.config?.amountInBase) motivos.push('Configuração: quantidade não definida');
+    if (motivos.length) throw new DomainError('VERSION_CONFLICT', 'Não foi possível criar a operação Lightning', { motivos });
+    const inv = buyerChair.lightningInvoice as NonNullable<MesaChair['lightningInvoice']>;
+    const input = {
+      assetIn: { network: 'lightning', chainId: 'ln', contractOrMint: null },
+      assetOut: { network: 'ethereum', chainId, contractOrMint: tusdt as string },
+      amountInBase: inv.amountSat, discountBps: b.discountBps, commissionBps: b.commissionBps, commissionSplitBps: b.commissionSplitBps,
+      maxSlippageBps: b.maxSlippageBps, maxPriceDriftBps: 500, expiresInSec: b.expiresInSec,
+      participants: [
+        { role: 'SELLER', network: 'ethereum', chainId, address: sellerEvm as string },
+        { role: 'PAYMASTER_1', network: 'ethereum', chainId, address: pm1Evm as string },
+        { role: 'BUYER', network: 'ethereum', chainId, address: buyerEvm as string },
+      ],
+      lightningHtlcHash: inv.paymentHash, lightningInvoice: inv.bolt11,
+    };
+    // Simulado (preview/dev): semeia o USDT do Comprador + semeia a preimage no nó simulado p/ a
+    // liquidação revelar R (no real, o Comprador gera R na própria carteira LN).
+    deps.dev?.seed?.('ethereum', buyerEvm as string, tusdt as string, 10n ** 15n);
+    const created = await deps.deals.create(input, sellerEvm as string);
+    onCreated(created.id);
+    for (const p of input.participants) if (p.role !== 'SELLER') await deps.deals.connectWallet(created.id, p.role as Role, p.address, p.address);
+    await deps.deals.open(created.id, sellerEvm as string);
+    try { await deps.deals.fund(created.id, 'BUYER', buyerEvm as string); } catch (e) { logger.warn({ dealId: created.id, err: (e as Error).message }, 'funding do comprador (USDT) pendente — carteira real completa via /onchain-tx'); }
+    await deps.audit.append({ actorType: 'user', actorId: mesa.payMasterId, category: 'portal.mesa.deal.created', dealId: created.id, payload: { mode: 'lightning-swap', amountSat: inv.amountSat } });
+    const dealNow = await deps.deals.get(created.id);
+    const meta = dealNow?.onChain?.ethereum?.meta as Record<string, unknown> | undefined;
+    const registerTx = meta?.registerPending && typeof meta.registerTx === 'string' ? JSON.parse(meta.registerTx) as Record<string, unknown> : null;
+    return { ...await mesaDealView(dealNow), registerTx };
+  };
+
   app.post('/v1/portal/mesa/deal', async (req, reply) => {
     const token = portalToken(req);
     const b = parse(MesaDealBodyZ, req.body ?? {});
@@ -1164,7 +1212,16 @@ export async function buildApi(deps: ApiDeps): Promise<FastifyInstance> {
     const legOk = (c?: MesaChair) => !!c && (!!c.expectedAsset.contractOrMint || (solReal && c.expectedAsset.network === 'solana'));
     const bothNative = !sellerChairA?.expectedAsset.contractOrMint && !buyerChairA?.expectedAsset.contractOrMint;
     const escrowDirectTokens = plan?.mode === 'ESCROW_DIRECT' && legOk(sellerChairA) && legOk(buyerChairA) && !bothNative;
-    const view = plan?.mode === 'HTLC_BTC'
+    // Precheck de LIQUIDEZ Lightning: o nó precisa de liquidez OUTBOUND ≥ amount (ele entrega o BTC).
+    if (plan?.mode === 'LIGHTNING_SWAP' && deps.lightning) {
+      const buyerInv = mesa.chairs.find(c => c.role === 'BUYER')?.lightningInvoice;
+      const amountSat = BigInt(buyerInv?.amountSat ?? mesa.config?.amountInBase ?? '0');
+      try { const bal = await deps.lightning.getBalance(); if (bal.outboundSat < amountSat) throw new DomainError('LIQUIDITY_INSUFFICIENT', `O nó Lightning não tem liquidez suficiente (disponível ${bal.outboundSat} sats, necessário ${amountSat}). Use a rota HTLC on-chain ou reduza o valor.`); }
+      catch (e) { if (e instanceof DomainError) throw e; logger.warn({ err: (e as Error).message }, 'precheck de liquidez Lightning falhou (nó indisponível)'); }
+    }
+    const view = plan?.mode === 'LIGHTNING_SWAP'
+      ? await createMesaLightningDeal(mesa, body, id => deps.mesa.attachDeal(mesa, id))
+      : plan?.mode === 'HTLC_BTC'
       ? await createMesaHtlcDeal(mesa, body, id => deps.mesa.attachDeal(mesa, id))
       : plan?.mode === 'CROSS_CHAIN' && plan.htlc
       ? await createMesaXchainHtlcDeal(mesa, body, id => deps.mesa.attachDeal(mesa, id))
@@ -1366,6 +1423,25 @@ export async function buildApi(deps: ApiDeps): Promise<FastifyInstance> {
     chair.pushSub = b.subscription;
     deps.portal.persistMesas();
     return { ok: true, enabled: !!deps.push?.enabled };
+  });
+  // LIGHTNING_SWAP: o COMPRADOR informa a invoice que gerou na própria carteira LN (payment_hash =
+  // hashlock do swap). A mesa decodifica/valida e guarda na cadeira; o nó paga na liquidação.
+  app.post('/v1/mesas/:mesaId/lightning-invoice', async req => {
+    const { mesaId } = req.params as { mesaId: string };
+    const claim = req.session?.mesa;
+    if (!claim || claim.mesaId !== mesaId) throw new DomainError('FORBIDDEN', 'Sessão de participante necessária');
+    if (!deps.lightning) throw new DomainError('SETTLEMENT_NOT_ALLOWED', 'Rota Lightning indisponível nesta mesa');
+    const b = parse(z.object({ bolt11: z.string().min(10).max(2000) }), req.body);
+    const mesa = deps.mesa.mesaById(mesaId); const chair = mesa?.chairs.find(c => c.chairId === claim.chairId);
+    if (!mesa || !chair) throw new DomainError('INVALID_INPUT', 'Cadeira não encontrada');
+    if (chair.role !== 'BUYER') throw new DomainError('FORBIDDEN', 'Só o Comprador fornece a invoice Lightning');
+    const inv = await deps.lightning.decodeInvoice(b.bolt11).catch(() => { throw new DomainError('INVALID_INPUT', 'Invoice Lightning inválida ou não decodificável'); });
+    const want = mesa.config?.amountInBase;
+    if (want && inv.amountSat.toString() !== want) throw new DomainError('INVALID_INPUT', `O valor da invoice (${inv.amountSat} sats) difere do acordado na mesa (${want} sats)`);
+    chair.lightningInvoice = { bolt11: b.bolt11, paymentHash: inv.paymentHash, amountSat: inv.amountSat.toString() };
+    deps.portal.persistMesas();
+    await deps.audit.append({ actorType: 'user', actorId: mesaId, category: 'mesa.lightning.invoice', dealId: null, payload: { chairId: chair.chairId, paymentHash: inv.paymentHash, amountSat: inv.amountSat.toString() } });
+    return { ok: true, paymentHash: inv.paymentHash, amountSat: inv.amountSat.toString() };
   });
   // Ativa um token (ex.: WETH) na allowlist ON-CHAIN do escrow V2 via keeper — habilita "ETH embrulhado".
   // Só em dev/demo (sandbox testnet) e SÓ funciona se o keeper for o owner do contrato (senão a tx reverte).

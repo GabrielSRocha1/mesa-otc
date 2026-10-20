@@ -2548,9 +2548,11 @@ window.addEventListener('unhandledrejection',function(e){try{console.warn('[veru
   }
   /* ---------- Tokens autorizados por rede (registro oficial via /v1/tokens) ---------- */
   const M3_GAS={ solana:{symbol:'SOL',decimals:9}, ethereum:{symbol:'ETH',decimals:18}, tron:{symbol:'TRX',decimals:6}, bsc:{symbol:'BNB',decimals:18}, polygon:{symbol:'POL',decimals:18}, base:{symbol:'ETH',decimals:18}, arbitrum:{symbol:'ETH',decimals:18}, bitcoin:{symbol:'BTC',decimals:8} };
-  const M3_NETS=[['solana','Solana'],['ethereum','Ethereum'],['tron','Tron'],['bsc','BNB Smart Chain'],['polygon','Polygon'],['base','Base'],['arbitrum','Arbitrum One'],['bitcoin','Bitcoin (BTC nativo · HTLC)']];
+  const M3_NETS=[['solana','Solana'],['ethereum','Ethereum'],['tron','Tron'],['bsc','BNB Smart Chain'],['polygon','Polygon'],['base','Base'],['arbitrum','Arbitrum One'],['bitcoin','Bitcoin (BTC nativo · HTLC)'],['lightning','Lightning (BTC · segundos)']];
   // BTC NATIVO: não é token — liquida via HTLC (swap atômico com hash secret compartilhado com o escrow).
   const M3_BTC_NATIVE={ symbol:'BTC', contractOrMint:null, decimals:8, representationOf:'BTC nativo — fluxo HTLC (atomic swap)' };
+  // BTC via LIGHTNING: entrega em segundos pelo nó da mesa; o Comprador fornece a invoice (hashlock).
+  const M3_BTC_LN={ symbol:'BTC', contractOrMint:null, decimals:8, representationOf:'BTC via Lightning — entrega em segundos' };
   // Seleção de moeda via MODAL (todas as redes numa lista só, com ícone) — não há mais escolha por rede.
   const m3PickAsset={ sell:null, buy:null };
   let m3Catalog=null; // catálogo unificado (nativos + tokens do registro + BTC nativo), montado 1x
@@ -2572,12 +2574,13 @@ window.addEventListener('unhandledrejection',function(e){try{console.warn('[veru
     const lists=await Promise.all(M3_NETS.map(async n=>{
       const net=n[0];
       if(net==='bitcoin') return [M3_BTC_NATIVE];
+      if(net==='lightning') return [M3_BTC_LN];
       try{ const j=await (await fetch(API+'/v1/tokens?network='+encodeURIComponent(net))).json(); return (j&&j.tokens)||[]; }catch(e){ return []; }
     }));
     const out=[];
     M3_NETS.forEach((n,i)=>{
       const net=n[0], label=n[1];
-      if(net!=='bitcoin'){ const g=M3_GAS[net]; if(g) out.push(m3MkAsset(net,label,{symbol:g.symbol,contractOrMint:null,decimals:g.decimals})); }
+      if(net!=='bitcoin'&&net!=='lightning'){ const g=M3_GAS[net]; if(g) out.push(m3MkAsset(net,label,{symbol:g.symbol,contractOrMint:null,decimals:g.decimals})); }
       (lists[i]||[]).forEach(t=> out.push(m3MkAsset(net,label,t)) );
     });
     m3Catalog=out; return out;
@@ -2638,6 +2641,7 @@ window.addEventListener('unhandledrejection',function(e){try{console.warn('[veru
   // Plano de liquidação derivado dos lados — espelha deriveSettlementPlan do backend.
   function m3Plan(sell,buy){
     if(!sell||!buy) return null;
+    if(sell.network==='lightning') return { mode:'LIGHTNING_SWAP', txt:'BTC via Lightning — entrega em segundos: o Comprador paga o token no escrow, o nó da mesa paga a invoice e revela o segredo que liquida' };
     const btc=s=>s.network==='bitcoin'&&s.contractOrMint==null;
     if(btc(sell)||btc(buy)) return { mode:'HTLC_BTC', txt:'BTC nativo via HTLC — swap atômico: BTC trancado na rede Bitcoin, a outra perna no escrow com o mesmo hash secret' };
     if(sell.network!==buy.network) return { mode:'CROSS_CHAIN', txt:'Redes diferentes ('+sell.network+' ↔ '+buy.network+') — escrow em cada rede + liberação atômica via Chainlink CCIP' };
@@ -3479,6 +3483,18 @@ window.addEventListener('unhandledrejection',function(e){try{console.warn('[veru
     // cofre P2WSH por fora) — sem este card, o participante batia em FUNDING_REQUIRED na assinatura
     // sem nunca ver o endereço do cofre nem o valor. O botão re-checa o depósito no backend.
     let fundHtml='';
+    // LIGHTNING_SWAP: o Comprador informa a invoice (gerada na própria carteira LN) ANTES do approve.
+    // O nó da mesa a paga na liquidação (entrega BTC em segundos). Selo + campo no card.
+    const isLn=(m.settlement&&m.settlement.mode==='LIGHTNING_SWAP');
+    if(isLn&&me.lnInvoiceNeeded){
+      fundHtml+='<div style="margin-top:12px;padding:12px;border:1px solid var(--blue);border-radius:10px">'
+        +'<div style="font-size:12px;font-weight:700;color:var(--blue);margin-bottom:4px">⚡ BTC via Lightning — entrega em segundos</div>'
+        +'<div style="font-size:12.5px;color:var(--ink-2)">Gere uma <b>invoice Lightning</b> na sua carteira (BTC, valor exato acordado) e cole aqui. O vendedor paga na liquidação — você recebe o BTC na hora.</div>'
+        +'<textarea class="inp" id="pLnInvoice" placeholder="lnbc..." style="width:100%;height:80px;margin-top:8px;font-size:12px;font-family:var(--f-mono)"></textarea>'
+        +'<button class="btn btn-primary btn-block" id="pLnInvoiceBtn" style="height:44px;margin-top:8px">Enviar invoice</button></div>';
+    } else if(isLn&&me.lnInvoiceProvided){
+      fundHtml+='<div style="margin-top:12px;padding:10px 12px;border:1px solid var(--line);border-radius:10px;font-size:12.5px;color:var(--ink-2)">⚡ Invoice Lightning recebida ✓ — o vendedor paga o BTC na liquidação (entrega em segundos).</div>';
+    }
     // LOCK ANTES DO OPEN: em LIQUIDITY_VERIFIED a operação está criada aguardando o lock BTC — o
     // card de depósito aparece JÁ nessa fase (a janela de 40 min só nasce quando o lock confirma
     // e a operação abre sozinha). Em AWAITING_SIGNATURES segue valendo para as demais pernas.
@@ -3564,6 +3580,14 @@ window.addEventListener('unhandledrejection',function(e){try{console.warn('[veru
       +fundHtml
       +'<div id="pChainHeal"></div>';
     pChainHealCheck(d,me);
+    // LIGHTNING: envio da invoice do Comprador (antes do approve — guardada na cadeira).
+    const lnb=$('#pLnInvoiceBtn'); if(lnb) lnb.addEventListener('click',async function(){
+      const ta=$('#pLnInvoice'); const bolt11=(ta&&ta.value||'').trim();
+      if(!bolt11){ toast('Cole a invoice Lightning (lnbc…).','err'); return; }
+      lnb.disabled=true; lnb.textContent='Enviando…';
+      try{ const r=await pApi('/v1/mesas/'+encodeURIComponent(P_MESA)+'/lightning-invoice',{method:'POST',body:{bolt11}}); toast('Invoice recebida ✓ ('+r.amountSat+' sats)','ok'); pRefresh(); }
+      catch(e){ if(!pStaleSession(e)) pErrBox('Invoice Lightning',((e&&e.code)?('['+e.code+'] '):'')+((e&&e.message)||String(e))); lnb.disabled=false; lnb.textContent='Enviar invoice'; }
+    });
     if(fundHtml&&d&&d.htlcVault){
       const bp=$('#pVaultPay'); if(bp) bp.addEventListener('click',async function(){
         bp.disabled=true; bp.textContent='Confirme na Verum Wallet…';

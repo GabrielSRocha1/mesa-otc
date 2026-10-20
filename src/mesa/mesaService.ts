@@ -687,6 +687,13 @@ export class MesaService {
       // o participante que precisa trancar BTC não tinha COMO saber o endereço do cofre nem quanto
       // enviar — batia em FUNDING_REQUIRED na assinatura sem instrução nenhuma na tela.
       funding: deal.participants.filter(p => p.fundingRequired).map(p => ({ role: p.role, status: p.funding ?? 'PENDING', legIndex: deal.terms?.legs.find(l => l.from === p.role)?.index ?? null })),
+      // LIGHTNING_SWAP: a UI mostra o selo "BTC via Lightning" e, p/ o Comprador, o estado da invoice
+      // (precisa informá-la antes do approve). O valor em sats vem dos termos da perna lightning.
+      lightning: (() => {
+        if (deal.terms?.route.kind !== 'LIGHTNING_SWAP') return null;
+        const leg = deal.terms?.legs.find(l => l.escrowChain === 'lightning');
+        return { amountSat: leg?.amountBase ?? deal.draft?.amountInBase ?? null, hasInvoice: !!deal.lightningInvoice };
+      })(),
       htlcVault: (() => {
         const leg = deal.terms?.legs.find(l => l.mode === 'HTLC' && l.escrowChain === 'bitcoin');
         if (!leg) return null;
@@ -750,7 +757,10 @@ export class MesaService {
     const me = mesa.chairs.find(c => c.chairId === viewer.chairId);
     return {
       ...base,
-      viewer: me ? { chairId: me.chairId, role: me.role, roleLabel: CHAIR_ROLE_LABEL[me.role], firstName: me.firstName ?? null, wallet: me.wallet ? this.shortAddr(me.wallet.address) : null, asset: me.expectedAsset.symbol } : null,
+      viewer: me ? { chairId: me.chairId, role: me.role, roleLabel: CHAIR_ROLE_LABEL[me.role], firstName: me.firstName ?? null, wallet: me.wallet ? this.shortAddr(me.wallet.address) : null, asset: me.expectedAsset.symbol,
+        // LIGHTNING_SWAP: o Comprador precisa informar a invoice antes do approve; a UI mostra o campo.
+        lnInvoiceNeeded: me.role === 'BUYER' && deriveSettlementPlan(mesa.chairs)?.mode === 'LIGHTNING_SWAP' && !me.lightningInvoice,
+        lnInvoiceProvided: !!me.lightningInvoice } : null,
       config: mesa.config ? { amountInBase: mesa.config.amountInBase ?? null, discountBps: mesa.config.discountBps, commissionBps: mesa.config.commissionBps, commissionPayer: mesa.config.commissionPayer ?? null } : null,
       chairs: mesa.chairs.map(c => ({
         role: c.role, roleLabel: CHAIR_ROLE_LABEL[c.role],

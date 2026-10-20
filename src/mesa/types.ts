@@ -24,6 +24,9 @@ export interface MesaChair {
   connectedAt?: number;
   /** Inscrição Web Push do participante (PWA) — p/ notificar "é sua vez de assinar". Opcional. */
   pushSub?: unknown;
+  /** LIGHTNING_SWAP: invoice BOLT11 do Comprador (payment_hash = hashlock do swap). O Comprador a
+   *  gera na própria carteira LN e a fornece à mesa; o nó da mesa a paga na liquidação. */
+  lightningInvoice?: { bolt11: string; paymentHash: string; amountSat: string };
 }
 
 /** Configuração da operação (editável só pelo admin; congelada na aprovação). */

@@ -10,7 +10,7 @@
  */
 import type { MesaChair } from './types.js';
 
-export type SettlementMode = 'ESCROW_DIRECT' | 'HTLC_BTC' | 'CROSS_CHAIN';
+export type SettlementMode = 'ESCROW_DIRECT' | 'HTLC_BTC' | 'CROSS_CHAIN' | 'LIGHTNING_SWAP';
 
 export interface SettlementPlan {
   mode: SettlementMode;
@@ -37,6 +37,15 @@ export function deriveSettlementPlan(chairs: MesaChair[]): SettlementPlan | null
   if (!seller || !buyer) return null;
   const sellerNetwork = seller.expectedAsset.network;
   const buyerNetwork = buyer.expectedAsset.network;
+  // BTC via Lightning: a cadeira do Vendedor é 'lightning' (BTC entregue pelo nó da mesa em segundos),
+  // o Comprador paga com token no escrow V2. Mesma estrutura de hashlock do HTLC_BTC, entrega em LN.
+  if (seller.expectedAsset.network === 'lightning') {
+    return {
+      mode: 'LIGHTNING_SWAP', sellerNetwork, buyerNetwork,
+      htlc: { hashAlgo: 'sha256', btcSide: 'SELLER', btcLockBlocks: 0, tokenLockSeconds: 2400 },
+      summary: `BTC via Lightning (entrega em segundos) ↔ ${buyer.expectedAsset.symbol} no escrow V2 — swap atômico pela preimage da invoice`,
+    };
+  }
   if (isNativeBtc(seller) || isNativeBtc(buyer)) {
     const btcSide = isNativeBtc(seller) ? 'SELLER' as const : 'BUYER' as const;
     return {
