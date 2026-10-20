@@ -924,7 +924,7 @@ window.addEventListener('unhandledrejection',function(e){try{console.warn('[veru
       <!-- ===== Cadastro da mesa: wizard em 4 passos curtos ===== -->
       <!-- Passo 1 — Mesa e cadeiras -->
       <section class="card" id="m3Create" style="display:none;margin-bottom:16px">
-        <div class="card-h"><div class="t">Nova mesa · Passo 1 de 4 — Mesa e cadeiras</div><span class="badge info">Sem expiração</span></div>
+        <div class="card-h"><div class="t">Nova mesa · Passo 1 de 3 — Mesa e cadeiras</div><span class="badge info">Sem expiração</span></div>
         <div class="form-row"><div class="fl">Rótulo (opcional)</div><input class="inp" id="m3cLabel" maxlength="120" placeholder="Ex.: Mesa BTC — cliente institucional"></div>
         <!-- "Rede principal" saiu (v4): a rede é escolhida POR LADO no passo 2; bridge/HTLC cuidam do resto. -->
         <div class="form-row"><div><div class="fl">Cadeiras</div><div class="fh">Bilateral (2), com Pay Master (3) ou dois Pay Masters (4) — escrow dinâmico</div></div>
@@ -943,7 +943,7 @@ window.addEventListener('unhandledrejection',function(e){try{console.warn('[veru
 
       <!-- Passo 2 — Ativos (tokens do registro oficial; contrato/decimais preenchidos sozinhos) -->
       <section class="card" id="m3s2" style="display:none;margin-bottom:16px">
-        <div class="card-h"><div class="t">Nova mesa · Passo 2 de 4 — Ativos</div><span class="badge info" id="m3s2Net">—</span></div>
+        <div class="card-h"><div class="t">Nova mesa · Passo 2 de 3 — Ativos e valores</div><span class="badge info" id="m3s2Net">—</span></div>
         <p class="fh" style="margin:0 0 10px">Escolha a moeda de CADA lado — uma lista só com TODAS as moedas de TODAS as redes (com ícone); contrato/mint e decimais entram sozinhos. Redes diferentes liquidam via bridge (CCIP); BTC nativo liquida via HTLC (swap atômico).</p>
         <div class="form-row"><div><div class="fl">Vendedor — moeda</div><div class="fh">O que o Vendedor entrega</div></div>
           <div class="netfield" id="m3cSellField" style="max-width:300px" title="Escolher moeda — todas as redes numa lista só">Escolher moeda</div>
@@ -967,7 +967,9 @@ window.addEventListener('unhandledrejection',function(e){try{console.warn('[veru
             <input class="inp" data-m3adv="buyDec" type="number" min="0" max="30" placeholder="Decimais" style="width:90px">
           </div>
         </div>
-        <div style="display:flex;gap:10px;margin-top:14px">
+        <!-- Rodapé oculto no wizard de 3 passos (ativos+valores viraram UM passo); o rodapé do
+             #opFeesCard navega pelos dois. Botões mantidos no DOM (handlers/compat). -->
+        <div style="display:none;gap:10px;margin-top:14px">
           <button class="btn" id="m3cBack2" type="button"><svg viewBox="0 0 24 24"><path d="M19 12H5M11 6l-6 6 6 6"/></svg>Voltar</button>
           <button class="btn btn-primary" id="m3cNext2" type="button">Continuar: Valores e taxas<svg viewBox="0 0 24 24"><path d="M5 12h14M13 6l6 6-6 6"/></svg></button>
         </div>
@@ -1041,7 +1043,7 @@ window.addEventListener('unhandledrejection',function(e){try{console.warn('[veru
 
       <!-- Passo 3 — Valores e taxas (grava na mesa via /config: humano→unidades base, %→bps) -->
       <section class="card" id="opFeesCard" style="display:none;margin-bottom:16px">
-        <div class="card-h"><div class="t"><svg viewBox="0 0 24 24" style="width:17px;height:17px;stroke:var(--blue);fill:none;stroke-width:2;vertical-align:-3px;margin-right:6px"><path d="M4 21v-7M4 10V3M12 21v-9M12 8V3M20 21v-5M20 12V3M1 14h6M9 8h6M17 16h6"/></svg>Nova mesa · Passo 3 de 4 — Valores e taxas</div><span class="badge info" id="opFeeSplitBadge">Vendedor 100%</span></div>
+        <div class="card-h"><div class="t"><svg viewBox="0 0 24 24" style="width:17px;height:17px;stroke:var(--blue);fill:none;stroke-width:2;vertical-align:-3px;margin-right:6px"><path d="M4 21v-7M4 10V3M12 21v-9M12 8V3M20 21v-5M20 12V3M1 14h6M9 8h6M17 16h6"/></svg>Valores e taxas</div><span class="badge info" id="opFeeSplitBadge">Vendedor 100%</span></div>
         <div class="form-row">
           <div><div class="fl">Quantidade do Vendedor</div><div class="fh" id="m3cSellAmtHint">Em unidades do token escolhido</div></div>
           <div style="text-align:right"><input class="inp" id="m3cSellAmt" inputmode="decimal" placeholder="Ex.: 250" style="min-width:150px;text-align:right"><div class="fh mono" id="m3cSellBase" style="margin-top:4px"></div></div>
@@ -1077,7 +1079,7 @@ window.addEventListener('unhandledrejection',function(e){try{console.warn('[veru
 
       <!-- Passo 4 — Revisão e criação -->
       <section class="card" id="m3s4" style="display:none;margin-bottom:16px">
-        <div class="card-h"><div class="t">Nova mesa · Passo 4 de 4 — Revisão</div><span class="badge info">Confira antes de criar</span></div>
+        <div class="card-h"><div class="t">Nova mesa · Passo 3 de 3 — Revisão</div><span class="badge info">Confira antes de criar</span></div>
         <div class="kv" id="m3rSummary"></div>
         <div style="display:flex;gap:10px;margin-top:14px">
           <button class="btn" id="m3cBack4" type="button"><svg viewBox="0 0 24 24"><path d="M19 12H5M11 6l-6 6 6 6"/></svg>Voltar</button>
@@ -2629,8 +2631,10 @@ window.addEventListener('unhandledrejection',function(e){try{console.warn('[veru
       +'</div>';
   }
   /* ---------- Wizard: 1) mesa e cadeiras · 2) ativos · 3) valores e taxas · 4) revisão → criar ---------- */
-  const M3_STEPS=['#m3Create','#m3s2','#opFeesCard','#m3s4'];
-  function m3Step(n){ M3_STEPS.forEach((sel,i)=>{ const el=$(sel); if(el) el.style.display=(n===i+1)?'':'none'; }); }
+  // Wizard em 3 passos (antes 4): o passo 2 exibe Ativos (#m3s2) e Valores (#opFeesCard) JUNTOS —
+  // nenhum elemento muda de lugar no DOM (campos continuam achados por ID); só a visibilidade agrupa.
+  const M3_STEPS=[['#m3Create'],['#m3s2','#opFeesCard'],['#m3s4']];
+  function m3Step(n){ M3_STEPS.forEach((group,i)=>{ group.forEach(sel=>{ const el=$(sel); if(el) el.style.display=(n===i+1)?'':'none'; }); }); }
   // Blocos do "hub" (lista/detalhe/todas-operações/carteira PM) escondidos durante a criação, pra a
   // tela de criação ficar DEDICADA (só o wizard + cabeçalho). m3ExitCreate restaura o hub.
   function m3HubBlocks(){ return ['#m3ListCard','#m3Detail','#opAllCard','#mesaSlots','#mesaSlotsHead']; }
@@ -3337,14 +3341,16 @@ window.addEventListener('unhandledrejection',function(e){try{console.warn('[veru
   function m3Init(){
     const nb=$('#m3New'); if(nb) nb.addEventListener('click',m3EnterCreate);
     const cc=$('#m3cCancel'); if(cc) cc.addEventListener('click',m3ExitCreate);
-    // Navegação do wizard: 1 Mesa → 2 Ativos → 3 Valores/taxas → 4 Revisão.
+    // Navegação do wizard (3 passos): 1 Mesa → 2 Ativos e valores → 3 Revisão. O rodapé do #m3s2
+    // fica oculto (o do #opFeesCard navega pelos dois); a validação de ativos que era do m3cNext2
+    // roda no m3cNext3, antes da revisão.
     const on=(id,fn)=>{ const el=$(id); if(el) el.addEventListener('click',fn); };
     on('#m3cNext',async()=>{ await m3EnterAssets(); m3Step(2); });
     on('#m3cBack2',()=>m3Step(1));
-    on('#m3cNext2',()=>{ const d=m3WizardData(); if(d.err){ toast(d.err,'err'); return; } m3OnSellAmt(); m3Step(3); });
-    on('#m3cBack',()=>m3Step(2));
-    on('#m3cNext3',()=>{ if(m3RenderReview()) m3Step(4); else toast('Revise os campos destacados','err'); });
-    on('#m3cBack4',()=>m3Step(3));
+    on('#m3cNext2',()=>{ const d=m3WizardData(); if(d.err){ toast(d.err,'err'); return; } m3OnSellAmt(); m3Step(2); });
+    on('#m3cBack',()=>m3Step(1));
+    on('#m3cNext3',()=>{ const d=m3WizardData(); if(d.err){ toast(d.err,'err'); return; } if(m3RenderReview()) m3Step(3); else toast('Revise os campos destacados','err'); });
+    on('#m3cBack4',()=>m3Step(2));
     on('#m3cSubmit',m3SubmitCreate);
     const sa=$('#m3cSellAmt'); if(sa) sa.addEventListener('input',m3OnSellAmt);   // vendedor → calcula comprador
     const ba=$('#m3cBuyAmt'); if(ba) ba.addEventListener('input',m3AmtPreview);    // comprador: ajuste manual livre
