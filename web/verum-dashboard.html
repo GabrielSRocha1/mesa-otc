@@ -1537,7 +1537,21 @@ window.addEventListener('unhandledrejection',function(e){try{console.warn('[veru
     if(fallbackData) return p.request({method:'personal_sign',params:[fallbackData,from]});
     throw new Error('A carteira não suporta assinatura tipada (v4/v3) e não há fallback disponível.');
   }
-  async function evmWaitReceipt(p,hash){ for(let i=0;i<60;i++){ const r=await p.request({method:'eth_getTransactionReceipt',params:[hash]}); if(r){ if(r.status==='0x0') throw new Error('Transação revertida on-chain'); return r; } await new Promise(z=>setTimeout(z,3000)); } throw new Error('Timeout aguardando a confirmação da transação'); }
+  async function evmWaitReceipt(p,hash){
+    for(let i=0;i<60;i++){
+      let r=null;
+      try{ r=await p.request({method:'eth_getTransactionReceipt',params:[hash]}); }
+      catch(e){
+        // Extensão não expõe leitura RPC (4200): a tx JÁ FOI enviada — espera fixa otimista e
+        // segue; os passos seguintes re-validam on-chain pelo backend (registro/allowance).
+        if((e&&e.code===4200)||/4200|não é suportado|unsupported/i.test((e&&e.message)||'')){ await new Promise(z=>setTimeout(z,30000)); return {status:'0x1',optimistic:true}; }
+        throw e;
+      }
+      if(r){ if(r.status==='0x0') throw new Error('Transação revertida on-chain'); return r; }
+      await new Promise(z=>setTimeout(z,3000));
+    }
+    throw new Error('Timeout aguardando a confirmação da transação');
+  }
   /** Executa o passo da vez devolvido por /onchain-tx|/deal/step: approve ERC-20 (se pendente) +
    *  assinatura EIP-712 do Approval; `submit(body)` envia ao backend — PMs são relayados pelo
    *  keeper, Vendedor/Comprador recebem o txRequest e a própria carteira envia o signV2. */
@@ -3823,7 +3837,9 @@ window.addEventListener('unhandledrejection',function(e){try{console.warn('[veru
         toast('Transação confirmada on-chain · '+((bo&&bo.txHash)?shortAddr(bo.txHash):''),'ok');
       } else if(step&&step.kind==='evm'){
         st('Confirme na Verum Wallet…');
-        await evmOnchainStep(step, body=>pApi('/v1/deals/'+encodeURIComponent(d.id)+'/onchain-tx',{method:'POST',body}));
+        // idem POR TENTATIVA: o endpoint exige o cabeçalho; chave fixa + corpo novo (assinatura/
+        // deadline mudam a cada tentativa) daria 409 — a idempotência de verdade é on-chain.
+        await evmOnchainStep(step, body=>pApi('/v1/deals/'+encodeURIComponent(d.id)+'/onchain-tx',{method:'POST',idem:d.id+':'+(pDto.viewer&&pDto.viewer.role)+':onchain:'+Date.now(),body}));
       }
     }catch(e){ if(!/simulado|autom/i.test(e.message||'')) throw e; }
   }
