@@ -18,7 +18,7 @@ export const htlcHashOf = (preimageHex: string): string => sha256Hex(hexToBytes(
 /** Divisão igualitária da comissão em bps; o resíduo de arredondamento vai para o primeiro Pay Master. */
 export const splitEqual = (commissionBps: number, n: number): number[] => { if (n <= 0) return []; const base = Math.floor(commissionBps / n); const arr = Array<number>(n).fill(base); arr[0] = (arr[0] ?? 0) + commissionBps - base * n; return arr; };
 import type { Store } from '../db/repository.js';
-import type { AdapterRegistry, ApprovalSignature, DealCommitment } from '../adapters/types.js';
+import type { AdapterRegistry, ApprovalSignature, DealCommitment, OnChainDealState } from '../adapters/types.js';
 import type { AssetRegistry } from './assetRegistry.js';
 import type { PriceEngine } from './price.js';
 import type { LiquidityEngine } from './liquidity.js';
@@ -374,9 +374,37 @@ export class DealEngine {
   }
   private async expireNow(deal: Deal, actor: string): Promise<void> {
     if (!PRE_SETTLING_EXPIRABLE.has(deal.state)) return;
+    // Reconcilia com o CONTRATO antes de expirar: legs pagas on-chain que o portal não marcou passam
+    // a FINAL — senão o reembolso abaixo não as cobre e os fundos ficam presos (incidente do WETH).
+    await this.reconcileFundingFromChain(deal, actor).catch(() => { /* RPC transitório: segue com o estado conhecido */ });
     metrics.invariantViolations.inc({ kind: 'expired' }); await this.transition(deal, 'EXPIRED', actor, { validSignatures: deal.validSignatures, required: deal.requiredSignatures });
     if (deal.participants.some(p => p.funding === 'FINAL')) { await this.transition(deal, 'REFUNDING', 'system'); await this.refundAll(deal, 'keeper', false); }
   }
+  /**
+   * RECONCILIAÇÃO on-chain (auditoria 2026-10-20): o estado real do swap é o do CONTRATO, não o do
+   * portal. O pagamento (signV2) entra no contrato, mas o portal só marcava o funding `FINAL` numa
+   * re-checagem posterior do /approvals que pode nunca rodar (aba fechada, turno expirado) — e aí a
+   * leg paga ficava invisível ao reembolso automático, prendendo os fundos (incidente do WETH).
+   * Aqui lemos `getDealState` de cada leg e marcamos `FINAL` o que já está depositado on-chain.
+   * Devolve se TODAS as legs que exigem funding estão depositadas (→ pode completar) e se ALGUMA está.
+   */
+  private async reconcileFundingFromChain(deal: Deal, actor: string): Promise<{ allFunded: boolean; anyFunded: boolean }> {
+    const t = deal.terms; if (!t) return { allFunded: false, anyFunded: false };
+    const stateByChain = new Map<Network, OnChainDealState | null>();
+    const stateOf = async (chain: Network): Promise<OnChainDealState | null> => {
+      if (!stateByChain.has(chain)) stateByChain.set(chain, await this.d.adapters.require(chain).getDealState(deal.id).catch(() => null));
+      return stateByChain.get(chain) ?? null;
+    };
+    let allFunded = true, anyFunded = false;
+    for (const leg of t.legs) {
+      const p = deal.participants.find(x => x.role === leg.from); if (!p?.fundingRequired) continue;
+      const st = await stateOf(leg.escrowChain);
+      if (st?.deposits[leg.index]) { anyFunded = true; if (p.funding !== 'FINAL') { p.funding = 'FINAL'; await this.persist(deal, 'funding.reconciled', actor, { role: leg.from, legIndex: leg.index, chain: leg.escrowChain }); } }
+      else allFunded = false;
+    }
+    return { allFunded, anyFunded };
+  }
+
   /** Reembolso permissionless: o keeper relaya; o depositante pode chamar o contrato diretamente (RL-021). */
   private async refundAll(deal: Deal, actor: string, cancelled: boolean): Promise<void> {
     const t = deal.terms; if (!t) return; let allDone = true;

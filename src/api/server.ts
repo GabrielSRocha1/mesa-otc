@@ -385,7 +385,15 @@ export async function buildApi(deps: ApiDeps): Promise<FastifyInstance> {
     const me = requireParticipant(d, s);
     if (!d.terms?.legs.length) throw new DomainError('SETTLEMENT_NOT_ALLOWED', 'termos não congelados');
     const a = stepAdapterOf(d, me.role);
-    return idempotent(req, reply, async () => a.submitParticipantStep(id, me.role, s.address, b as Record<string, unknown>));
+    return idempotent(req, reply, async () => {
+      const r = await a.submitParticipantStep(id, me.role, s.address, b as Record<string, unknown>);
+      // MARCAR O FUNDING NA ORIGEM (auditoria 2026-10-20): o passo on-chain (signV2) já entrou no
+      // contrato — marca o funding FINAL AGORA, em vez de depender da re-checagem posterior do
+      // /approvals (que pode nunca rodar se a aba fechar/o turno expirar). Idempotente e best-effort:
+      // deposit() reconhece "papel já avançou on-chain"; falha transitória cai na reconciliação.
+      try { await deps.deals.fund(id, me.role, s.address); } catch (e) { logger.warn({ dealId: id, role: me.role, err: (e as Error).message }, 'funding na origem adiado (será reconciliado)'); }
+      return r;
+    });
   });
 
   app.post('/v1/deals/:id/cancel', async (req, reply) => { const s = requireSession(req); const { id } = req.params as { id: string }; return idempotent(req, reply, async () => deps.deals.view(await deps.deals.cancel(id, s.address), s.address)); });
