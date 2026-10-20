@@ -3210,22 +3210,27 @@ window.addEventListener('unhandledrejection',function(e){try{console.warn('[veru
   async function m3Invite(chairId){
     try{
       const inv=await pmApi('/v1/portal/mesas/'+m3Sel+'/chairs/'+chairId+'/invite',{method:'POST',body:{}});
-      const share=navigator.share?'<button class="btn" id="m3iShare">Compartilhar</button>':'';
+      // UM BOTÃO primário: "Compartilhar convite" (share nativo; sem suporte → copia a mensagem
+      // completa). Link/código viram ações secundárias discretas; a mensagem fica em <details>.
       $('#modalRoot').innerHTML='<div class="mback" id="m3iBack" style="position:fixed;inset:0;background:rgba(2,6,16,.7);z-index:60;display:grid;place-items:center;padding:16px">'
         +'<div class="card" style="max-width:520px;width:100%;max-height:90vh;overflow:auto">'
         +'<div class="card-h"><div class="t">Convite — '+esc(M3_ROLE[inv.role]||inv.role)+'</div><button class="btn" id="m3iClose" style="height:32px">Fechar</button></div>'
         +'<div style="text-align:center;margin:14px 0"><div style="font-family:var(--f-mono);font-size:30px;letter-spacing:.12em">'+esc(inv.code)+'</div><div style="font-size:11.5px;color:var(--ink-3);margin-top:4px">Código do convite (mostrado uma única vez)</div></div>'
-        +'<div class="mono" style="font-size:12px;word-break:break-all;background:var(--bg-2);border:1px solid var(--line);border-radius:10px;padding:10px">'+esc(inv.link)+'</div>'
-        +'<textarea class="inp" id="m3iMsg" style="width:100%;height:190px;margin-top:10px;font-size:12px;font-family:var(--f-mono)" readonly>'+esc(inv.message)+'</textarea>'
-        +'<div style="display:flex;gap:8px;margin-top:10px;flex-wrap:wrap">'
-        +'<button class="btn" id="m3iCopyLink">Copiar link</button><button class="btn" id="m3iCopyCode">Copiar código</button><button class="btn btn-primary" id="m3iCopyMsg">Copiar mensagem</button>'+share+'</div>'
+        +'<button class="btn btn-primary btn-block" id="m3iShareMain" style="height:48px">Compartilhar convite</button>'
+        +'<div style="display:flex;gap:8px;margin-top:8px"><button class="btn" id="m3iCopyLink" style="flex:1;height:36px;font-size:12px">Copiar link</button><button class="btn" id="m3iCopyCode" style="flex:1;height:36px;font-size:12px">Copiar código</button><button class="btn" id="m3iCopyMsg" style="flex:1;height:36px;font-size:12px">Copiar mensagem</button></div>'
+        +'<details style="margin-top:10px"><summary style="cursor:pointer;font-size:12px;color:var(--ink-3)">Ver link e mensagem completa</summary>'
+        +'<div class="mono" style="font-size:12px;word-break:break-all;background:var(--bg-2);border:1px solid var(--line);border-radius:10px;padding:10px;margin-top:8px">'+esc(inv.link)+'</div>'
+        +'<textarea class="inp" id="m3iMsg" style="width:100%;height:190px;margin-top:10px;font-size:12px;font-family:var(--f-mono)" readonly>'+esc(inv.message)+'</textarea></details>'
         +'</div></div>';
       $('#m3iClose').addEventListener('click',closeModal);
       $('#m3iBack').addEventListener('click',e=>{ if(e.target.id==='m3iBack') closeModal(); });
       $('#m3iCopyLink').addEventListener('click',()=>{ clip(inv.link); toast('Link copiado','ok'); });
       $('#m3iCopyCode').addEventListener('click',()=>{ clip(inv.code); toast('Código copiado','ok'); });
       $('#m3iCopyMsg').addEventListener('click',()=>{ clip(inv.message); toast('Mensagem copiada','ok'); });
-      const sh=$('#m3iShare'); if(sh) sh.addEventListener('click',()=>{ navigator.share({title:'VERUM OTC — Convite',text:inv.message}).catch(()=>{}); });
+      $('#m3iShareMain').addEventListener('click',()=>{
+        if(navigator.share){ navigator.share({title:'VERUM OTC — Convite',text:inv.message}).catch(()=>{}); }
+        else { clip(inv.message); toast('Mensagem completa copiada — cole no WhatsApp/Telegram','ok'); }
+      });
       m3Refresh();
     }catch(e){ toast(e.message||'Falha ao gerar convite','err'); }
   }
