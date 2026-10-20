@@ -119,7 +119,10 @@ export class LocalChainAdapter implements SettlementAdapter {
       if (!(await this.verifier(dealHash, p, s))) throw new DomainError('SIGNATURE_INVALID', `assinatura criptográfica inválida on-chain (${s.role})`);
       seen.add(s.role);
     }
-    if (seen.size !== required) throw new DomainError('SETTLEMENT_NOT_ALLOWED', `assinaturas ${seen.size}/${required} — não liquida`);
+    // settle SEM assinaturas (signatures=[]) confia no ESTADO on-chain (FUNDED) — espelha o settleV2
+    // real, que ignora as assinaturas da mesa porque as autorizações já estão no contrato via signV2.
+    // É o caminho usado pela rota LIGHTNING_SWAP (a preimage vem do pagamento, não de uma assinatura).
+    if (signatures.length > 0 && seen.size !== required) throw new DomainError('SETTLEMENT_NOT_ALLOWED', `assinaturas ${seen.size}/${required} — não liquida`);
     const leg = this.legOf(d, legIndex);
     if (leg.mode === 'HTLC' || d.htlc) { if (!preimage || !/^[0-9a-f]{64}$/.test(preimage) || sha256Hex(hexToBytes(preimage)) !== d.commit.htlcHash) throw new DomainError('SETTLEMENT_NOT_ALLOWED', 'preimage HTLC ausente ou inválida'); }
     if (this.faults.settleReverts) { this.tx(false, 'reverted'); throw new DomainError('SETTLEMENT_FAILED', 'transação revertida'); }
