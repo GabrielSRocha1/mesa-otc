@@ -73,6 +73,16 @@ const Schema = z.object({
   BITCOIN_CONFIRMATIONS: z.coerce.number().int().min(1).max(12).default(3),
   BITCOIN_CSV_BLOCKS: z.coerce.number().int().min(6).max(1000).default(144),
   BITCOIN_FEE_FLOOR_SAT_VB: z.coerce.number().int().min(1).max(500).default(2),
+  // Lightning Network (rota LIGHTNING_SWAP — perna BTC via LND REST). Grupo all-or-nothing:
+  // LND_REST_URL + LND_MACAROON (hex, escopo mínimo invoice+offchain+readonly) + LND_TLS_CERT (PEM
+  // ou base64). Ausente = rota Lightning desligada (o HTLC on-chain segue como único caminho BTC).
+  // LND_SIMULATE=1 força o simulador in-process (preview/teste) mesmo com o grupo real presente.
+  LND_SIMULATE: z.enum(['0', '1']).default('0'),
+  LND_REST_URL: z.string().optional(),
+  LND_MACAROON: z.string().regex(/^[0-9a-fA-F]+$/).optional(),      // macaroon em hex
+  LND_TLS_CERT: z.string().optional(),                              // PEM ou base64 do cert do nó
+  LND_INVOICE_EXPIRY_SEC: z.coerce.number().int().min(60).max(3600).default(600), // expiry curto (~10 min)
+  LND_PAYMENT_TIMEOUT_SEC: z.coerce.number().int().min(5).max(300).default(60),   // teto do pagamento LN
   // Conta DEMO do portal (apresentações): semeada no boot fora de produção.
   DEMO_EMAIL: z.string().default('demo@verumotc.com'),
   DEMO_PASSWORD: z.string().min(8).default('VerumDemo2026'),
@@ -107,6 +117,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
     ['SOLANA', [c.SOLANA_RPC_URL, c.SOLANA_CHAIN_ID, c.SOLANA_PROGRAM_ID, c.SOLANA_EXECUTOR_KEYPAIR, c.SOLANA_ATTESTOR_KEYPAIR, c.SOLANA_TUSDT_MINT, c.SOLANA_TBTC_MINT]],
     ['TRON', [c.TRON_FULL_HOST, c.TRON_CHAIN_ID, c.TRON_ESCROW_ADDRESS, c.TRON_EXECUTOR_KEY, c.TRON_ATTESTOR_KEY, c.TRON_TUSDT, c.TRON_TBTC]],
     ['BITCOIN', [c.BITCOIN_ESPLORA_URL, c.BITCOIN_NETWORK, c.BITCOIN_CLAIM_KEY, c.BITCOIN_REFUND_KEY]],
+    ['LND', [c.LND_REST_URL, c.LND_MACAROON, c.LND_TLS_CERT]],
   ];
   for (const [name, keys] of groups) {
     const set = keys.filter(Boolean).length;
@@ -127,6 +138,14 @@ export interface SolanaSettings { rpcUrl: string; chainId: '101' | '102' | '103'
 export function solanaConfig(c: Config): SolanaSettings | null {
   if (!c.SOLANA_RPC_URL || !c.SOLANA_CHAIN_ID || !c.SOLANA_PROGRAM_ID || !c.SOLANA_EXECUTOR_KEYPAIR || !c.SOLANA_ATTESTOR_KEYPAIR || !c.SOLANA_TUSDT_MINT || !c.SOLANA_TBTC_MINT) return null;
   return { rpcUrl: c.SOLANA_RPC_URL, chainId: c.SOLANA_CHAIN_ID, programId: c.SOLANA_PROGRAM_ID, executorKeypair: c.SOLANA_EXECUTOR_KEYPAIR, attestorKeypair: c.SOLANA_ATTESTOR_KEYPAIR, tusdtMint: c.SOLANA_TUSDT_MINT, tbtcMint: c.SOLANA_TBTC_MINT, confirmations: c.SOLANA_CONFIRMATIONS };
+}
+
+/** Lightning Network (LND REST). null = grupo ausente OU LND_SIMULATE=1 (simulador in-process). */
+export interface LndSettings { restUrl: string; macaroonHex: string; tlsCert: string; invoiceExpirySec: number; paymentTimeoutSec: number }
+export function lndConfig(c: Config): LndSettings | null {
+  if (c.LND_SIMULATE === '1') return null;
+  if (!c.LND_REST_URL || !c.LND_MACAROON || !c.LND_TLS_CERT) return null;
+  return { restUrl: c.LND_REST_URL.replace(/\/$/, ''), macaroonHex: c.LND_MACAROON, tlsCert: c.LND_TLS_CERT, invoiceExpirySec: c.LND_INVOICE_EXPIRY_SEC, paymentTimeoutSec: c.LND_PAYMENT_TIMEOUT_SEC };
 }
 
 /** Bitcoin nativo (HTLC P2WSH real). null = grupo ausente (simulador regtest local). */
