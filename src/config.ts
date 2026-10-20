@@ -67,7 +67,7 @@ const Schema = z.object({
   // de usuário com blocos instantâneos sem mexer nas envs reais herdadas da produção.
   BITCOIN_SIMULATE: z.enum(['0', '1']).default('0'),
   BITCOIN_ESPLORA_URL: z.string().optional(),
-  BITCOIN_NETWORK: z.enum(['mainnet', 'testnet', 'regtest']).optional(),
+  BITCOIN_NETWORK: z.enum(['mainnet', 'testnet', 'signet', 'regtest']).optional(),
   BITCOIN_CLAIM_KEY: z.string().regex(/^(0x)?[0-9a-fA-F]{64}$/).optional(),
   BITCOIN_REFUND_KEY: z.string().regex(/^(0x)?[0-9a-fA-F]{64}$/).optional(),
   BITCOIN_CONFIRMATIONS: z.coerce.number().int().min(1).max(12).default(3),
@@ -149,7 +149,7 @@ export function lndConfig(c: Config): LndSettings | null {
 }
 
 /** Bitcoin nativo (HTLC P2WSH real). null = grupo ausente (simulador regtest local). */
-export interface BitcoinSettingsCfg { esploraUrl: string; network: 'mainnet' | 'testnet' | 'regtest'; claimKey: string; refundKey: string; confirmations: number; csvBlocks: number; feeFloorSatVb: number }
+export interface BitcoinSettingsCfg { esploraUrl: string; network: 'mainnet' | 'testnet' | 'signet' | 'regtest'; claimKey: string; refundKey: string; confirmations: number; csvBlocks: number; feeFloorSatVb: number }
 export function bitcoinConfig(c: Config): BitcoinSettingsCfg | null {
   if (c.BITCOIN_SIMULATE === '1') return null;
   if (!c.BITCOIN_ESPLORA_URL || !c.BITCOIN_NETWORK || !c.BITCOIN_CLAIM_KEY || !c.BITCOIN_REFUND_KEY) return null;

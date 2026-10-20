@@ -32,14 +32,14 @@ import { DomainError } from '../domain/errors.js';
 import type { CanonicalAsset, ChainRef, Deal, Leg, Participant, Terms } from '../domain/types.js';
 import type { AdapterCapabilities, ApprovalSignature, AssetVerification, DealCommitment, OnChainDealState, RegisterResult, SettlementAdapter, TxRef, TxStatus } from './types.js';
 
-export type BitcoinNet = 'mainnet' | 'testnet' | 'regtest';
+export type BitcoinNet = 'mainnet' | 'testnet' | 'signet' | 'regtest';
 export interface BitcoinSettings {
   esploraUrl: string; network: BitcoinNet;
   claimKey: string; refundKey: string;            // hex 32 bytes (keeper)
   confirmations: number; csvBlocks: number; feeFloorSatVb: number;
 }
 
-const HRP: Record<BitcoinNet, string> = { mainnet: 'bc', testnet: 'tb', regtest: 'bcrt' };
+const HRP: Record<BitcoinNet, string> = { mainnet: 'bc', testnet: 'tb', signet: 'tb', regtest: 'bcrt' };
 const dsha256 = (b: Uint8Array): Uint8Array => sha256(sha256(b));
 const hash160 = (b: Uint8Array): Uint8Array => ripemd160(sha256(b));
 

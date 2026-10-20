@@ -52,6 +52,16 @@ describe('script HTLC + endereço P2WSH', () => {
     expect(toNetworkHrp(test, 'testnet')).toBe(test); // já no HRP certo → intacto
     expect(toNetworkHrp('0xDEAD', 'testnet')).toBe('0xDEAD'); // não-bech32 → intacto
   });
+  it('signet usa o mesmo HRP tb do testnet (migração testnet4→signet não muda endereço/chave)', () => {
+    // Signet e testnet compartilham o prefixo tb1… — a mesma chave controla o mesmo endereço; só o
+    // Esplora (BITCOIN_ESPLORA_URL) define a rede efetiva. Garante que derivar em 'signet' não quebra.
+    const sig = p2wpkhAddress(claimPub, 'signet');
+    expect(sig.startsWith('tb1')).toBe(true);
+    expect(sig).toBe(p2wpkhAddress(claimPub, 'testnet'));
+    const vault = p2wshAddress(htlcWitnessScript('aa'.repeat(32), claimPub, claimPub, 144), 'signet');
+    expect(vault.startsWith('tb1')).toBe(true);
+    expect(toNetworkHrp(p2wpkhAddress(claimPub, 'mainnet'), 'signet')).toBe(sig); // bc1… → tb1… equivalente
+  });
 
   it('outputScriptOf aceita bech32 v0 da própria rede e rejeita rede errada/lixo', () => {
     const w = p2wpkhAddress(claimPub, 'regtest');
