@@ -307,6 +307,11 @@ export class VerumEvmV2Adapter implements SettlementAdapter, ParticipantStepProv
       // vazio e o allowance 0 >= 0 marcava FINAL indevidamente — nunca marque depósito sem registro.
       if (Number(t.state) === StateV2.NONE) throw new DomainError('FUNDING_REQUIRED', 'Operação ainda não registrada on-chain — o Pay Master 1 precisa enviar o createTradeV2 (botão "Registrar on-chain" na esteira)', { registerPending: true, tradeId: b.meta.tradeId });
       const isSellerLeg = Number(b.meta.sellerLegIndex) === legIndex && Number(b.meta.sellerLegIndex) >= 0;
+      // JÁ DEPOSITADO on-chain: no V2 o pagamento é PULADO no signV2 do papel (transferFrom), o que
+      // ZERA o allowance. Se o papel já avançou (nextIdx passou) ou a trade saiu do SIGNING, o
+      // depósito ESTÁ feito — exigir allowance de novo aqui era FUNDING_REQUIRED falso pós-assinatura.
+      const onRole = isSellerLeg ? OnchainRole.SELLER : OnchainRole.BUYER;
+      if (Number(t.state) !== StateV2.SIGNING || CANON.indexOf(onRole) < Number(t.nextIdx)) return this.ref('deposited');
       const owner = isSellerLeg ? t.seller : t.buyer;
       const token = isSellerLeg ? t.sellerAsset : t.buyerAsset;
       // Comprador deposita líquido + comissões on-chain dos PMs (pagas no settle).
