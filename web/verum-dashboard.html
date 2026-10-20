@@ -3655,6 +3655,7 @@ window.addEventListener('unhandledrejection',function(e){try{console.warn('[veru
       +(me.role==='BUYER'?'<p style="font-size:12.5px;color:var(--ink-3);margin:12px 0 0">Você autoriza apenas o PAGAMENTO acordado — quem deposita o ativo à venda é o Vendedor.</p>':'')
       +(me.role==='SELLER'?'<p style="font-size:12.5px;color:var(--ink-3);margin:12px 0 0">Você deposita o ativo à venda no contrato; a taxa da plataforma sai do seu lado e a comissão dos Pay Masters é descontada do valor que você recebe.</p>':'')
       +'<p style="font-size:12.5px;color:var(--amber);margin:12px 0">Revise cuidadosamente os dados antes de assinar.</p>'
+      +'<div id="pSignSteps" style="display:none;margin:0 0 10px;padding:10px 12px;background:var(--bg-2);border:1px solid var(--line);border-radius:10px"></div>'
       +'<button class="btn btn-primary btn-block" id="pRvSign" style="height:50px">Assinar e continuar</button>'
       +'</div></div>';
     $('#pRvClose').addEventListener('click',closeModal);
@@ -3799,6 +3800,19 @@ window.addEventListener('unhandledrejection',function(e){try{console.warn('[veru
       }
     }
   }
+  // Lista de PASSOS no modal (✓/⏳/·) — o usuário vê onde está dentro do "Assinar e continuar"
+  // (antes o progresso era só o texto do botão). Guardas de existência: o modal pode fechar no meio.
+  function pStepsInit(labels){
+    const el=document.getElementById('pSignSteps'); if(!el) return;
+    el.style.display='';
+    el.innerHTML=labels.map(function(l,i){ return '<div data-st="'+i+'" style="font-size:12.5px;color:var(--ink-3);margin:2px 0"><span>·</span> '+esc(l)+'</div>'; }).join('');
+    pStepsAt(0);
+  }
+  function pStepsAt(i){
+    const el=document.getElementById('pSignSteps'); if(!el) return;
+    [].forEach.call(el.children,function(row,k){ const dot=row.firstElementChild; if(!dot) return;
+      if(k<i){ dot.textContent='✓'; row.style.color='#4ade80'; } else if(k===i){ dot.textContent='⏳'; row.style.color='var(--ink)'; } else { dot.textContent='·'; row.style.color='var(--ink-3)'; } });
+  }
   async function pSign(){
     const btn=$('#pRvSign'); if(btn){ btn.disabled=true; btn.textContent='Assinando na Verum Wallet…'; }
     try{
@@ -3806,8 +3820,11 @@ window.addEventListener('unhandledrejection',function(e){try{console.warn('[veru
       // 0) VENDA DE BTC: se o MEU papel tranca BTC e o cofre ainda não confirmou, o "Assinar e
       //    continuar" também ENVIA o BTC do contrato — um ato só (pagar → confirmar → assinar).
       const myF=(d.funding||[]).find(function(f){ return f.role===(pDto.viewer&&pDto.viewer.role); });
-      if(myF&&myF.status!=='FINAL'&&d.htlcVault&&d.htlcVault.from===(pDto.viewer&&pDto.viewer.role)){
-        await pFundBtcVault(d,function(t){ if(btn) btn.textContent=t; });
+      const btcFirst=!!(myF&&myF.status!=='FINAL'&&d.htlcVault&&d.htlcVault.from===(pDto.viewer&&pDto.viewer.role));
+      const stepBase=btcFirst?2:0;
+      pStepsInit((btcFirst?['Enviar o BTC ao cofre','Confirmação da rede Bitcoin']:[]).concat(['Confirmação no contrato (carteira)','Assinatura final']));
+      if(btcFirst){
+        await pFundBtcVault(d,function(t){ if(btn) btn.textContent=t; if(/Aguardando confirmação/i.test(t||'')) pStepsAt(1); });
         // LOCK ANTES DO OPEN: o depósito confirmado ABRIU a operação no backend (auto-open). Se a
         // vez de assinar ainda não é deste papel (ex.: comprador trancou BTC e a ordem começa no
         // Vendedor), encerra aqui com sucesso — a assinatura vem quando chegar a vez dele.
@@ -3818,8 +3835,10 @@ window.addEventListener('unhandledrejection',function(e){try{console.warn('[veru
         }
       }
       // 1) Passo ON-CHAIN pela própria carteira (escrow real).
+      pStepsAt(stepBase);
       await pOnchainStep(d,function(t){ if(btn) btn.textContent=t; });
       // 2) Assinatura da MESA (auditoria) no esquema da rede do papel.
+      pStepsAt(stepBase+1);
       const env=await pApi('/v1/deals/'+encodeURIComponent(d.id)+'/approval-envelope');
       const signature=await pSignEnvelope(env);
       await pApi('/v1/deals/'+encodeURIComponent(d.id)+'/approvals',{method:'POST',idem:'mesa-sign-'+d.id+'-'+(pDto.viewer&&pDto.viewer.role),body:{ role:pDto.viewer.role, signature, nonce:env.payload.nonce }});
