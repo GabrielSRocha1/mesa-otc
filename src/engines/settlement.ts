@@ -4,7 +4,7 @@
  * Idempotente: `settlements.deal_id` é único; um segundo `settle()` para a mesma Deal retorna o registro existente
  * (ou falha com SETTLEMENT_ALREADY_EXECUTED) sem emitir transação. Reconciliação lê o estado on-chain antes de enviar.
  */
-import type { Deal, DealState, Leg, SettlementRecord, Terms } from '../domain/types.js';
+import type { Deal, DealState, Leg, Network, SettlementRecord, Terms } from '../domain/types.js';
 import { newId, randomHex, PRE_SETTLING_EXPIRABLE } from '../domain/types.js';
 import { DomainError } from '../domain/errors.js';
 import type { Store } from '../db/repository.js';
@@ -52,7 +52,11 @@ export class SettlementEngine {
     // 5. ativos e depósitos
     for (const leg of t.legs) {
       try { await this.d.registry.verifyOnChain(leg.asset, this.d.adapters); pass(`ativo:${leg.index}`); } catch (e) { if (isTransient(e)) throw e; fail(`ativo:${leg.index}`, 'ASSET_VERIFICATION_FAILED', (e as Error).message); }
-      const p = deal.participants.find(x => x.role === leg.from); if (!p || p.funding !== 'FINAL') fail(`funding:${leg.index}`, 'FUNDING_REQUIRED', `leg ${leg.index} sem depósito final`); else pass(`funding:${leg.index}`);
+      const p = deal.participants.find(x => x.role === leg.from);
+      // Perna lightning: o BTC é ENTREGUE no settle (o nó paga a invoice), não depositado antes —
+      // não exige funding prévio. A liquidez outbound é checada no approve (precheck).
+      if (leg.escrowChain === 'lightning') pass(`funding:${leg.index}`, 'lightning — entregue na liquidação');
+      else if (!p || p.funding !== 'FINAL') fail(`funding:${leg.index}`, 'FUNDING_REQUIRED', `leg ${leg.index} sem depósito final`); else pass(`funding:${leg.index}`);
     }
     // 6. rota ainda viável e idêntica à assinada
     try {
@@ -68,6 +72,9 @@ export class SettlementEngine {
     } catch (e) { if (isTransient(e)) throw e; fail('preço', 'PRICE_ANOMALY', (e as Error).message); }
     // 8. não liquidada on-chain
     for (const chain of new Set(t.legs.map(l => l.escrowChain))) {
+      // A cadeia 'lightning' não tem commitment on-chain (revision/dealHash) — só exige que o nó
+      // esteja PRONTO (FUNDED) ou já tenha pago (SETTLED). A segurança é a preimage no settleV2.
+      if (chain === 'lightning') { try { const st = await this.d.adapters.require(chain).getDealState(deal.id); if (st.status === 'FUNDED' || st.status === 'SETTLED') pass(`on-chain:${chain}`, `lightning ${st.status}`); else fail(`on-chain:${chain}`, 'SETTLEMENT_NOT_ALLOWED', `lightning ${st.status}`); } catch (e) { if (isTransient(e)) throw e; fail(`on-chain:${chain}`, 'SETTLEMENT_NOT_ALLOWED', (e as Error).message); } continue; }
       try { const st = await this.d.adapters.require(chain).getDealState(deal.id); if (st.status === 'SETTLED' && st.revision === deal.revision && st.dealHash === h.dealHash) pass(`on-chain:${chain}`, `já liquidada nesta cadeia (${st.settledTx}); será reconciliada`); else if (st.status === 'SETTLED') fail(`on-chain:${chain}`, 'SETTLEMENT_ALREADY_EXECUTED', 'liquidada on-chain com outra revisão/hash'); else if (st.status !== 'FUNDED') fail(`on-chain:${chain}`, 'FUNDING_REQUIRED', `status on-chain ${st.status}`); else if (st.revision !== deal.revision || st.dealHash !== h.dealHash) fail(`on-chain:${chain}`, 'SIGNATURE_INVALID', 'commitment on-chain difere da revisão corrente'); else pass(`on-chain:${chain}`); }
       catch (e) { if (isTransient(e)) throw e; fail(`on-chain:${chain}`, 'SETTLEMENT_NOT_ALLOWED', (e as Error).message); }
     }
@@ -104,14 +111,23 @@ export class SettlementEngine {
       rec.status = 'EXECUTING'; await this.d.store.updateSettlement(rec); deal.settlement = rec; await this.deals.transition(deal, 'SETTLING', 'system', { settlementId: rec.id });
       const sigs: ApprovalSignature[] = deal.signatures.filter(s => s.revision === deal.revision && s.status === 'valid').map(s => ({ role: s.role, signer: s.signer, scheme: s.scheme, signature: s.signature, nonce: s.nonce }));
       const preimage = (deal as Deal & { htlcPreimage?: string }).htlcPreimage;
-      // ordem: legs de contrato primeiro (revelam preimage se HTLC), depois BTC (claim com preimage revelada)
-      const order = [...t.legs].sort((a, b) => (a.mode === 'HTLC' ? 1 : 0) - (b.mode === 'HTLC' ? 1 : 0));
+      // Ordem da liquidação:
+      //  - HTLC on-chain: contrato primeiro (settleV2 REVELA a preimage que a mesa conhece), depois
+      //    BTC (claim com a preimage).
+      //  - LIGHTNING_SWAP: perna lightning primeiro (PAGA a invoice → revela R que a mesa NÃO conhecia),
+      //    depois contrato (settleV2 com R). Inverso: a preimage nasce no pagamento, não na mesa.
+      const isLightning = t.route.kind === 'LIGHTNING_SWAP';
+      const order = [...t.legs].sort((a, b) => isLightning
+        ? (a.escrowChain === 'lightning' ? 0 : 1) - (b.escrowChain === 'lightning' ? 0 : 1)
+        : (a.mode === 'HTLC' ? 1 : 0) - (b.mode === 'HTLC' ? 1 : 0));
       for (const leg of order) {
         const ex = rec.legs.find(l => l.index === leg.index)!; const adapter = this.d.adapters.require(leg.escrowChain);
         try {
           const onChain = await adapter.getDealState(deal.id);
           const doneTx = onChain.settledLegs[leg.index]; if (doneTx) { ex.step = 'FINAL'; ex.txRef = doneTx; ex.confirmations = adapter.capabilities().finalityConfirmations; await this.d.store.updateSettlement(rec); continue; } // recuperação: já enviada antes de uma queda
-          const pre = leg.mode === 'HTLC' ? (await this.revealedPreimage(deal, t)) ?? preimage : preimage;
+          const pre = isLightning
+            ? (leg.escrowChain === 'lightning' ? undefined : (await this.revealedPreimageFrom(deal, 'lightning')) ?? undefined)  // lightning paga (sem pre); contrato usa R da lightning
+            : (leg.mode === 'HTLC' ? (await this.revealedPreimage(deal, t)) ?? preimage : preimage);
           const tx = await adapter.settle(deal.id, leg.index, sigs, pre); ex.step = 'SUBMITTED'; ex.txRef = tx.ref; await this.d.store.updateSettlement(rec); await this.deals.persist(deal, 'settlement.leg.submitted', actor, { legIndex: leg.index, tx: tx.ref });
           const st = await adapter.waitFinal(tx.ref);
           if (st.status === 'reverted') throw new DomainError('SETTLEMENT_FAILED', `leg ${leg.index} revertida: ${st.error ?? 'reverted'}`, { tx: tx.ref });
@@ -153,6 +169,10 @@ export class SettlementEngine {
   private async revealedPreimage(deal: Deal, t: Terms): Promise<string | null> {
     const contractLeg = t.legs.find(l => l.mode !== 'HTLC'); if (!contractLeg) return null;
     try { return await this.d.adapters.require(contractLeg.escrowChain).revealedPreimage(deal.id); } catch { return null; }
+  }
+  /** Preimage revelada por uma cadeia específica — no LIGHTNING_SWAP a R nasce no pagamento da perna lightning. */
+  private async revealedPreimageFrom(deal: Deal, chain: Network): Promise<string | null> {
+    try { return await this.d.adapters.require(chain).revealedPreimage(deal.id); } catch { return null; }
   }
 
   /** Confirmação assíncrona (indexer/keeper): promove legs INCLUDED → FINAL e a Deal → SETTLED. Idempotente. */

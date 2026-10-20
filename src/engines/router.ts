@@ -37,6 +37,9 @@ export class RouterEngine {
       void i;
     }
     if (kind === 'HTLC') { const contractLeg = legPlans.find(l => l.mode === 'ESCROW_NN'); if (!contractLeg) { viable = false; notes.push('HTLC exige uma leg em cadeia com contrato'); } }
+    // Perna BTC via Lightning: mesma estrutura de contrato do HTLC (hashlock + leg ESCROW_NN), mas
+    // o kind discrimina a ENTREGA (nó LN em vez de cofre P2WSH on-chain) p/ o settlement/deal.
+    if (kind === 'HTLC' && legPlans.some(l => l.escrowChain === 'lightning')) kind = 'LIGHTNING_SWAP';
     const route: Route = { routeId: `RT-${kind}-${chains.map(c => c.toUpperCase()).join('-')}`, kind, legs: legPlans, estTimeSec: est, estCostUsd: cost.toFixed(2), viable, note: notes.join('; ') || (kind === 'HTLC' ? 'Leg Bitcoin liquidada por HTLC encadeado ao escrow.' : 'Escrow N-de-N verificado on-chain.') };
     routes.push(route);
     if (this.cfg.marketRoutesEnabled) routes.push({ ...route, routeId: route.routeId.replace('RT-', 'RT-MARKET-'), kind: 'MARKET', viable: false, note: 'Rotas MARKET desabilitadas na v1 (ADR-002).' });
