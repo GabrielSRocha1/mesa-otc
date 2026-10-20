@@ -435,18 +435,30 @@ export class VerumEvmV2Adapter implements SettlementAdapter, ParticipantStepProv
     const now = await this.chainNow();
     const deadline = Math.min(now + 300, Number(t.expiresAt));
     let approve: Record<string, string> | null = null;
+    let wrap: Record<string, string> | null = null;
+    // ETH "embrulhado": cadeira ETH vira WETH no registro, mas a carteira do participante só tem
+    // ETH nativo — sem o deposit() do WETH o signV2 reverte ao puxar o token. O passo devolve o
+    // wrap que falta e a carteira o executa ANTES do approve (deposit é payable sem argumentos).
+    const WETH = '0xfFf9976782d46CC05630D1f6eBAb18b2324d6B14'.toLowerCase(); // Sepolia (= app.WETH_SEPOLIA)
+    const wrapIfNeeded = async (token: Hex, owner: Hex, due: bigint): Promise<void> => {
+      if (String(token).toLowerCase() !== WETH) return;
+      const bal = await this.pub.readContract({ address: token, abi: ERC20_ABI, functionName: 'balanceOf', args: [owner] }) as bigint;
+      if (bal < due) wrap = { to: token, valueWei: (due - bal).toString(), data: '0xd0e30db0' /* deposit() */ };
+    };
     if (onRole === OnchainRole.SELLER && !t.sellerExternal) {
       const due = t.sellerAmount + t.feeAmount;
       const allowance = await this.pub.readContract({ address: t.sellerAsset, abi: ERC20_ABI, functionName: 'allowance', args: [signer as Hex, this.escrowV2] }) as bigint;
       if (allowance < due) approve = { token: t.sellerAsset, spender: this.escrowV2, amount: due.toString() };
+      await wrapIfNeeded(t.sellerAsset, signer as Hex, due);
     } else if (onRole === OnchainRole.BUYER) {
       const due = t.buyerAmount + t.commissionPm1 + t.commissionPm2 + (t.sellerExternal ? t.feeAmount : 0n);
       const allowance = await this.pub.readContract({ address: t.buyerAsset, abi: ERC20_ABI, functionName: 'allowance', args: [signer as Hex, this.escrowV2] }) as bigint;
       if (allowance < due) approve = { token: t.buyerAsset, spender: this.escrowV2, amount: due.toString() };
+      await wrapIfNeeded(t.buyerAsset, signer as Hex, due);
     }
     const typedData = { domain: { ...evmDomain(this.cfg.chainId, this.escrowV2), chainId: this.cfg.chainId }, types: APPROVAL_TYPES, primaryType: 'Approval' as const, message: { tradeId: b.meta.tradeId as Hex, termsHash: b.meta.termsHash as Hex, role: onRole, deadline: BigInt(deadline) } };
     return {
-      kind: 'evm', chainId: this.cfg.chainId, escrow: this.escrowV2, fn: 'signV2', deadline, approve,
+      kind: 'evm', chainId: this.cfg.chainId, escrow: this.escrowV2, fn: 'signV2', deadline, approve, wrap,
       typedData: { ...typedData, message: { ...typedData.message, deadline: String(deadline) } },
       // Digest EIP-712 pronto: fallback personal_sign p/ carteiras sem typed data (o contrato
       // aceita ECDSA sobre toEthSignedMessageHash(digest)) e hash de referência p/ ERC-1271.
