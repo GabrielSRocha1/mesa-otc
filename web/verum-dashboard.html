@@ -2548,9 +2548,11 @@ window.addEventListener('unhandledrejection',function(e){try{console.warn('[veru
   }
   /* ---------- Tokens autorizados por rede (registro oficial via /v1/tokens) ---------- */
   const M3_GAS={ solana:{symbol:'SOL',decimals:9}, ethereum:{symbol:'ETH',decimals:18}, tron:{symbol:'TRX',decimals:6}, bsc:{symbol:'BNB',decimals:18}, polygon:{symbol:'POL',decimals:18}, base:{symbol:'ETH',decimals:18}, arbitrum:{symbol:'ETH',decimals:18}, bitcoin:{symbol:'BTC',decimals:8} };
-  const M3_NETS=[['solana','Solana'],['ethereum','Ethereum'],['tron','Tron'],['bsc','BNB Smart Chain'],['polygon','Polygon'],['base','Base'],['arbitrum','Arbitrum One'],['bitcoin','Bitcoin (BTC nativo · HTLC)']];
+  const M3_NETS=[['solana','Solana'],['ethereum','Ethereum'],['tron','Tron'],['bsc','BNB Smart Chain'],['polygon','Polygon'],['base','Base'],['arbitrum','Arbitrum One'],['bitcoin','Bitcoin (BTC nativo · HTLC)'],['lightning','Lightning (BTC · segundos)']];
   // BTC NATIVO: não é token — liquida via HTLC (swap atômico com hash secret compartilhado com o escrow).
   const M3_BTC_NATIVE={ symbol:'BTC', contractOrMint:null, decimals:8, representationOf:'BTC nativo — fluxo HTLC (atomic swap)' };
+  // BTC via LIGHTNING: entrega em segundos pelo nó da mesa; o Comprador fornece a invoice (hashlock).
+  const M3_BTC_LN={ symbol:'BTC', contractOrMint:null, decimals:8, representationOf:'BTC via Lightning — entrega em segundos' };
   // Seleção de moeda via MODAL (todas as redes numa lista só, com ícone) — não há mais escolha por rede.
   const m3PickAsset={ sell:null, buy:null };
   let m3Catalog=null; // catálogo unificado (nativos + tokens do registro + BTC nativo), montado 1x
@@ -2572,12 +2574,13 @@ window.addEventListener('unhandledrejection',function(e){try{console.warn('[veru
     const lists=await Promise.all(M3_NETS.map(async n=>{
       const net=n[0];
       if(net==='bitcoin') return [M3_BTC_NATIVE];
+      if(net==='lightning') return [M3_BTC_LN];
       try{ const j=await (await fetch(API+'/v1/tokens?network='+encodeURIComponent(net))).json(); return (j&&j.tokens)||[]; }catch(e){ return []; }
     }));
     const out=[];
     M3_NETS.forEach((n,i)=>{
       const net=n[0], label=n[1];
-      if(net!=='bitcoin'){ const g=M3_GAS[net]; if(g) out.push(m3MkAsset(net,label,{symbol:g.symbol,contractOrMint:null,decimals:g.decimals})); }
+      if(net!=='bitcoin'&&net!=='lightning'){ const g=M3_GAS[net]; if(g) out.push(m3MkAsset(net,label,{symbol:g.symbol,contractOrMint:null,decimals:g.decimals})); }
       (lists[i]||[]).forEach(t=> out.push(m3MkAsset(net,label,t)) );
     });
     m3Catalog=out; return out;
@@ -2638,6 +2641,7 @@ window.addEventListener('unhandledrejection',function(e){try{console.warn('[veru
   // Plano de liquidação derivado dos lados — espelha deriveSettlementPlan do backend.
   function m3Plan(sell,buy){
     if(!sell||!buy) return null;
+    if(sell.network==='lightning') return { mode:'LIGHTNING_SWAP', txt:'BTC via Lightning — entrega em segundos: o Comprador paga o token no escrow, o nó da mesa paga a invoice e revela o segredo que liquida' };
     const btc=s=>s.network==='bitcoin'&&s.contractOrMint==null;
     if(btc(sell)||btc(buy)) return { mode:'HTLC_BTC', txt:'BTC nativo via HTLC — swap atômico: BTC trancado na rede Bitcoin, a outra perna no escrow com o mesmo hash secret' };
     if(sell.network!==buy.network) return { mode:'CROSS_CHAIN', txt:'Redes diferentes ('+sell.network+' ↔ '+buy.network+') — escrow em cada rede + liberação atômica via Chainlink CCIP' };
