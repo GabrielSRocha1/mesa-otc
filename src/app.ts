@@ -311,6 +311,19 @@ export async function createApp(config: Config, o: AppOverrides = {}): Promise<A
       void push.send(chair.pushSub, { title: 'É a sua vez de assinar', body: `Mesa ${m.code}: toque para abrir e assinar na Verum Wallet.`, url: `https://${config.APP_DOMAIN}/mesa?mesa=${m.mesaId}`, tag: `turn:${m.mesaId}` });
     } catch { /* best-effort */ }
   };
+  // FRENTE D (auditoria 2026-10-20): quando os turnos são ADIADOS por registro pendente do contrato
+  // (turn.deferred, turnRole=null — o onTurnChange acima não dispara nada nesse caso), avisa quem
+  // registra (PAYMASTER_1, msg.sender do createTradeV2) para abrir a aba e confirmar o registro —
+  // senão a operação fica parada esperando alguém tocar a tela. Best-effort; inerte sem VAPID/push.
+  const notifyRegister = (dealId: string) => {
+    try {
+      const m = Object.values(portal.mesas()).find(x => x.dealId === dealId);
+      const chair = m?.chairs.find(c => c.role === 'PAYMASTER_1');
+      if (!m || !chair?.pushSub) return;
+      void push.send(chair.pushSub, { title: 'Registre o contrato', body: `Mesa ${m.code}: abra e confirme o registro do contrato para liberar as assinaturas.`, url: `https://${config.APP_DOMAIN}/mesa?mesa=${m.mesaId}`, tag: `register:${m.mesaId}` });
+    } catch { /* best-effort */ }
+  };
+  deals.events.on('deal', (ev: { dealId: string; type: string }) => { if (ev.type === 'turn.deferred') notifyRegister(ev.dealId); });
   // Ativação de token na allowlist on-chain do escrow V2 (ex.: WETH) — só quando o V2 está ativo.
   const escrowAddToken = verumEvmV2 ? ((t: `0x${string}`, d: number, s: string) => verumEvmV2!.addToken(t, d, s)) : undefined;
   const api = await buildApi({ deals, settlement, price, liquidity, router, registry, adapters, platformFeeBps: config.PLATFORM_FEE_BPS, mesa, lightning, push, escrowAddToken, networkCostUsd: async n => adapters.require(n).estimateCostUsd('settle'), auth, portal, identity, identityDev, rooms, proposals, store, audit, balanceReaders: o.balanceReaders, mesaHtmlPath: config.MESA_HTML_PATH, portalHtmlPath: config.PORTAL_HTML_PATH, conviteHtmlPath: config.CONVITE_HTML_PATH, operacaoHtmlPath: config.OPERACAO_HTML_PATH, env: config.OTC_ENV, demoDeferFunding: config.DEMO_DEFER_FUNDING, rateLimit: { windowMs: 60_000, max: config.OTC_ENV === 'dev' ? 100_000 : 120 }, dev: local ? { solanaChainId: adapters.require('solana').chain.chainId, mint: (a, c, amt) => local!.solana.mint(a, c, amt), demo, ensureOnChain, seed: (network, address, contract, amount) => { const a = adapters.get(network as Network); if (a instanceof LocalChainAdapter) a.mint(address, contract, amount); }, evm: verumEvm && verumEvmKeyring && verumEvmCfg ? { chainId: String(verumEvmCfg.chainId), escrow: verumEvmCfg.escrow, tbtc: verumEvmCfg.tbtc, tusdt: verumEvmCfg.tusdt, explorerBase: verumEvmCfg.explorerBase, keyring: verumEvmKeyring, mintToken: (t, to, amt) => verumEvm!.mintToken(t, to, amt) } : undefined } : undefined });
@@ -321,6 +334,11 @@ export async function createApp(config: Config, o: AppOverrides = {}): Promise<A
     // retentadas pelo keeper — é assim que o refund BTC pós-CSV (~48h) sai SOZINHO quando o
     // timelock vence, sem operador rodar script. Espaçado (~2 min) p/ não spammar RPC/Esplora.
     if (ticks % 24 === 0) { for (const d of await store.listDeals({ states: ['REFUNDING'] })) { if (!d.refunds.some(r => r.status === 'PENDING')) continue; try { await deals.retryRefunds(d.id); } catch (e) { logger.warn({ dealId: d.id, err: (e as Error).message }, 'retryRefunds agendado falhou'); } } }
+    // FRENTE C (auditoria 2026-10-20): deal em LIQUIDITY_VERIFIED com perna HTLC cujo lock BTC JÁ
+    // confirmou on-chain abre SOZINHA — sem depender de alguém tocar o endpoint de depósito. O open()
+    // detecta o lock (registra o cofre sem tx + lê o Esplora) e segue; se ainda não confirmou, lança
+    // FUNDING_REQUIRED e tentamos no próximo ciclo. Espaçado p/ não martelar o Esplora.
+    if (ticks % 4 === 0) { for (const d of await store.listDeals({ states: ['LIQUIDITY_VERIFIED'] })) { if (!d.terms?.legs.some(l => l.mode === 'HTLC')) continue; try { await deals.open(d.id, d.createdBy); logger.info({ dealId: d.id }, 'auto-open: lock BTC confirmado'); } catch { /* lock ainda não confirmou — próximo ciclo */ } } }
     if (++ticks % 720 === 0) { const purged = await store.purge(now(), 24 * 3600_000); logger.info(purged, 'retenção'); } metrics.priceBreakerOpen.set(price.breakerState().open ? 1 : 0); for (const s of ['AWAITING_SIGNATURES', 'SETTLING', 'SETTLEMENT_VALIDATION', 'REFUNDING'] as const) metrics.activeDeals.set({ state: s }, (await store.listDeals({ states: [s] })).length); } catch (e) { logger.error({ err: (e as Error).message }, 'scheduler'); } };
   return { config, store, adapters, local, verumEvm, verumSolana, verumTron, verumEvmKeyring, tronKeyring, registry, price, liquidity, router, signature, risk, audit, deals, settlement, auth, identity, rooms, proposals, mesa, lightning, lightningReal, api, sources: { price: priceSources, liquidity: liquiditySources },
     startScheduler() { if (!timer) timer = setInterval(() => { void tick(); }, config.EXPIRY_SCAN_MS); }, stopScheduler() { if (timer) clearInterval(timer); timer = null; },
