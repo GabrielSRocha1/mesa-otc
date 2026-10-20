@@ -1123,10 +1123,10 @@ export async function buildApi(deps: ApiDeps): Promise<FastifyInstance> {
   app.get('/v1/portal/mesas/:mesaId', async req => {
     const { mesaId } = req.params as { mesaId: string };
     const { mesa } = adminMesa(req, mesaId, false);
-    // Turnos adiados (registro pendente do PM1): este é o poll que o ADMIN da mesa v3 fica
-    // olhando — sem a cura aqui, o registro confirmava on-chain e a tela seguia presa em
-    // "Registrando o contrato na rede" até alguém abrir a esteira legada ou o link público.
-    await healDeferredTurns(mesa.dealId);
+    // Cura no poll do ADMIN da mesa v3: turnos adiados (registro pendente do PM1), liquidação
+    // congelada (serverless) e refunds pendentes — sem isso a tela ficava presa em
+    // "Registrando…"/"liquidando…" até alguém abrir a esteira legada.
+    await healMesaDeal(mesa.dealId);
     return deps.mesa.mesaViewFor(mesa, { kind: 'admin' });
   });
   // Troca o ativo (token) de uma cadeira — antes de aprovar. Reusa o modal de moedas do wizard no front.
@@ -1414,17 +1414,36 @@ export async function buildApi(deps: ApiDeps): Promise<FastifyInstance> {
     turnHealAt.set(dealId, Date.now());
     try { await deps.deals.startTurnsIfRegistered(dealId); } catch { /* próxima rodada */ }
   };
+  // CURA COMPLETA no poll das telas v3 (mesa do admin e visualização do participante): o poll
+  // legado /v1/portal/mesa/deal já curava liquidação congelada/turnos adiados/refunds pendentes,
+  // mas as telas NOVAS polam estas rotas — a trade liquidava on-chain e a UI ficava em
+  // "liquidando…" para sempre (serverless congela o listener assíncrono após a resposta).
+  const healMesaDeal = async (dealId: string | null | undefined): Promise<void> => {
+    if (!dealId) return;
+    const d = await deps.deals.get(dealId).catch(() => null);
+    if (!d) return;
+    if (d.state === 'SETTLEMENT_VALIDATION' || d.state === 'SETTLING') {
+      try { await deps.dev?.ensureOnChain?.(dealId); } catch { /* melhor esforço */ }
+      try { if (d.state === 'SETTLEMENT_VALIDATION') await deps.settlement.settle(dealId, 'keeper'); else await deps.settlement.recover(); } catch { /* idempotente; falha vira BLOCKED */ }
+      return;
+    }
+    if (d.state === 'AWAITING_SIGNATURES' && d.turnRole === null) { await healDeferredTurns(dealId); return; }
+    if (d.state === 'REFUNDING' && d.refunds.some(r => r.status === 'PENDING') && Date.now() - (refundRetryAt.get(dealId) ?? 0) > 90_000) {
+      refundRetryAt.set(dealId, Date.now());
+      try { await deps.deals.retryRefunds(dealId); } catch { /* fica PENDING até a próxima */ }
+    }
+  };
   app.get('/v1/mesas/:mesaId', async req => {
     const { mesaId } = req.params as { mesaId: string };
     const mesaClaim = req.session?.mesa;
     if (mesaClaim && mesaClaim.mesaId === mesaId) {
       const mesa = deps.mesa.mesaById(mesaId);
       if (!mesa) throw new DomainError('INVALID_INPUT', 'Mesa não encontrada');
-      await healDeferredTurns(mesa.dealId);
+      await healMesaDeal(mesa.dealId);
       return deps.mesa.mesaViewFor(mesa, { kind: 'participant', chairId: mesaClaim.chairId });
     }
     const { mesa } = adminMesa(req, mesaId, false);
-    await healDeferredTurns(mesa.dealId);
+    await healMesaDeal(mesa.dealId);
     return deps.mesa.mesaViewFor(mesa, { kind: 'admin' });
   });
   // Web Push — chave pública VAPID (p/ o front se inscrever). Vazia = push desligado (sem VAPID).
