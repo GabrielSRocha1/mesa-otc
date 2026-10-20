@@ -155,6 +155,9 @@ export interface Deal {
   turnExpiresAt?: number | null;
   shareToken: string;
   onChain: Record<string, { registered: boolean; revision: number; meta?: Record<string, string | number> }>; // por cadeia de escrow (meta: tradeId/termsHash/janela on-chain dos adapters reais)
+  /** LIGHTNING_SWAP: hashlock (payment_hash) e invoice do Comprador. A mesa NÃO conhece a preimage. */
+  lightningHtlcHash?: string;
+  lightningInvoice?: string;
 }
 
 export interface DealDraft {

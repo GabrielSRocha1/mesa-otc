@@ -18,7 +18,7 @@ import { DomainError } from '../../domain/errors.js';
 import type { AdapterCapabilities, AssetVerification, DealCommitment, OnChainDealState, RegisterResult, SettlementAdapter, TxRef, TxStatus, ApprovalSignature } from '../types.js';
 import type { LightningService } from './types.js';
 
-export interface LnLegDeps { getDeal: (dealId: string) => Promise<{ lightningInvoice?: string; terms?: { route?: { htlcHash?: string } } } | null>; now?: () => number }
+export interface LnLegDeps { getDeal: (dealId: string) => Promise<{ lightningInvoice?: string; terms?: { route?: { htlcHash?: string } } | null } | null>; now?: () => number }
 
 interface LnLegState { bolt11: string; htlcHash: string; status: OnChainDealState['status']; preimage?: string; settledTx?: string; refundedTx?: string }
 

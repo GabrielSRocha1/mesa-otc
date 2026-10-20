@@ -39,7 +39,11 @@ export const CreateDealInput = z.object({
   maxSlippageBps: z.number().int().min(1).max(1000).default(50),
   maxPriceDriftBps: z.number().int().min(10).max(1000).default(100),
   expiresInSec: z.number().int().min(900).max(10 * 86400).default(3600), // até 10 dias: cobre a assinatura sequencial (Nº participantes × janela de 5 min)
-  participants: z.array(z.object({ role: z.enum(['SELLER', 'BUYER', 'PAYMASTER_1', 'PAYMASTER_2']), network: z.enum(['bitcoin', 'ethereum', 'solana', 'zcash', 'tron', 'lightning']), chainId: z.string().min(1), address: z.string().min(20).max(120) })).min(3).max(4)
+  participants: z.array(z.object({ role: z.enum(['SELLER', 'BUYER', 'PAYMASTER_1', 'PAYMASTER_2']), network: z.enum(['bitcoin', 'ethereum', 'solana', 'zcash', 'tron', 'lightning']), chainId: z.string().min(1), address: z.string().min(20).max(120) })).min(3).max(4),
+  // LIGHTNING_SWAP: o hashlock e a invoice vêm do COMPRADOR (a mesa não gera a preimage). payment_hash
+  // da invoice == lightningHtlcHash == htlcHash do deal. Só válidos quando a perna é lightning.
+  lightningHtlcHash: z.string().regex(/^[0-9a-f]{64}$/i).optional(),
+  lightningInvoice: z.string().min(10).optional()
 });
 export type CreateDealInputT = z.infer<typeof CreateDealInput>;
 
@@ -117,16 +121,22 @@ export class DealEngine {
     if (assetIn.assetId === assetOut.assetId) throw new DomainError('INVALID_INPUT', 'Ativo de saída deve ser diferente do de entrada');
     const participants: Participant[] = input.participants.map(p => { const a = this.d.adapters.get(p.network); if (!a) throw new DomainError('ADAPTER_UNAVAILABLE', `Rede ${p.network} não suportada`); if (a.chain.chainId !== p.chainId) throw new DomainError('WALLET_INVALID', `chainId ${p.chainId} inválido para ${p.network}`); if (!a.validateAddress(p.address)) throw new DomainError('WALLET_INVALID', `Endereço inválido para ${p.network}: ${p.address}`); return { ...p, keyScheme: NETWORK_KEY_SCHEME[p.network] }; }).sort((a, b) => ROLE_ORDER[a.role] - ROLE_ORDER[b.role]);
     const seller = participants.find(p => p.role === 'SELLER') as Participant; const buyer = participants.find(p => p.role === 'BUYER') as Participant;
-    if (seller.network !== assetIn.network) throw new DomainError('WALLET_INVALID', 'A carteira do Vendedor precisa estar na rede do ativo de entrada');
+    // Exceção LIGHTNING: o Vendedor (market-maker) entrega BTC via nó LN e assina/recebe no EVM —
+    // a carteira dele NÃO fica na "rede" lightning. A entrega é do nó, não da carteira do papel.
+    if (assetIn.network !== 'lightning' && seller.network !== assetIn.network) throw new DomainError('WALLET_INVALID', 'A carteira do Vendedor precisa estar na rede do ativo de entrada');
     if (buyer.network !== assetOut.network) throw new DomainError('WALLET_INVALID', 'A carteira do Comprador precisa estar na rede do ativo de saída');
     const isCreator = participants.some(p => p.address.toLowerCase() === actor.toLowerCase()); if (!isCreator) throw new DomainError('NOT_PARTICIPANT', 'O criador precisa ser um dos participantes');
     const t = this.now(); const id = newId('OTC');
     // A janela global (→ terms.expiresAt, que entra no hash) deve ser criada grande o
     // suficiente p/ cobrir as assinaturas sequenciais (Nº participantes × 5 min). O piso
     // por-turno abaixo se adapta: cada vez recebe min(5 min, tempo global restante).
+    // LIGHTNING: a perna BTC (assetIn 'lightning', do VENDEDOR/market-maker) é ENTREGUE no settle —
+    // o Vendedor NÃO deposita. fundingRequired do Vendedor = false; só o Comprador (USDT) financia.
+    const lnSell = assetIn.network === 'lightning';
     const deal: Deal = { id, version: 1, state: 'DRAFT', revision: 1, terms: null, hash: null, draft: { assetIn, assetOut, amountInBase: input.amountInBase, discountBps: input.discountBps, commissionBps: input.commissionBps, commissionSplitBps: split, maxSlippageBps: input.maxSlippageBps, maxPriceDriftBps: input.maxPriceDriftBps, expiresInSec: input.expiresInSec, participants },
-      participants: participants.map(p => ({ ...p, connected: p.address.toLowerCase() === actor.toLowerCase(), fundingRequired: p.role === 'SELLER' || p.role === 'BUYER', funding: p.role === 'SELLER' || p.role === 'BUYER' ? 'PENDING' : 'N/A', riskLevel: 'UNKNOWN' })),
-      requiredSignatures: participants.length, validSignatures: 0, signatures: [], settlement: null, refunds: [], risk: null, createdBy: actor, createdAt: t, updatedAt: t, expiresAt: t + input.expiresInSec * 1000, turnRole: null, turnExpiresAt: null, shareToken: randomHex(32), onChain: {} };
+      participants: participants.map(p => { const fundReq = (p.role === 'SELLER' && !lnSell) || p.role === 'BUYER'; return { ...p, connected: p.address.toLowerCase() === actor.toLowerCase(), fundingRequired: fundReq, funding: fundReq ? 'PENDING' : 'N/A', riskLevel: 'UNKNOWN' }; }),
+      requiredSignatures: participants.length, validSignatures: 0, signatures: [], settlement: null, refunds: [], risk: null, createdBy: actor, createdAt: t, updatedAt: t, expiresAt: t + input.expiresInSec * 1000, turnRole: null, turnExpiresAt: null, shareToken: randomHex(32), onChain: {},
+      ...(input.lightningHtlcHash ? { lightningHtlcHash: input.lightningHtlcHash.toLowerCase() } : {}), ...(input.lightningInvoice ? { lightningInvoice: input.lightningInvoice } : {}) } as Deal;
     await this.d.store.insertDeal(deal); await this.d.store.appendDealEvent({ seq: 1, dealId: id, type: 'created', at: t, actor, payload: { requiredSignatures: deal.requiredSignatures }, prevHash: '0'.repeat(64), hash: sha256Hex(`created|${id}|${t}`) });
     await this.d.audit.append({ actorType: 'user', actorId: actor, category: 'deal.created', dealId: id, payload: { requiredSignatures: deal.requiredSignatures } });
     const fresh = await this.d.store.getDeal(id) as Deal; await this.transition(fresh, 'CREATED', actor);
@@ -174,10 +184,14 @@ export class DealEngine {
         { index: 0, asset: dr.assetIn, amountBase: econ.amountInEffectiveBase, from: 'SELLER', to: 'BUYER', escrowChain: dr.assetIn.network, escrowContract: escrowFor(dr.assetIn.network).escrowContract, mode: escrowFor(dr.assetIn.network).mode },
         { index: 1, asset: dr.assetOut, amountBase: econ.amountOutBase, from: 'BUYER', to: 'SELLER', escrowChain: dr.assetOut.network, escrowContract: escrowFor(dr.assetOut.network).escrowContract, mode: escrowFor(dr.assetOut.network).mode }
       ];
-      // segredo gerado para o Vendedor (leg BTC); exposto só a ele via API. Override fixo APENAS no
-      // runner de swap resumível (htlcPreimageHex) — reconstrói o mesmo cofre de um lock confirmado.
+      // HTLC on-chain: a mesa GERA a preimage (exposta só ao Vendedor; override no runner resumível).
+      // LIGHTNING_SWAP: o htlcHash vem do COMPRADOR (deal.lightningHtlcHash) — a mesa NÃO conhece a
+      // preimage (ela nasce no pagamento da invoice). Sem isso, a mesa poderia liquidar sem pagar.
+      const lnHash = (deal as Deal & { lightningHtlcHash?: string }).lightningHtlcHash;
       const htlc = route.kind === 'HTLC' ? { preimage: this.d.config.htlcPreimageHex && /^[0-9a-f]{64}$/i.test(this.d.config.htlcPreimageHex) ? this.d.config.htlcPreimageHex.toLowerCase() : randomHex(32) } : null;
-      const terms: Terms = { schemaVersion: 1, environment: this.d.config.env, dealId: deal.id, revision: deal.revision, createdAt: deal.createdAt, expiresAt: deal.expiresAt, participants: dr.participants, requiredSignatures: deal.requiredSignatures, legs, pricing: econ.pricing, route: { routeId: route.routeId, kind: route.kind, legs: route.legs, ...(htlc ? { htlcHash: htlcHashOf(htlc.preimage) } : {}) }, dealNonce: randomHex(16) };
+      const htlcHash = route.kind === 'LIGHTNING_SWAP' ? lnHash : (htlc ? htlcHashOf(htlc.preimage) : undefined);
+      if (route.kind === 'LIGHTNING_SWAP' && !htlcHash) throw new DomainError('INVALID_INPUT', 'operação Lightning exige lightningHtlcHash (payment_hash da invoice do Comprador)');
+      const terms: Terms = { schemaVersion: 1, environment: this.d.config.env, dealId: deal.id, revision: deal.revision, createdAt: deal.createdAt, expiresAt: deal.expiresAt, participants: dr.participants, requiredSignatures: deal.requiredSignatures, legs, pricing: econ.pricing, route: { routeId: route.routeId, kind: route.kind, legs: route.legs, ...(htlcHash ? { htlcHash } : {}) }, dealNonce: randomHex(16) };
       deal.terms = terms; deal.hash = computeDealHash(terms); (deal as Deal & { htlcPreimage?: string }).htlcPreimage = htlc?.preimage;
       await this.transition(deal, 'LIQUIDITY_VERIFIED', actor, { dealHash: deal.hash.dealHash, routeId: route.routeId, priceSnapshotId: snapshot.id, liquidity: { depthUsd: liq.depthUsd, slippageBps: liq.slippageBps } });
       // O registro on-chain acontece no OPEN (não aqui): escrow real tem janela FIXA de 40 min a

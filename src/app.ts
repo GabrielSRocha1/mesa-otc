@@ -8,6 +8,7 @@ import type { Store } from './db/repository.js';
 import { AdapterRegistry, type ApprovalVerifier, type DealCommitment, type SettlementAdapter } from './adapters/types.js';
 import { createLocalAdapters, LocalChainAdapter } from './adapters/local.js';
 import { createLightningService } from './adapters/lightning/index.js';
+import { LightningLegAdapter } from './adapters/lightning/legAdapter.js';
 import { verumEvmConfig, solanaConfig, tronConfig, bitcoinConfig } from './config.js';
 import { BitcoinChainAdapter } from './adapters/bitcoin.js';
 import { VerumEvmAdapter } from './adapters/verum/evm.js';
@@ -167,6 +168,8 @@ export async function createApp(config: Config, o: AppOverrides = {}): Promise<A
   }
   const tokens = verumEvmCfg ? { ...LOCAL_TOKENS, usdtEth: verumEvmCfg.tusdt } : LOCAL_TOKENS;
   const registry = defaultRegistry({ ethereum: adapters.require('ethereum').chain.chainId, solana: adapters.require('solana').chain.chainId, bitcoin: adapters.require('bitcoin').chain.chainId }, tokens, LOCAL_CODE_HASHES, { usdtSol: null, usdcSol: null });
+  // BTC via Lightning (rota LIGHTNING_SWAP) — ativo nativo da "rede" lightning; entrega pelo nó LN.
+  registry.add({ code: 'BTC', network: 'lightning', chainId: 'ln', contractOrMint: null, assetId: 'lightning:ln/btc', decimals: 8, tokenStandard: 'native', issuer: 'Lightning Network', status: 'active' });
   if (verumEvmCfg) registry.add({ code: 'BTC', network: 'ethereum', chainId: String(verumEvmCfg.chainId), contractOrMint: verumEvmCfg.tbtc, assetId: `eip155:${verumEvmCfg.chainId}/erc20:${verumEvmCfg.tbtc.toLowerCase()}`, decimals: 8, tokenStandard: 'ERC-20', issuer: 'Verum tBTC (mock)', status: 'active' });
   // WETH (ETH embrulhado) na rede EVM: habilita "vender ETH" como token via ESCROW_DIRECT. Diferente da
   // Solana, o escrow EVM TEM allowlist on-chain — o WETH precisa ser ativado via addToken (keeper owner).
@@ -194,6 +197,7 @@ export async function createApp(config: Config, o: AppOverrides = {}): Promise<A
   prices[`tron:${tronChainId}/trc20:${tronUsdt}`] = 1.0001; prices[`tron:${tronChainId}/trc20:${tronTbtc}`] = 64_230.5;
   // BTC nativo na chainId REAL do adapter (testnet/mainnet via BITCOIN_*; o regtest já está em LOCAL_PRICES).
   prices[`bip122:${adapters.require('bitcoin').chain.chainId}/slip44:0`] = 64_230.5;
+  prices['lightning:ln/btc'] = 64_230.5; // BTC via Lightning — mesmo preço do BTC nativo
   if (solCfg) { const solChainId = adapters.require('solana').chain.chainId; prices[`solana:${solChainId}/token:${solCfg.tusdtMint}`] = 1.0001; prices[`solana:${solChainId}/token:${solCfg.tbtcMint}`] = 64_230.5; prices[`solana:${solChainId}/token:${WSOL_MINT}`] = 151.2; prices[`solana:${solChainId}/slip44:501`] = 151.2; }
   const depth: Record<string, number> = Object.fromEntries(Object.keys(prices).map(k => [k, 8_000_000]));
   const priceSources = (o.priceSources as StaticPriceSource[] | undefined) ?? [new StaticPriceSource('Pyth', 1.0, prices), new StaticPriceSource('Chainlink', 1.0, prices), new StaticPriceSource('Coinbase', 0.8, prices), new StaticPriceSource('Kraken', 0.8, prices)];
@@ -295,6 +299,9 @@ export async function createApp(config: Config, o: AppOverrides = {}): Promise<A
   const ln = createLightningService(config);
   const lightning = o.lightning ?? ln.service;
   const lightningReal = o.lightning ? false : ln.real;
+  // A perna BTC da rota LIGHTNING_SWAP entra no registry como a "rede" lightning (LightningLegAdapter);
+  // o motor a trata uniformemente. Inerte até uma deal lightning existir. getDeal resolve a invoice.
+  adapters.register(new LightningLegAdapter(lightning, { getDeal: id => store.getDeal(id), now }));
   const push = new PushService(vapidFrom(config), logger);
   notifyTurn = (dealId, role) => {
     try {
