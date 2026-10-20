@@ -3245,9 +3245,25 @@ window.addEventListener('unhandledrejection',function(e){try{console.warn('[veru
     try{ await pmApi('/v1/portal/mesas/'+m3Sel+'/config',{method:'PATCH',body}); m3CfgDirty=false; m3CfgDirtyUI(true); toast('Alterações salvas na mesa','ok'); m3Refresh(); }
     catch(e){ toast(e.message,'err'); }
   }
+  // Overlay de progresso do approve: a assinatura do registro na carteira deixa de ser "susto" —
+  // o PM vê o que vem antes de a carteira abrir. Fora do #modalRoot (usado pelo convite).
+  function m3ApproveProg(stepIdx){
+    var labels=['Validando saldos e congelando os termos','Registrar o contrato na rede — assine na sua carteira (vai abrir agora)','Operação registrada ✓'];
+    var el=document.getElementById('m3ApproveProg');
+    if(stepIdx==null){ if(el) el.remove(); return; }
+    if(!el){ el=document.createElement('div'); el.id='m3ApproveProg';
+      el.style.cssText='position:fixed;inset:0;background:rgba(2,6,16,.82);z-index:94;display:grid;place-items:center;padding:16px';
+      document.body.appendChild(el); }
+    el.innerHTML='<div style="background:var(--card);border:1px solid var(--line);border-radius:16px;max-width:420px;width:100%;padding:24px">'
+      +'<div style="font-family:var(--f-head);font-weight:800;font-size:16px;margin-bottom:12px">Aprovando a operação</div>'
+      +labels.map(function(l,i){ var dot=i<stepIdx?'✓':(i===stepIdx?'⏳':'·'); var col=i<stepIdx?'#4ade80':(i===stepIdx?'var(--ink)':'var(--ink-3)');
+        return '<div style="font-size:13px;margin:4px 0;color:'+col+'">'+dot+' '+esc(l)+'</div>'; }).join('')
+      +'</div>';
+  }
   async function m3Approve(){
     m3ShowMotivos(null);
     const btn=$('#m3dApprove'); btn.disabled=true; btn.textContent='Validando saldos e aprovando…';
+    m3ApproveProg(0);
     try{
       const ap=await pmApi('/v1/portal/mesas/'+m3Sel+'/approve',{method:'POST',body:{}});
       toast('Operação aprovada — termos congelados','ok');
@@ -3255,18 +3271,21 @@ window.addEventListener('unhandledrejection',function(e){try{console.warn('[veru
       if(regTx&&regTx.to&&ap.deal&&ap.deal.id) m3AutoRegKey=ap.deal.id; // o approve já envia; a esteira não repete
       if(regTx&&regTx.to){
         // Carteira real: o registro on-chain (createTradeV2) sai da carteira do PM1.
-        btn.textContent='Registrando a operação on-chain (assine na carteira)…';
-        const p=await findVerumEthProvider(); if(!p) throw new Error('Operação aprovada, mas o provider EVM da Verum Wallet não está nesta aba para registrar on-chain.');
+        m3ApproveProg(1);
+        btn.textContent='Registrando a operação (assine na carteira)…';
+        const p=await findVerumEthProvider(); if(!p) throw new Error('Operação aprovada, mas o provider EVM da Verum Wallet não está nesta aba para registrar o contrato.');
         const accs=await p.request({method:'eth_requestAccounts'}); const from=accs&&accs[0];
         const h=await p.request({method:'eth_sendTransaction',params:[{from,to:regTx.to,data:regTx.data}]});
         await evmWaitReceipt(p,h);
-        toast('Operação registrada on-chain ✓','ok');
+        m3ApproveProg(2);
+        toast('Operação registrada no contrato ✓','ok');
+        await new Promise(function(r){ setTimeout(r,900); }); // deixa o ✓ visível um instante
       }
       m3BalAt=0; m3Refresh();
     }catch(e){
       const det=(e&&e.details&&e.details.motivos)||null;
-      if(det) m3ShowMotivos(det); else toast(e.message||'Falha na aprovação','err');
-    }finally{ btn.disabled=false; btn.textContent='Aprovar operação'; }
+      if(det) m3ShowMotivos(det); else pErrBox('Falha na aprovação',((e&&e.code)?('['+e.code+'] '):'')+((e&&e.message)||String(e)));
+    }finally{ m3ApproveProg(null); btn.disabled=false; btn.textContent='Aprovar operação'; }
   }
   /** PM1 com CARTEIRA REAL: passo on-chain (relay do signV2 pelo keeper) + envelope da mesa, ambos
    *  assinados na própria wallet — usado quando o backend não tem chave dev para o admin. */
