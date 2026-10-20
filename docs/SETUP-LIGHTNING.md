@@ -50,6 +50,30 @@ subconjunto REST consumido pelo `LndRestService` e casa `sha256(preimage) == pay
 - `test/lightning.service.test.ts` — cliente REST real × fake + simulador.
 - `test/lightning.swap.test.ts` — a mecânica atômica do coordinator (5 cenários).
 
+## Ligar o nó em produção (deploy Vercel)
+
+O deploy chama o REST do LND **de fora** (funções serverless) — o nó precisa estar **acessível pela
+internet** (REST público com TLS). Um nó local/Polar **não** serve para o deploy (só para dev local).
+
+**Par correto hoje:** a perna USDT roda na **Sepolia (testnet)**. O nó LND deve ser **testnet/signet**
+— nunca mainnet, senão a mesa entrega **BTC real** contra tUSDT sem valor. Signet (Mutinynet) é a rede
+Lightning de teste mais saudável hoje (blocos regulares, faucet).
+
+Passos:
+1. **Suba um nó testnet/signet acessível pela internet.** Opções:
+   - *Gerenciado (mais rápido):* um provedor de nó LND gerenciado (ex.: Voltage) numa rede de teste —
+     já entrega REST público + `admin.macaroon` + `tls.cert`, sem VPS para administrar.
+   - *Autocustodiado:* LND em signet num VPS, com a porta REST (8080) exposta por HTTPS.
+2. **Abra ≥1 canal com liquidez OUTBOUND** (é o BTC que a mesa entrega). Em signet/Mutinynet use o
+   faucet + um par de canal. O precheck da aprovação barra se `outbound < amount` do swap.
+3. **Gere o macaroon de escopo mínimo** e converta para hex (ver abaixo); pegue o `tls.cert`.
+4. **Grave as envs no deploy** (Production na Vercel) — `LND_SIMULATE=0`, `LND_REST_URL`,
+   `LND_MACAROON` (hex), `LND_TLS_CERT` (PEM ou base64). Grupo all-or-nothing: os três juntos.
+5. **Valide a conexão** antes de confiar: `npx tsx --env-file=.env scripts/lnd-check.mts` (com as
+   envs do nó no `.env` local, apontando para o nó de produção). Confirma `getinfo`, a **rede** do nó
+   e a liquidez OUTBOUND — e avisa se parecer mainnet ou se o outbound for zero. Nunca imprime segredos.
+6. **Redeploy** e teste um swap Lightning ponta a ponta no deploy.
+
 ## Produção
 
 - Nó LND **dedicado e autocustodiado** (não compartilhar com outros serviços). Macaroon de escopo
