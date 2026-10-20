@@ -924,7 +924,7 @@ window.addEventListener('unhandledrejection',function(e){try{console.warn('[veru
       <!-- ===== Cadastro da mesa: wizard em 4 passos curtos ===== -->
       <!-- Passo 1 — Mesa e cadeiras -->
       <section class="card" id="m3Create" style="display:none;margin-bottom:16px">
-        <div class="card-h"><div class="t">Nova mesa · Passo 1 de 4 — Mesa e cadeiras</div><span class="badge info">Sem expiração</span></div>
+        <div class="card-h"><div class="t">Nova mesa · Passo 1 de 3 — Mesa e cadeiras</div><span class="badge info">Sem expiração</span></div>
         <div class="form-row"><div class="fl">Rótulo (opcional)</div><input class="inp" id="m3cLabel" maxlength="120" placeholder="Ex.: Mesa BTC — cliente institucional"></div>
         <!-- "Rede principal" saiu (v4): a rede é escolhida POR LADO no passo 2; bridge/HTLC cuidam do resto. -->
         <div class="form-row"><div><div class="fl">Cadeiras</div><div class="fh">Bilateral (2), com Pay Master (3) ou dois Pay Masters (4) — escrow dinâmico</div></div>
@@ -943,7 +943,7 @@ window.addEventListener('unhandledrejection',function(e){try{console.warn('[veru
 
       <!-- Passo 2 — Ativos (tokens do registro oficial; contrato/decimais preenchidos sozinhos) -->
       <section class="card" id="m3s2" style="display:none;margin-bottom:16px">
-        <div class="card-h"><div class="t">Nova mesa · Passo 2 de 4 — Ativos</div><span class="badge info" id="m3s2Net">—</span></div>
+        <div class="card-h"><div class="t">Nova mesa · Passo 2 de 3 — Ativos e valores</div><span class="badge info" id="m3s2Net">—</span></div>
         <p class="fh" style="margin:0 0 10px">Escolha a moeda de CADA lado — uma lista só com TODAS as moedas de TODAS as redes (com ícone); contrato/mint e decimais entram sozinhos. Redes diferentes liquidam via bridge (CCIP); BTC nativo liquida via HTLC (swap atômico).</p>
         <div class="form-row"><div><div class="fl">Vendedor — moeda</div><div class="fh">O que o Vendedor entrega</div></div>
           <div class="netfield" id="m3cSellField" style="max-width:300px" title="Escolher moeda — todas as redes numa lista só">Escolher moeda</div>
@@ -967,7 +967,9 @@ window.addEventListener('unhandledrejection',function(e){try{console.warn('[veru
             <input class="inp" data-m3adv="buyDec" type="number" min="0" max="30" placeholder="Decimais" style="width:90px">
           </div>
         </div>
-        <div style="display:flex;gap:10px;margin-top:14px">
+        <!-- Rodapé oculto no wizard de 3 passos (ativos+valores viraram UM passo); o rodapé do
+             #opFeesCard navega pelos dois. Botões mantidos no DOM (handlers/compat). -->
+        <div style="display:none;gap:10px;margin-top:14px">
           <button class="btn" id="m3cBack2" type="button"><svg viewBox="0 0 24 24"><path d="M19 12H5M11 6l-6 6 6 6"/></svg>Voltar</button>
           <button class="btn btn-primary" id="m3cNext2" type="button">Continuar: Valores e taxas<svg viewBox="0 0 24 24"><path d="M5 12h14M13 6l6 6-6 6"/></svg></button>
         </div>
@@ -982,6 +984,7 @@ window.addEventListener('unhandledrejection',function(e){try{console.warn('[veru
       <!-- ===== Mesas v3: detalhe da mesa selecionada ===== -->
       <section class="card" id="m3Detail" style="display:none;margin-bottom:16px">
         <div class="card-h"><div class="t" id="m3dTitle">Mesa</div><span class="badge info" id="m3dStatus">—</span></div>
+        <div id="m3dNextStep" style="display:none;margin:2px 0 10px;padding:10px 12px;border-radius:10px;background:rgba(201,168,76,.10);border:1px solid rgba(201,168,76,.35);font-size:13px"></div>
         <div style="display:flex;gap:14px;flex-wrap:wrap;align-items:center;margin-bottom:12px">
           <span class="mono" id="m3dCode" style="font-size:13px"></span>
           <span class="mono" id="m3dOpCode" style="font-size:13px;color:var(--blue)" title="Código único da operação"></span>
@@ -1040,7 +1043,7 @@ window.addEventListener('unhandledrejection',function(e){try{console.warn('[veru
 
       <!-- Passo 3 — Valores e taxas (grava na mesa via /config: humano→unidades base, %→bps) -->
       <section class="card" id="opFeesCard" style="display:none;margin-bottom:16px">
-        <div class="card-h"><div class="t"><svg viewBox="0 0 24 24" style="width:17px;height:17px;stroke:var(--blue);fill:none;stroke-width:2;vertical-align:-3px;margin-right:6px"><path d="M4 21v-7M4 10V3M12 21v-9M12 8V3M20 21v-5M20 12V3M1 14h6M9 8h6M17 16h6"/></svg>Nova mesa · Passo 3 de 4 — Valores e taxas</div><span class="badge info" id="opFeeSplitBadge">Vendedor 100%</span></div>
+        <div class="card-h"><div class="t"><svg viewBox="0 0 24 24" style="width:17px;height:17px;stroke:var(--blue);fill:none;stroke-width:2;vertical-align:-3px;margin-right:6px"><path d="M4 21v-7M4 10V3M12 21v-9M12 8V3M20 21v-5M20 12V3M1 14h6M9 8h6M17 16h6"/></svg>Valores e taxas</div><span class="badge info" id="opFeeSplitBadge">Vendedor 100%</span></div>
         <div class="form-row">
           <div><div class="fl">Quantidade do Vendedor</div><div class="fh" id="m3cSellAmtHint">Em unidades do token escolhido</div></div>
           <div style="text-align:right"><input class="inp" id="m3cSellAmt" inputmode="decimal" placeholder="Ex.: 250" style="min-width:150px;text-align:right"><div class="fh mono" id="m3cSellBase" style="margin-top:4px"></div></div>
@@ -1076,7 +1079,7 @@ window.addEventListener('unhandledrejection',function(e){try{console.warn('[veru
 
       <!-- Passo 4 — Revisão e criação -->
       <section class="card" id="m3s4" style="display:none;margin-bottom:16px">
-        <div class="card-h"><div class="t">Nova mesa · Passo 4 de 4 — Revisão</div><span class="badge info">Confira antes de criar</span></div>
+        <div class="card-h"><div class="t">Nova mesa · Passo 3 de 3 — Revisão</div><span class="badge info">Confira antes de criar</span></div>
         <div class="kv" id="m3rSummary"></div>
         <div style="display:flex;gap:10px;margin-top:14px">
           <button class="btn" id="m3cBack4" type="button"><svg viewBox="0 0 24 24"><path d="M19 12H5M11 6l-6 6 6 6"/></svg>Voltar</button>
@@ -2628,8 +2631,10 @@ window.addEventListener('unhandledrejection',function(e){try{console.warn('[veru
       +'</div>';
   }
   /* ---------- Wizard: 1) mesa e cadeiras · 2) ativos · 3) valores e taxas · 4) revisão → criar ---------- */
-  const M3_STEPS=['#m3Create','#m3s2','#opFeesCard','#m3s4'];
-  function m3Step(n){ M3_STEPS.forEach((sel,i)=>{ const el=$(sel); if(el) el.style.display=(n===i+1)?'':'none'; }); }
+  // Wizard em 3 passos (antes 4): o passo 2 exibe Ativos (#m3s2) e Valores (#opFeesCard) JUNTOS —
+  // nenhum elemento muda de lugar no DOM (campos continuam achados por ID); só a visibilidade agrupa.
+  const M3_STEPS=[['#m3Create'],['#m3s2','#opFeesCard'],['#m3s4']];
+  function m3Step(n){ M3_STEPS.forEach((group,i)=>{ group.forEach(sel=>{ const el=$(sel); if(el) el.style.display=(n===i+1)?'':'none'; }); }); }
   // Blocos do "hub" (lista/detalhe/todas-operações/carteira PM) escondidos durante a criação, pra a
   // tela de criação ficar DEDICADA (só o wizard + cabeçalho). m3ExitCreate restaura o hub.
   function m3HubBlocks(){ return ['#m3ListCard','#m3Detail','#opAllCard','#mesaSlots','#mesaSlotsHead']; }
@@ -3056,6 +3061,29 @@ window.addEventListener('unhandledrejection',function(e){try{console.warn('[veru
       $('#m3dTitle').textContent='Mesa '+(m.label||m.code);
       $('#m3dCode').textContent=m.code;
       $('#m3dStatus').outerHTML='<span id="m3dStatus">'+m3Badge(m.status)+'</span>';
+      // PRÓXIMO PASSO (admin): frase fixa dizendo a ação pendente e de quem — try/catch próprio
+      // para nunca derrubar o resto do refresh.
+      try{
+        const ns=$('#m3dNextStep');
+        if(ns){
+          const nm=function(r){ const c=(m.chairs||[]).find(x=>x.role===r); return (M3_ROLE[r]||r)+(c&&c.firstName?(' ('+c.firstName+')'):''); };
+          const dl=m.deal; let txt='';
+          const semConvite=(m.chairs||[]).find(c=>!c.wallet&&!c.invite&&c.role!=='PAYMASTER_1');
+          const semConexao=(m.chairs||[]).find(c=>!c.wallet&&c.role!=='PAYMASTER_1');
+          if(dl){
+            if(dl.state==='SETTLED') txt='Operação concluída ✓';
+            else if(['FULLY_SIGNED','SETTLEMENT_VALIDATION','SETTLING'].includes(dl.state)) txt='Tudo assinado — liquidando no contrato…';
+            else if(['EXPIRED','REFUNDING','REFUNDED','BLOCKED','CANCELLED'].includes(dl.state)) txt='Operação não concluída — depósitos confirmados são devolvidos automaticamente.';
+            else if(dl.state==='LIQUIDITY_VERIFIED') txt=dl.htlcVault?('Aguardando '+nm(dl.htlcVault.from)+' enviar o BTC ao cofre — avise-o.'):'Aguardando os depósitos.';
+            else if(dl.state==='AWAITING_SIGNATURES'&&!dl.turnRole&&(dl.validSignatures||0)<(dl.requiredSignatures||9)) txt='Registrando o contrato na rede (~1–2 min) — sua carteira abre sozinha se faltar assinar o registro.';
+            else if(dl.state==='AWAITING_SIGNATURES'&&dl.turnRole==='PAYMASTER_1') txt='Sua vez: toque em "Assinar a vez".';
+            else if(dl.state==='AWAITING_SIGNATURES'&&dl.turnRole) txt='Aguardando '+nm(dl.turnRole)+' assinar ('+(dl.validSignatures||0)+'/'+(dl.requiredSignatures||0)+') — avise-o.';
+          } else if(semConexao) txt=semConvite?('Convidar '+nm(semConvite.role)+' (botão "Convidar participante").'):('Aguardando '+nm(semConexao.role)+' conectar a carteira pelo convite.');
+          else if(!m.config||!m.config.amountInBase) txt='Definir os valores da operação e salvar.';
+          else if(!m.approvedAt) txt='Conferir os valores e tocar em "Aprovar e liberar assinaturas".';
+          ns.style.display=txt?'':'none'; ns.innerHTML=txt?('<b>Próximo passo:</b> '+esc(txt)):'';
+        }
+      }catch(e){}
       const chairs=$('#m3dChairs');
       // Saldos do precheck (por papel) p/ exibir no card, como na aba Operações.
       const balByRole={}; ((m3Bal&&m3Bal.chairs)||[]).forEach(b=>{ balByRole[b.role]=b; });
@@ -3186,22 +3214,27 @@ window.addEventListener('unhandledrejection',function(e){try{console.warn('[veru
   async function m3Invite(chairId){
     try{
       const inv=await pmApi('/v1/portal/mesas/'+m3Sel+'/chairs/'+chairId+'/invite',{method:'POST',body:{}});
-      const share=navigator.share?'<button class="btn" id="m3iShare">Compartilhar</button>':'';
+      // UM BOTÃO primário: "Compartilhar convite" (share nativo; sem suporte → copia a mensagem
+      // completa). Link/código viram ações secundárias discretas; a mensagem fica em <details>.
       $('#modalRoot').innerHTML='<div class="mback" id="m3iBack" style="position:fixed;inset:0;background:rgba(2,6,16,.7);z-index:60;display:grid;place-items:center;padding:16px">'
         +'<div class="card" style="max-width:520px;width:100%;max-height:90vh;overflow:auto">'
         +'<div class="card-h"><div class="t">Convite — '+esc(M3_ROLE[inv.role]||inv.role)+'</div><button class="btn" id="m3iClose" style="height:32px">Fechar</button></div>'
         +'<div style="text-align:center;margin:14px 0"><div style="font-family:var(--f-mono);font-size:30px;letter-spacing:.12em">'+esc(inv.code)+'</div><div style="font-size:11.5px;color:var(--ink-3);margin-top:4px">Código do convite (mostrado uma única vez)</div></div>'
-        +'<div class="mono" style="font-size:12px;word-break:break-all;background:var(--bg-2);border:1px solid var(--line);border-radius:10px;padding:10px">'+esc(inv.link)+'</div>'
-        +'<textarea class="inp" id="m3iMsg" style="width:100%;height:190px;margin-top:10px;font-size:12px;font-family:var(--f-mono)" readonly>'+esc(inv.message)+'</textarea>'
-        +'<div style="display:flex;gap:8px;margin-top:10px;flex-wrap:wrap">'
-        +'<button class="btn" id="m3iCopyLink">Copiar link</button><button class="btn" id="m3iCopyCode">Copiar código</button><button class="btn btn-primary" id="m3iCopyMsg">Copiar mensagem</button>'+share+'</div>'
+        +'<button class="btn btn-primary btn-block" id="m3iShareMain" style="height:48px">Compartilhar convite</button>'
+        +'<div style="display:flex;gap:8px;margin-top:8px"><button class="btn" id="m3iCopyLink" style="flex:1;height:36px;font-size:12px">Copiar link</button><button class="btn" id="m3iCopyCode" style="flex:1;height:36px;font-size:12px">Copiar código</button><button class="btn" id="m3iCopyMsg" style="flex:1;height:36px;font-size:12px">Copiar mensagem</button></div>'
+        +'<details style="margin-top:10px"><summary style="cursor:pointer;font-size:12px;color:var(--ink-3)">Ver link e mensagem completa</summary>'
+        +'<div class="mono" style="font-size:12px;word-break:break-all;background:var(--bg-2);border:1px solid var(--line);border-radius:10px;padding:10px;margin-top:8px">'+esc(inv.link)+'</div>'
+        +'<textarea class="inp" id="m3iMsg" style="width:100%;height:190px;margin-top:10px;font-size:12px;font-family:var(--f-mono)" readonly>'+esc(inv.message)+'</textarea></details>'
         +'</div></div>';
       $('#m3iClose').addEventListener('click',closeModal);
       $('#m3iBack').addEventListener('click',e=>{ if(e.target.id==='m3iBack') closeModal(); });
       $('#m3iCopyLink').addEventListener('click',()=>{ clip(inv.link); toast('Link copiado','ok'); });
       $('#m3iCopyCode').addEventListener('click',()=>{ clip(inv.code); toast('Código copiado','ok'); });
       $('#m3iCopyMsg').addEventListener('click',()=>{ clip(inv.message); toast('Mensagem copiada','ok'); });
-      const sh=$('#m3iShare'); if(sh) sh.addEventListener('click',()=>{ navigator.share({title:'VERUM OTC — Convite',text:inv.message}).catch(()=>{}); });
+      $('#m3iShareMain').addEventListener('click',()=>{
+        if(navigator.share){ navigator.share({title:'VERUM OTC — Convite',text:inv.message}).catch(()=>{}); }
+        else { clip(inv.message); toast('Mensagem completa copiada — cole no WhatsApp/Telegram','ok'); }
+      });
       m3Refresh();
     }catch(e){ toast(e.message||'Falha ao gerar convite','err'); }
   }
@@ -3221,9 +3254,25 @@ window.addEventListener('unhandledrejection',function(e){try{console.warn('[veru
     try{ await pmApi('/v1/portal/mesas/'+m3Sel+'/config',{method:'PATCH',body}); m3CfgDirty=false; m3CfgDirtyUI(true); toast('Alterações salvas na mesa','ok'); m3Refresh(); }
     catch(e){ toast(e.message,'err'); }
   }
+  // Overlay de progresso do approve: a assinatura do registro na carteira deixa de ser "susto" —
+  // o PM vê o que vem antes de a carteira abrir. Fora do #modalRoot (usado pelo convite).
+  function m3ApproveProg(stepIdx){
+    var labels=['Validando saldos e congelando os termos','Registrar o contrato na rede — assine na sua carteira (vai abrir agora)','Operação registrada ✓'];
+    var el=document.getElementById('m3ApproveProg');
+    if(stepIdx==null){ if(el) el.remove(); return; }
+    if(!el){ el=document.createElement('div'); el.id='m3ApproveProg';
+      el.style.cssText='position:fixed;inset:0;background:rgba(2,6,16,.82);z-index:94;display:grid;place-items:center;padding:16px';
+      document.body.appendChild(el); }
+    el.innerHTML='<div style="background:var(--card);border:1px solid var(--line);border-radius:16px;max-width:420px;width:100%;padding:24px">'
+      +'<div style="font-family:var(--f-head);font-weight:800;font-size:16px;margin-bottom:12px">Aprovando a operação</div>'
+      +labels.map(function(l,i){ var dot=i<stepIdx?'✓':(i===stepIdx?'⏳':'·'); var col=i<stepIdx?'#4ade80':(i===stepIdx?'var(--ink)':'var(--ink-3)');
+        return '<div style="font-size:13px;margin:4px 0;color:'+col+'">'+dot+' '+esc(l)+'</div>'; }).join('')
+      +'</div>';
+  }
   async function m3Approve(){
     m3ShowMotivos(null);
     const btn=$('#m3dApprove'); btn.disabled=true; btn.textContent='Validando saldos e aprovando…';
+    m3ApproveProg(0);
     try{
       const ap=await pmApi('/v1/portal/mesas/'+m3Sel+'/approve',{method:'POST',body:{}});
       toast('Operação aprovada — termos congelados','ok');
@@ -3231,18 +3280,21 @@ window.addEventListener('unhandledrejection',function(e){try{console.warn('[veru
       if(regTx&&regTx.to&&ap.deal&&ap.deal.id) m3AutoRegKey=ap.deal.id; // o approve já envia; a esteira não repete
       if(regTx&&regTx.to){
         // Carteira real: o registro on-chain (createTradeV2) sai da carteira do PM1.
-        btn.textContent='Registrando a operação on-chain (assine na carteira)…';
-        const p=await findVerumEthProvider(); if(!p) throw new Error('Operação aprovada, mas o provider EVM da Verum Wallet não está nesta aba para registrar on-chain.');
+        m3ApproveProg(1);
+        btn.textContent='Registrando a operação (assine na carteira)…';
+        const p=await findVerumEthProvider(); if(!p) throw new Error('Operação aprovada, mas o provider EVM da Verum Wallet não está nesta aba para registrar o contrato.');
         const accs=await p.request({method:'eth_requestAccounts'}); const from=accs&&accs[0];
         const h=await p.request({method:'eth_sendTransaction',params:[{from,to:regTx.to,data:regTx.data}]});
         await evmWaitReceipt(p,h);
-        toast('Operação registrada on-chain ✓','ok');
+        m3ApproveProg(2);
+        toast('Operação registrada no contrato ✓','ok');
+        await new Promise(function(r){ setTimeout(r,900); }); // deixa o ✓ visível um instante
       }
       m3BalAt=0; m3Refresh();
     }catch(e){
       const det=(e&&e.details&&e.details.motivos)||null;
-      if(det) m3ShowMotivos(det); else toast(e.message||'Falha na aprovação','err');
-    }finally{ btn.disabled=false; btn.textContent='Aprovar operação'; }
+      if(det) m3ShowMotivos(det); else pErrBox('Falha na aprovação',((e&&e.code)?('['+e.code+'] '):'')+((e&&e.message)||String(e)));
+    }finally{ m3ApproveProg(null); btn.disabled=false; btn.textContent='Aprovar operação'; }
   }
   /** PM1 com CARTEIRA REAL: passo on-chain (relay do signV2 pelo keeper) + envelope da mesa, ambos
    *  assinados na própria wallet — usado quando o backend não tem chave dev para o admin. */
@@ -3289,14 +3341,16 @@ window.addEventListener('unhandledrejection',function(e){try{console.warn('[veru
   function m3Init(){
     const nb=$('#m3New'); if(nb) nb.addEventListener('click',m3EnterCreate);
     const cc=$('#m3cCancel'); if(cc) cc.addEventListener('click',m3ExitCreate);
-    // Navegação do wizard: 1 Mesa → 2 Ativos → 3 Valores/taxas → 4 Revisão.
+    // Navegação do wizard (3 passos): 1 Mesa → 2 Ativos e valores → 3 Revisão. O rodapé do #m3s2
+    // fica oculto (o do #opFeesCard navega pelos dois); a validação de ativos que era do m3cNext2
+    // roda no m3cNext3, antes da revisão.
     const on=(id,fn)=>{ const el=$(id); if(el) el.addEventListener('click',fn); };
     on('#m3cNext',async()=>{ await m3EnterAssets(); m3Step(2); });
     on('#m3cBack2',()=>m3Step(1));
-    on('#m3cNext2',()=>{ const d=m3WizardData(); if(d.err){ toast(d.err,'err'); return; } m3OnSellAmt(); m3Step(3); });
-    on('#m3cBack',()=>m3Step(2));
-    on('#m3cNext3',()=>{ if(m3RenderReview()) m3Step(4); else toast('Revise os campos destacados','err'); });
-    on('#m3cBack4',()=>m3Step(3));
+    on('#m3cNext2',()=>{ const d=m3WizardData(); if(d.err){ toast(d.err,'err'); return; } m3OnSellAmt(); m3Step(2); });
+    on('#m3cBack',()=>m3Step(1));
+    on('#m3cNext3',()=>{ const d=m3WizardData(); if(d.err){ toast(d.err,'err'); return; } if(m3RenderReview()) m3Step(3); else toast('Revise os campos destacados','err'); });
+    on('#m3cBack4',()=>m3Step(2));
     on('#m3cSubmit',m3SubmitCreate);
     const sa=$('#m3cSellAmt'); if(sa) sa.addEventListener('input',m3OnSellAmt);   // vendedor → calcula comprador
     const ba=$('#m3cBuyAmt'); if(ba) ba.addEventListener('input',m3AmtPreview);    // comprador: ajuste manual livre
@@ -3356,7 +3410,7 @@ window.addEventListener('unhandledrejection',function(e){try{console.warn('[veru
     if(!res.ok){ const e=new Error((data&&(data.message||data.error))||('Erro '+res.status)); e.status=res.status; e.code=data&&data.error; throw e; }
     return data;
   }
-  let pDto=null, pBalAt=0, pBal=null;
+  let pDto=null, pBalAt=0, pBal=null, pDepChkAt=0;
   function pBadgePart(c){
     if(!c.connected) return '<span class="badge wait">Aguardando conexão</span>';
     const d=pDto&&pDto.deal;
@@ -3416,14 +3470,28 @@ window.addEventListener('unhandledrejection',function(e){try{console.warn('[veru
       const provPay=solProvider(); const canPay=!!(provPay&&typeof provPay.signAndSendPayment==='function');
       // Banner obrigatório de ambiente (auditoria): perna BTC no SIMULADOR nunca se passa por real.
       const simBanner=d.htlcVault.simulated?'<div style="margin-bottom:8px;padding:6px 10px;border-radius:8px;background:rgba(245,158,11,.14);border:1px solid var(--amber);color:var(--amber);font-size:12px;font-weight:700">⚠ AMBIENTE DE TESTE — BTC SIMULADO (nenhum BTC real se move)</div>':'';
+      // UM CAMINHO SÓ: botão primário "Pagar com a carteira"; o manual (endereço + copiar +
+      // verificar) fica recolhido num "Prefere enviar manualmente?". Sem canPay (carteira antiga)
+      // o manual abre sozinho e vira o caminho único. IDs/listeners inalterados.
+      const manualBody='<div class="mono" style="word-break:break-all;font-size:12px;background:var(--bg-2);border:1px solid var(--line);border-radius:8px;padding:8px;margin:8px 0">'+esc(d.htlcVault.address)+'</div>'
+        +'<div style="display:flex;gap:8px"><button class="btn" id="pVaultCopy" style="flex:1;height:40px">Copiar endereço</button><button class="btn'+(canPay?'':' btn-primary')+'" id="pVaultCheck" style="flex:1;height:40px">Já enviei — verificar</button></div>';
+      // Estado "ENVIADO — aguardando a rede": substitui o botão de pagar por um status com
+      // cronômetro (pTick atualiza) + "Verificar agora". A retomada da assinatura é automática.
+      const sentAt=pBtcSentAt(d);
+      const sentMin=sentAt?Math.max(0,Math.floor((Date.now()-sentAt)/60000)):0;
+      const sentHtml=sentAt
+        ?('<div style="margin:8px 0;padding:10px;border:1px solid var(--line);border-radius:10px;font-size:13px">✅ Depósito enviado — aguardando a confirmação da rede (~10 min na testnet) · ⏱ há <span id="pVaultElapsed" data-sent="'+sentAt+'">'+sentMin+'</span> min'
+          +(sentMin>=40?'<div style="font-size:11.5px;color:var(--ink-3);margin-top:4px">Está demorando mais que o normal — o depósito continua valendo; a tela retoma sozinha quando confirmar.</div>':'')
+          +'</div><button class="btn btn-block" id="pVaultCheck" style="height:40px">Verificar agora</button>')
+        :'';
       fundHtml='<div style="margin-top:12px;padding:12px;border:1px solid var(--amber);border-radius:10px">'
         +simBanner
         +'<b style="color:var(--amber)">Depósito BTC pendente</b>'
-        +'<div style="font-size:12.5px;color:var(--ink-2);margin-top:4px">Tranque <b class="mono">'+esc(btcHuman)+' BTC</b> ('+esc(String(d.htlcVault.requiredSat))+' sats) no cofre HTLC desta operação:</div>'
-        +'<div class="mono" style="word-break:break-all;font-size:12px;background:var(--bg-2);border:1px solid var(--line);border-radius:8px;padding:8px;margin:8px 0">'+esc(d.htlcVault.address)+'</div>'
-        +(canPay?'<button class="btn btn-primary btn-block" id="pVaultPay" style="height:44px;margin-bottom:8px">Pagar com a carteira ('+esc(btcHuman)+' BTC)</button>':'')
-        +'<div style="display:flex;gap:8px"><button class="btn" id="pVaultCopy" style="flex:1;height:40px">Copiar endereço</button><button class="btn'+(canPay?'':' btn-primary')+'" id="pVaultCheck" style="flex:1;height:40px">Já enviei — verificar</button></div>'
-        +'<div style="font-size:11.5px;color:var(--ink-3);margin-top:6px">Você pode trancar a qualquer momento (independe da contraparte). Se a operação não se completar, o reembolso fica disponível após o timelock.</div>'
+        +'<div style="font-size:12.5px;color:var(--ink-2);margin-top:4px">Envie <b class="mono">'+esc(btcHuman)+' BTC</b> ('+esc(String(d.htlcVault.requiredSat))+' sats) ao cofre desta operação.</div>'
+        +sentHtml
+        +(!sentAt&&canPay?'<button class="btn btn-primary btn-block" id="pVaultPay" style="height:44px;margin:8px 0">Pagar com a carteira ('+esc(btcHuman)+' BTC)</button>':'')
+        +(sentAt?'':'<details'+(canPay?'':' open')+' style="margin-top:4px"><summary style="cursor:pointer;font-size:12px;color:var(--ink-3)">'+(canPay?'Prefere enviar manualmente?':'Enviar manualmente')+'</summary>'+manualBody+'</details>')
+        +'<div style="font-size:11.5px;color:var(--ink-3);margin-top:6px">Você pode enviar a qualquer momento (independe da contraparte). Se a operação não se completar, o valor volta para você após o prazo de segurança.</div>'
         +'</div>';
     } else if(myFund){
       // Perna de TOKEN (escrow EVM/Solana/Tron ou lock HTLC Solana): a carteira consegue depositar
@@ -3440,11 +3508,34 @@ window.addEventListener('unhandledrejection',function(e){try{console.warn('[veru
         +'<button class="btn btn-primary btn-block" id="pEscrowDep" style="height:44px;margin-top:8px">'+(isBuyerDep?'Autorizar pagamento agora':'Depositar no escrow agora')+'</button>'
         +'</div>';
     }
+    // PRÓXIMO PASSO SEMPRE VISÍVEL: uma frase derivada do estado dizendo o que falta e de quem —
+    // acaba com tela "parada" sem instrução. Puro derive (try/catch no chamador; nunca mata o render).
+    function pNextStepTxt(){
+      const nm=function(r){ const c=(m.chairs||[]).find(x=>x.role===r); return (M3_ROLE[r]||r)+(c&&c.firstName?(' ('+c.firstName+')'):''); };
+      if(!d) return m.config?'Aguardando o Pay Master aprovar a operação.':'Aguardando o Pay Master configurar a operação.';
+      if(d.state==='SETTLED') return 'Operação concluída ✓';
+      if(['FULLY_SIGNED','SETTLEMENT_VALIDATION','SETTLING'].includes(d.state)) return 'Tudo assinado — o contrato está executando a troca…';
+      if(['EXPIRED','REFUNDING','REFUNDED','BLOCKED','CANCELLED'].includes(d.state)) return 'Operação não concluída — depósitos confirmados são devolvidos automaticamente.';
+      if(d.state==='LIQUIDITY_VERIFIED'){
+        if(d.htlcVault&&d.htlcVault.from===(me.role)&&myFund) return 'Seu próximo passo: enviar o BTC ao cofre — toque em "Revisar e assinar".';
+        if(d.htlcVault) return 'Aguardando '+nm(d.htlcVault.from)+' enviar o BTC ao cofre.';
+        return 'Aguardando os depósitos.';
+      }
+      if(d.state==='AWAITING_SIGNATURES'){
+        if(!d.turnRole&&(d.validSignatures||0)<(d.requiredSignatures||9)) return 'O Pay Master está registrando o contrato na rede (~1–2 min) — as assinaturas abrem em seguida.';
+        if(d.turnRole===me.role) return (d.signed||[]).includes(me.role)?'Você já assinou — acompanhe.':'Sua vez: revisar e assinar.';
+        if(d.turnRole) return 'Aguardando '+nm(d.turnRole)+' assinar ('+(d.validSignatures||0)+'/'+(d.requiredSignatures||0)+').';
+      }
+      return '';
+    }
+    let nextStep=''; try{ nextStep=pNextStepTxt(); }catch(e){}
+    const nextStepHtml=nextStep?'<div style="margin-bottom:10px;padding:10px 12px;border-radius:10px;background:rgba(201,168,76,.10);border:1px solid rgba(201,168,76,.35);font-size:13px"><b>Próximo passo:</b> '+esc(nextStep)+'</div>':'';
     // GATE DE SEQUÊNCIA: turnos adiados até o PM1 registrar o contrato on-chain — o participante
     // vê o porquê da espera (sem isso parecia travado). Some sozinho quando os turnos começam.
     const regWait=(d&&d.state==='AWAITING_SIGNATURES'&&!d.turnRole&&(d.validSignatures||0)<(d.requiredSignatures||9))
-      ?'<div style="margin-top:12px;padding:10px 12px;border:1px solid var(--line);border-radius:10px;font-size:12.5px;color:var(--ink-2)">⏳ Aguardando o <b>Pay Master 1</b> registrar a operação on-chain (createTradeV2). As assinaturas abrem em seguida — esta tela atualiza sozinha.</div>':'';
-    $('#pSigns').innerHTML=(d?('Ordem: Vendedor → Pay Master 1'+((m.chairs||[]).some(c=>c.role==='PAYMASTER_2')?' → Pay Master 2':'')+' → Comprador'
+      ?'<div style="margin-top:12px;padding:10px 12px;border:1px solid var(--line);border-radius:10px;font-size:12.5px;color:var(--ink-2)">⏳ O <b>Pay Master</b> está registrando o contrato da operação na rede (~1–2 min). As assinaturas abrem em seguida — esta tela atualiza sozinha.</div>':'';
+    $('#pSigns').innerHTML=nextStepHtml
+      +(d?('Ordem: Vendedor → Pay Master 1'+((m.chairs||[]).some(c=>c.role==='PAYMASTER_2')?' → Pay Master 2':'')+' → Comprador'
       +(d.turnRole?('<br>Vez atual: <b>'+esc(M3_ROLE[d.turnRole]||d.turnRole)+'</b>'):'')) : 'A coleta de assinaturas começa após a aprovação do Pay Master.')
       +(m.irreversible?'<br><span style="color:var(--amber)">🔒 Operação irreversível — fundos trancados; o contrato roda até a liquidação (preimage) ou o reembolso após o timelock.</span>':'')
       +regWait
@@ -3458,6 +3549,7 @@ window.addEventListener('unhandledrejection',function(e){try{console.warn('[veru
           const prov=solProvider(); try{ await prov.connect(); }catch(e){}
           const sats=String(d.htlcVault.requiredSat); const v=String(BigInt(sats)).padStart(9,'0'); const fr=v.slice(-8).replace(/0+$/,''); const amount=(v.slice(0,-8)||'0')+(fr?'.'+fr:'');
           const r=await withSigTimeout(prov.signAndSendPayment({ network:'bitcoin', outputs:[{ address:d.htlcVault.address, amount:amount, asset:{kind:'native'} }], memo:null }),'bitcoin');
+          pBtcSentMark(d, r&&r.txHash); // card passa ao estado "enviado — aguardando" no próximo render
           toast('BTC enviado ao cofre ✓ '+((r&&r.txHash)?shortAddr(r.txHash):''),'ok');
           bp.textContent='Enviado — aguardando confirmação…';
           // Verificação imediata: normalmente ainda está no mempool (aguardando bloco) — informa
@@ -3466,7 +3558,7 @@ window.addEventListener('unhandledrejection',function(e){try{console.warn('[veru
           catch(e2){ if(/mempool|confirma/i.test((e2&&e2.message)||'')) toast('No mempool — aguarde a confirmação do bloco e toque "Já enviei — verificar".','ok'); else if(!pStaleSession(e2)) pErrBox('Verificação do depósito',((e2&&e2.code)?('['+e2.code+'] '):'')+((e2&&e2.message)||String(e2))); }
         }catch(e){
           // UNSUPPORTED/flag off/toggle de rede errado → cai no fluxo manual (endereço continua no card).
-          pErrBox('Pagamento pela carteira falhou',(((e&&e.code)?('['+e.code+'] '):'')+((e&&e.message)||String(e)))+'\n\nAlternativa: envie manualmente os sats ao endereço do cofre (copie no card) e toque "Já enviei — verificar". Se o erro citar rede/ambiente, confira se a Verum Wallet está no modo testnet.');
+          pErrBox('Pagamento pela carteira falhou',(((e&&e.code)?('['+e.code+'] '):'')+((e&&e.message)||String(e)))+'\n\nAlternativa: envie manualmente os sats pelo caminho "Prefere enviar manualmente?" do card e toque "Já enviei — verificar". Se o erro citar rede/ambiente, confira se a Verum Wallet está no modo testnet.');
         }
         finally{ bp.disabled=false; bp.textContent='Pagar com a carteira'; }
       });
@@ -3540,6 +3632,8 @@ window.addEventListener('unhandledrejection',function(e){try{console.warn('[veru
   }
   function pTick(){
     const m=pDto; if(!m) return;
+    // Cronômetro do depósito BTC enviado (estado "aguardando a rede" no card).
+    try{ const elx=document.getElementById('pVaultElapsed'); if(elx){ const t0=Number(elx.getAttribute('data-sent')||'0'); if(t0) elx.textContent=String(Math.max(0,Math.floor((Date.now()-t0)/60000))); } }catch(e){}
     $('#pTtl').textContent='Mesa: '+fmtCountdown(m.expiresAt).replace(' restantes','');
     const tt=$('#pTurnTtl'); const d=m.deal;
     if(d&&d.turnExpiresAt&&d.state==='AWAITING_SIGNATURES'){ tt.style.display=''; tt.textContent='Assinaturas: '+fmtCountdown(d.turnExpiresAt).replace(' restantes',''); }
@@ -3555,6 +3649,23 @@ window.addEventListener('unhandledrejection',function(e){try{console.warn('[veru
         try{ const r=await pApi('/v1/mesas/'+encodeURIComponent(P_MESA)+'/deal/'+encodeURIComponent(P_OP)); if(r&&r.deal){ pDto.deal=r.deal; if(r.irreversible!=null) pDto.irreversible=r.irreversible; } }catch(e){}
       }
       if(Date.now()-pBalAt>15000){ pBalAt=Date.now(); pApi('/v1/mesas/'+encodeURIComponent(P_MESA)+'/precheck').then(b=>{ pBal=b; pRender(); }).catch(()=>{}); }
+      // WATCH do depósito BTC enviado: com a marca local e o funding ainda pendente, re-checa o
+      // backend a cada ≥30 s (idem key idêntica — idempotente). Ao confirmar, o auto-pull/auto-sign
+      // retomam a assinatura sozinhos. Marca é limpa no FINAL ou em estado terminal.
+      try{
+        const d0=pDto&&pDto.deal, me0=pDto&&pDto.viewer;
+        if(d0&&me0&&d0.htlcVault&&d0.htlcVault.from===me0.role){
+          const mf0=(d0.funding||[]).find(f=>f.role===me0.role);
+          const pend=mf0&&mf0.status!=='FINAL'&&!['SETTLED','REFUNDED','EXPIRED','BLOCKED','CANCELLED'].includes(d0.state);
+          if(!pend){ if(pBtcSentAt(d0)) pBtcSentClear(d0); }
+          else if(pBtcSentAt(d0)&&Date.now()-pDepChkAt>30000){
+            pDepChkAt=Date.now();
+            pApi('/v1/deals/'+encodeURIComponent(d0.id)+'/legs/'+d0.htlcVault.legIndex+'/deposit',{method:'POST',idem:'fund-'+d0.id+'-'+me0.role})
+              .then(function(){ pBtcSentClear(d0); toast('Depósito confirmado ✓','ok'); pRefresh(); })
+              .catch(function(){ /* ainda na fila da rede — próxima rodada */ });
+          }
+        }
+      }catch(e){}
       pRender(); pTick();
     }catch(e){ if(e.status===401||e.status===403){ try{ sessionStorage.removeItem('verum_mesa_pt_'+P_MESA); localStorage.removeItem('verum_mesa_pt_'+P_MESA); }catch(x){} P_TOK=''; pReentry('Sessão expirada — reconecte para continuar vendo a operação.'); } }
   }
@@ -3604,6 +3715,7 @@ window.addEventListener('unhandledrejection',function(e){try{console.warn('[veru
       +(me.role==='BUYER'?'<p style="font-size:12.5px;color:var(--ink-3);margin:12px 0 0">Você autoriza apenas o PAGAMENTO acordado — quem deposita o ativo à venda é o Vendedor.</p>':'')
       +(me.role==='SELLER'?'<p style="font-size:12.5px;color:var(--ink-3);margin:12px 0 0">Você deposita o ativo à venda no contrato; a taxa da plataforma sai do seu lado e a comissão dos Pay Masters é descontada do valor que você recebe.</p>':'')
       +'<p style="font-size:12.5px;color:var(--amber);margin:12px 0">Revise cuidadosamente os dados antes de assinar.</p>'
+      +'<div id="pSignSteps" style="display:none;margin:0 0 10px;padding:10px 12px;background:var(--bg-2);border:1px solid var(--line);border-radius:10px"></div>'
       +'<button class="btn btn-primary btn-block" id="pRvSign" style="height:50px">Assinar e continuar</button>'
       +'</div></div>';
     $('#pRvClose').addEventListener('click',closeModal);
@@ -3693,7 +3805,7 @@ window.addEventListener('unhandledrejection',function(e){try{console.warn('[veru
       // (o pull acontece no sign da vez); Solana escrow = nada on-chain (custódia no sign; o fund é
       // checagem de saldo); Solana HTLC (purpose htlc_lock) = a própria tx de lock, que É o depósito.
       if(mode==='deposit'){
-        if(step&&step.kind==='evm'){ st('Aprovando o token (approve)…'); await evmApproveOnly(step); return; }
+        if(step&&step.kind==='evm'){ st('Autorizando o valor na carteira…'); await evmApproveOnly(step); return; }
         if(!(step&&step.kind==='solana'&&step.purpose==='htlc_lock'&&step.transactionBase64)) return;
       }
       if(step&&step.kind==='solana'&&step.transactionBase64){
@@ -3719,34 +3831,57 @@ window.addEventListener('unhandledrejection',function(e){try{console.warn('[veru
   // declarativo), espera a confirmação do bloco re-checando o backend, e devolve o controle ao
   // pSign para a assinatura. A vez NÃO expira durante a confirmação (motor pausa a janela do
   // assinante com depósito pendente e a reinicia ao confirmar).
+  // Marca local "BTC enviado": gravada SÓ depois do signAndSendPayment resolver (cancelou na
+  // carteira = não grava). Serve para (a) nunca reenviar na janela broadcast→mempool em que o
+  // backend ainda não vê a tx, e (b) mostrar o estado "aguardando confirmação" no card.
+  function pBtcSentKey(d){ return 'verum_btcsent_'+d.id+'_'+((pDto&&pDto.viewer&&pDto.viewer.role)||''); }
+  function pBtcSentAt(d){ try{ const v=localStorage.getItem(pBtcSentKey(d)); return v?Number(String(v).split('|')[0]):null; }catch(e){ return null; } }
+  function pBtcSentMark(d,txHash){ try{ localStorage.setItem(pBtcSentKey(d), Date.now()+'|'+(txHash||'')); }catch(e){} }
+  function pBtcSentClear(d){ try{ localStorage.removeItem(pBtcSentKey(d)); }catch(e){} }
   async function pFundBtcVault(d,st){
     st=st||function(){};
     const role=pDto.viewer&&pDto.viewer.role;
     const check=function(){ return pApi('/v1/deals/'+encodeURIComponent(d.id)+'/legs/'+d.htlcVault.legIndex+'/deposit',{method:'POST',idem:'fund-'+d.id+'-'+role}); };
     // Já confirmado (depósito manual anterior)? Já no mempool (envio anterior — NUNCA reenvia)?
     let needSend=true;
-    try{ await check(); return; }
+    try{ await check(); pBtcSentClear(d); return; }
     catch(e0){ if(/mempool|confirma/i.test((e0&&e0.message)||'')) needSend=false; else if(!(e0&&e0.code==='FUNDING_REQUIRED')) throw e0; }
+    // Enviado há <60 min por esta tela: NÃO reenvia mesmo que o backend ainda não veja o mempool.
+    const sentAt=pBtcSentAt(d);
+    if(needSend&&sentAt&&Date.now()-sentAt<60*60000) needSend=false;
     if(needSend){
       const prov=solProvider();
-      if(!prov||typeof prov.signAndSendPayment!=='function') throw new Error('Esta Verum Wallet não envia BTC pelo dApp. Alternativa: copie o endereço do cofre no card, envie os sats manualmente e toque "Já enviei — verificar".');
+      if(!prov||typeof prov.signAndSendPayment!=='function') throw new Error('Esta Verum Wallet não envia BTC pelo dApp. Alternativa: abra "Prefere enviar manualmente?" no card, envie os sats ao endereço e toque "Já enviei — verificar".');
       try{ await prov.connect(); }catch(e){}
       st('Confirme o envio do BTC na carteira…');
       const v=String(BigInt(String(d.htlcVault.requiredSat))).padStart(9,'0'); const fr=v.slice(-8).replace(/0+$/,''); const amount=(v.slice(0,-8)||'0')+(fr?'.'+fr:'');
       const r=await withSigTimeout(prov.signAndSendPayment({ network:'bitcoin', outputs:[{ address:d.htlcVault.address, amount:amount, asset:{kind:'native'} }], memo:null }),'bitcoin');
+      pBtcSentMark(d, r&&r.txHash);
       toast('BTC enviado ao cofre ✓ '+((r&&r.txHash)?shortAddr(r.txHash):''),'ok');
     }
-    // Espera a confirmação do bloco (testnet ~10 min; teto 30), re-checando a cada 20 s.
-    const t0=Date.now();
-    for(;;){
-      st('Aguardando confirmação do bloco… ('+Math.floor((Date.now()-t0)/60000)+' min — testnet ~10 min)');
-      await new Promise(function(r){ setTimeout(r,20000); });
-      try{ await check(); st('Depósito confirmado ✓'); return; }
-      catch(e){
-        if(!/mempool|confirma|financiado|envie/i.test((e&&e.message)||'')) throw e;
-        if(Date.now()-t0>30*60000) throw new Error('A confirmação do bloco passou de 30 min. O depósito continua valendo — volte depois e toque "Revisar e assinar" de novo: o fluxo retoma de onde parou (não reenvia).');
-      }
+    // SEM espera bloqueante (antes: loop de até 30 min preso no modal). Até 3 re-checagens rápidas
+    // cobrem o simulador/bloco imediato; seguindo pendente, devolve {pending} — o chamador fecha o
+    // modal e a retomada é AUTOMÁTICA (watch no pRefresh + auto-pull/auto-sign quando confirmar).
+    for(let i=0;i<3;i++){
+      st('Aguardando confirmação do bloco… (testnet ~10 min)');
+      await new Promise(function(r){ setTimeout(r,i?20000:4000); });
+      try{ await check(); pBtcSentClear(d); st('Depósito confirmado ✓'); return; }
+      catch(e){ if(!/mempool|confirma|financiado|envie/i.test((e&&e.message)||'')) throw e; }
     }
+    return { pending:true };
+  }
+  // Lista de PASSOS no modal (✓/⏳/·) — o usuário vê onde está dentro do "Assinar e continuar"
+  // (antes o progresso era só o texto do botão). Guardas de existência: o modal pode fechar no meio.
+  function pStepsInit(labels){
+    const el=document.getElementById('pSignSteps'); if(!el) return;
+    el.style.display='';
+    el.innerHTML=labels.map(function(l,i){ return '<div data-st="'+i+'" style="font-size:12.5px;color:var(--ink-3);margin:2px 0"><span>·</span> '+esc(l)+'</div>'; }).join('');
+    pStepsAt(0);
+  }
+  function pStepsAt(i){
+    const el=document.getElementById('pSignSteps'); if(!el) return;
+    [].forEach.call(el.children,function(row,k){ const dot=row.firstElementChild; if(!dot) return;
+      if(k<i){ dot.textContent='✓'; row.style.color='#4ade80'; } else if(k===i){ dot.textContent='⏳'; row.style.color='var(--ink)'; } else { dot.textContent='·'; row.style.color='var(--ink-3)'; } });
   }
   async function pSign(){
     const btn=$('#pRvSign'); if(btn){ btn.disabled=true; btn.textContent='Assinando na Verum Wallet…'; }
@@ -3755,8 +3890,19 @@ window.addEventListener('unhandledrejection',function(e){try{console.warn('[veru
       // 0) VENDA DE BTC: se o MEU papel tranca BTC e o cofre ainda não confirmou, o "Assinar e
       //    continuar" também ENVIA o BTC do contrato — um ato só (pagar → confirmar → assinar).
       const myF=(d.funding||[]).find(function(f){ return f.role===(pDto.viewer&&pDto.viewer.role); });
-      if(myF&&myF.status!=='FINAL'&&d.htlcVault&&d.htlcVault.from===(pDto.viewer&&pDto.viewer.role)){
-        await pFundBtcVault(d,function(t){ if(btn) btn.textContent=t; });
+      const btcFirst=!!(myF&&myF.status!=='FINAL'&&d.htlcVault&&d.htlcVault.from===(pDto.viewer&&pDto.viewer.role));
+      const stepBase=btcFirst?2:0;
+      pStepsInit((btcFirst?['Enviar o BTC ao cofre','Confirmação da rede Bitcoin']:[]).concat(['Confirmação no contrato (carteira)','Assinatura final']));
+      if(btcFirst){
+        const fr=await pFundBtcVault(d,function(t){ if(btn) btn.textContent=t; if(/Aguardando confirmação/i.test(t||'')) pStepsAt(1); });
+        // ESPERA NÃO-BLOQUEANTE: bloco ainda não confirmou → solta o usuário. O card mostra o
+        // estado com cronômetro, o pRefresh re-checa sozinho e, ao confirmar, o modal reabre e
+        // assina automaticamente (auto-pull/auto-sign). Nada se perde e nada reenvia.
+        if(fr&&fr.pending){
+          closeModal();
+          toast('BTC enviado ✓ — aguardando a confirmação da rede (~10 min). Esta tela acompanha e retoma sozinha.','ok');
+          pRefresh(); return;
+        }
         // LOCK ANTES DO OPEN: o depósito confirmado ABRIU a operação no backend (auto-open). Se a
         // vez de assinar ainda não é deste papel (ex.: comprador trancou BTC e a ordem começa no
         // Vendedor), encerra aqui com sucesso — a assinatura vem quando chegar a vez dele.
@@ -3767,8 +3913,10 @@ window.addEventListener('unhandledrejection',function(e){try{console.warn('[veru
         }
       }
       // 1) Passo ON-CHAIN pela própria carteira (escrow real).
+      pStepsAt(stepBase);
       await pOnchainStep(d,function(t){ if(btn) btn.textContent=t; });
       // 2) Assinatura da MESA (auditoria) no esquema da rede do papel.
+      pStepsAt(stepBase+1);
       const env=await pApi('/v1/deals/'+encodeURIComponent(d.id)+'/approval-envelope');
       const signature=await pSignEnvelope(env);
       await pApi('/v1/deals/'+encodeURIComponent(d.id)+'/approvals',{method:'POST',idem:'mesa-sign-'+d.id+'-'+(pDto.viewer&&pDto.viewer.role),body:{ role:pDto.viewer.role, signature, nonce:env.payload.nonce }});
@@ -3797,13 +3945,36 @@ window.addEventListener('unhandledrejection',function(e){try{console.warn('[veru
   }
   // Caixa de erro PERSISTENTE (não some como o toast): a pessoa consegue LER e PRINTAR a mensagem
   // exata — essencial no celular/dapp-browser pra diagnosticar a falha.
+  // DICIONÁRIO DE ERROS: traduz o texto técnico para uma frase que um leigo entende e AGE.
+  // A tradução é SÓ na exibição — o texto cru segue intacto em "Ver detalhes"/"Copiar erro"
+  // (ferramenta de suporte) e nos regex de roteamento (/mempool|confirma/i etc.), que leem e.message.
+  function pHumanErr(msg){
+    var m=String(msg||'');
+    if(/mempool|na fila/i.test(m)) return 'Seu envio está na fila da rede — aguarde a confirmação (~10 min na testnet). Nada se perdeu.';
+    if(/FUNDING_REQUIRED|ainda não financiado|sem depósito|Deposite no escrow/i.test(m)) return 'O depósito ainda não foi confirmado na rede. Assim que confirmar, o passo seguinte abre sozinho.';
+    if(/não registrada on-chain|createTradeV2|registerPending/i.test(m)) return 'O contrato da operação ainda está sendo registrado na rede pelo Pay Master (~1–2 min). Tente de novo em instantes.';
+    if(/allowance|approve|Autorize o token/i.test(m)) return 'Falta autorizar o valor na sua carteira. Toque de novo e confirme a autorização quando a carteira abrir.';
+    if(/TIMEOUT|não respondeu|não devolveu a assinatura/i.test(m)) return 'A Verum Wallet não respondeu. Abra a carteira, confira se está desbloqueada e tente de novo.';
+    if(/USER_REJECTED|rejected|recusad/i.test(m)) return 'A ação foi recusada na carteira. Quando quiser continuar, toque de novo.';
+    if(/Sessão necessária|sessão|401/i.test(m)) return 'Sua sessão venceu. Reconecte a Verum Wallet para continuar.';
+    if(/DEAL_EXPIRED|expirad/i.test(m)) return 'O prazo desta operação venceu. Depósitos confirmados são devolvidos automaticamente.';
+    if(/prazo de 5 minutos|turn/i.test(m)) return 'A janela de assinatura desta vez (5 min) venceu.';
+    if(/saldo insuficiente|INSUFFICIENT/i.test(m)) return 'Saldo insuficiente na carteira para esta ação.';
+    if(/RPC|ADAPTER_UNAVAILABLE|indisponível|network|fetch/i.test(m)) return 'A rede está instável neste momento. Aguarde alguns segundos e tente de novo.';
+    return null; // sem tradução: mostra o texto original em destaque
+  }
   function pErrBox(title,msg){
     var old=document.getElementById('pErrBox'); if(old) old.remove();
+    var human=pHumanErr(msg);
     var el=document.createElement('div'); el.id='pErrBox';
     el.style.cssText='position:fixed;inset:0;background:rgba(2,6,16,.82);z-index:95;display:grid;place-items:center;padding:16px';
     el.innerHTML='<div style="background:var(--card);border:1px solid #b91c1c;border-radius:16px;max-width:460px;width:100%;padding:24px">'
       +'<div style="font-family:var(--f-head);font-weight:800;font-size:17px;margin-bottom:10px;color:#fecaca">'+esc(title)+'</div>'
-      +'<div style="font-size:13px;color:var(--ink-2);white-space:pre-wrap;word-break:break-word;background:var(--bg-2);border:1px solid var(--line);border-radius:10px;padding:12px;max-height:40vh;overflow:auto">'+esc(msg)+'</div>'
+      +(human
+        ?('<div style="font-size:14px;color:var(--ink);line-height:1.5;margin-bottom:10px">'+esc(human)+'</div>'
+          +'<details style="font-size:12px;color:var(--ink-3)"><summary style="cursor:pointer">Ver detalhes técnicos</summary>'
+          +'<pre style="white-space:pre-wrap;word-break:break-word;background:var(--bg-2);border:1px solid var(--line);border-radius:10px;padding:10px;max-height:32vh;overflow:auto;margin-top:8px;font-size:11.5px">'+esc(msg)+'</pre></details>')
+        :('<div style="font-size:13px;color:var(--ink-2);white-space:pre-wrap;word-break:break-word;background:var(--bg-2);border:1px solid var(--line);border-radius:10px;padding:12px;max-height:40vh;overflow:auto">'+esc(msg)+'</div>'))
       +'<div style="display:flex;gap:8px;margin-top:14px">'
       +'<button class="btn" id="pErrCopy" style="flex:1;height:42px">Copiar erro</button>'
       +'<button class="btn btn-primary" id="pErrClose" style="flex:1;height:42px">Fechar</button>'
@@ -3893,10 +4064,11 @@ window.addEventListener('unhandledrejection',function(e){try{console.warn('[veru
         const chR=await fetch(API+'/v1/mesas/'+encodeURIComponent(P_MESA)+'/reenter/challenge',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({network:'solana',address:solAddr,addresses})});
         const ch=await chR.json(); if(!chR.ok) throw new Error(ch.message||'Esta carteira não pertence a esta mesa.');
         const net=ch.network||'solana'; const signAddr=ch.address||solAddr;
-        // DIAGNÓSTICO visível: mostra em QUAL rede/endereço a reentrada vai assinar. Se aparecer
-        // "(solana …)" para um Vendedor BTC, o reenterChallenge está devolvendo a rede errada; se
-        // "(bitcoin tb1…)" a rede está certa e o problema é na assinatura da carteira.
-        btn.textContent='Deslize para assinar ('+net+(signAddr?(' '+String(signAddr).slice(0,8)+'…'):'')+')…';
+        // Texto leigo no botão; o DIAGNÓSTICO (rede/endereço que vai assinar) fica numa linha
+        // discreta abaixo — se aparecer "solana …" para um Vendedor BTC, o reenterChallenge
+        // devolveu a rede errada; "bitcoin tb1…" certa = problema na assinatura da carteira.
+        btn.textContent='Deslize para assinar na carteira…';
+        try{ let dg=document.getElementById('pReDiag'); if(!dg){ dg=document.createElement('div'); dg.id='pReDiag'; dg.style.cssText='font-size:11px;color:var(--ink-3);margin-top:6px;text-align:center'; btn.parentNode.insertBefore(dg,btn.nextSibling); } dg.textContent='rede: '+net+(signAddr?(' · '+String(signAddr).slice(0,8)+'…'):''); }catch(e){}
         const signature=await pReenterSign(net,signAddr,ch.message);
         btn.textContent='Entrando…';
         const reR=await fetch(API+'/v1/mesas/'+encodeURIComponent(P_MESA)+'/reenter',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({network:net,address:signAddr,nonce:ch.nonce,signature})});
