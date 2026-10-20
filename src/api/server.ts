@@ -463,6 +463,7 @@ export async function buildApi(deps: ApiDeps): Promise<FastifyInstance> {
   // ---- Operação (Deal real) a partir da mesa: cria no DealEngine e expõe o estado vivo p/ a esteira ----
   // No modo EVM inclui o contrato de liquidação e as transferências (txids reais) p/ o painel do frontend.
   const refundRetryAt = new Map<string, number>(); // throttle do heal de refund no poll (por instância)
+  let lastExpireSweepAt = 0; // throttle da varredura de expiração no poll (serverless sem scheduler)
   const mesaDealView = async (d: Deal) => {
     const ev = deps.dev?.evm ?? null;
     const legs = d.terms?.legs ?? [];
@@ -904,6 +905,11 @@ export async function buildApi(deps: ApiDeps): Promise<FastifyInstance> {
   });
   app.get('/v1/portal/mesa/deal', async req => {
     const id = deps.portal.getMesaDeal(portalToken(req)); if (!id) return { deal: null };
+    // SERVERLESS SEM SCHEDULER (auditoria 2026-10-20): sem um setInterval de fundo, nada expira
+    // quando "a aba fecha e ninguém age" — justamente o incidente. O poll faz a varredura de
+    // expiração (throttle ~60 s/instância): expireDue agora RECONCILIA com o contrato (marca FINAL
+    // legs pagas on-chain) e reembolsa sozinho. Global: cura também deals de outras mesas.
+    if (Date.now() - lastExpireSweepAt > 60_000) { lastExpireSweepAt = Date.now(); try { await deps.deals.expireDue(); } catch { /* próxima rodada */ } }
     let d = await deps.deals.get(id).catch(() => null);
     // Cura deals presas (liquidação assíncrona cortada no serverless): re-hidrata o simulador
     // desta instância e liquida/retoma. `recover()` destrava registros EXECUTING órfãos.
