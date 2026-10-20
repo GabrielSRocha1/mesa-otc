@@ -11,7 +11,10 @@ export type KeyScheme = 'secp256k1' | 'ed25519';
 export type Role = 'SELLER' | 'BUYER' | 'PAYMASTER_1' | 'PAYMASTER_2';
 export type TokenStandard = 'native' | 'ERC-20' | 'SPL' | 'Token-2022' | 'TRC-20';
 export type SettlementMode = 'ESCROW_NN' | 'HTLC';
-export type RouteKind = 'ESCROW_NN' | 'HTLC' | 'MARKET';
+// LIGHTNING_SWAP: perna BTC entregue via Lightning (invoice com payment_hash = htlcHash), acoplada
+// à perna USDT do escrow V2 pela preimage — mesma estrutura de contrato do HTLC (sellerAsset=0 +
+// htlcHash), só muda o MOTOR da entrega BTC (nó LN em vez de cofre P2WSH on-chain).
+export type RouteKind = 'ESCROW_NN' | 'HTLC' | 'MARKET' | 'LIGHTNING_SWAP';
 export type Environment = 'dev' | 'testnet' | 'staging' | 'prod';
 
 export const ROLES: readonly Role[] = ['SELLER', 'BUYER', 'PAYMASTER_1', 'PAYMASTER_2'];

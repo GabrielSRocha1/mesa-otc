@@ -7,6 +7,7 @@ import { SqlStore, createPgliteClient, createPgClient, type SqlClient } from './
 import type { Store } from './db/repository.js';
 import { AdapterRegistry, type ApprovalVerifier, type DealCommitment, type SettlementAdapter } from './adapters/types.js';
 import { createLocalAdapters, LocalChainAdapter } from './adapters/local.js';
+import { createLightningService } from './adapters/lightning/index.js';
 import { verumEvmConfig, solanaConfig, tronConfig, bitcoinConfig } from './config.js';
 import { BitcoinChainAdapter } from './adapters/bitcoin.js';
 import { VerumEvmAdapter } from './adapters/verum/evm.js';
@@ -43,8 +44,8 @@ import type { Config } from './config.js';
 import type { Deal, Network, Participant, Role } from './domain/types.js';
 import type { ApprovalSignature } from './adapters/types.js';
 
-export interface AppOverrides { autoSettle?: boolean; store?: Store; adapters?: SettlementAdapter[]; priceSources?: PriceSource[]; liquiditySources?: LiquiditySource[]; screening?: WalletScreening; now?: () => number; denylist?: string[]; balanceReaders?: import('./mesa/balances.js').BalanceReaders; btcAddressOf?: (dealId: string, role: Role) => Promise<string | null>; evmAddressOf?: (dealId: string, role: Role) => Promise<string | null>; /** Runner de swap resumível (testnet): preimage HTLC fixa p/ recriar a deal com o mesmo htlcHash de um lock confirmado. */ htlcPreimageHex?: string }
-export interface App { config: Config; store: Store; adapters: AdapterRegistry; local?: { evm: LocalChainAdapter; solana: LocalChainAdapter; bitcoin: LocalChainAdapter; tron?: LocalChainAdapter }; verumEvm?: VerumEvmAdapter; verumSolana?: VerumSolanaAdapter; verumTron?: VerumTronAdapter; verumEvmKeyring?: VerumEvmDevKeyring; tronKeyring?: TronDevKeyring; registry: AssetRegistry; price: PriceEngine; liquidity: LiquidityEngine; router: RouterEngine; signature: SignatureEngine; risk: RiskEngine; audit: AuditLog; deals: DealEngine; settlement: SettlementEngine; auth: WalletAuth; identity: IdentityService; rooms: RoomService; proposals: ProposalService; mesa: import('./mesa/mesaService.js').MesaService; api: Awaited<ReturnType<typeof buildApi>>; sources: { price: StaticPriceSource[]; liquidity: StaticLiquiditySource[] }; startScheduler(): void; stopScheduler(): void; close(): Promise<void> }
+export interface AppOverrides { autoSettle?: boolean; store?: Store; adapters?: SettlementAdapter[]; priceSources?: PriceSource[]; liquiditySources?: LiquiditySource[]; screening?: WalletScreening; now?: () => number; denylist?: string[]; balanceReaders?: import('./mesa/balances.js').BalanceReaders; btcAddressOf?: (dealId: string, role: Role) => Promise<string | null>; evmAddressOf?: (dealId: string, role: Role) => Promise<string | null>; /** Runner de swap resumível (testnet): preimage HTLC fixa p/ recriar a deal com o mesmo htlcHash de um lock confirmado. */ htlcPreimageHex?: string; /** Nó Lightning injetado (rota LIGHTNING_SWAP) — mock in-process nos testes; senão vem de createLightningService. */ lightning?: import('./adapters/lightning/types.js').LightningService }
+export interface App { config: Config; store: Store; adapters: AdapterRegistry; local?: { evm: LocalChainAdapter; solana: LocalChainAdapter; bitcoin: LocalChainAdapter; tron?: LocalChainAdapter }; verumEvm?: VerumEvmAdapter; verumSolana?: VerumSolanaAdapter; verumTron?: VerumTronAdapter; verumEvmKeyring?: VerumEvmDevKeyring; tronKeyring?: TronDevKeyring; registry: AssetRegistry; price: PriceEngine; liquidity: LiquidityEngine; router: RouterEngine; signature: SignatureEngine; risk: RiskEngine; audit: AuditLog; deals: DealEngine; settlement: SettlementEngine; auth: WalletAuth; identity: IdentityService; rooms: RoomService; proposals: ProposalService; mesa: import('./mesa/mesaService.js').MesaService; lightning: import('./adapters/lightning/types.js').LightningService; lightningReal: boolean; api: Awaited<ReturnType<typeof buildApi>>; sources: { price: StaticPriceSource[]; liquidity: StaticLiquiditySource[] }; startScheduler(): void; stopScheduler(): void; close(): Promise<void> }
 
 /** Mint canônico do Wrapped SOL (mesmo em todos os clusters) — SOL como token SPL. */
 export const WSOL_MINT = 'So11111111111111111111111111111111111111112';
@@ -288,6 +289,12 @@ export async function createApp(config: Config, o: AppOverrides = {}): Promise<A
   const mesa = new MesaService({ portal, store, audit, auth, getDeal: id => store.getDeal(id), baseUrl: `https://${config.APP_DOMAIN}`, now, nativeWrapOf, btcSimulated: () => adapters.get('bitcoin') instanceof LocalChainAdapter });
   // Web Push "é sua vez": serviço (gracioso se VAPID ausente) + hook real do DealEngine. Procura a
   // mesa do deal, acha a cadeira do papel da vez e dispara a notificação para a inscrição dela.
+  // Lightning (rota LIGHTNING_SWAP): nó real quando o grupo LND_* está completo; senão o simulador
+  // in-process. Injetável nos testes via AppOverrides.lightning. Fica disponível no App; inerte até
+  // uma operação Lightning ser criada (o fluxo HTLC on-chain não é afetado).
+  const ln = createLightningService(config);
+  const lightning = o.lightning ?? ln.service;
+  const lightningReal = o.lightning ? false : ln.real;
   const push = new PushService(vapidFrom(config), logger);
   notifyTurn = (dealId, role) => {
     try {
@@ -308,7 +315,7 @@ export async function createApp(config: Config, o: AppOverrides = {}): Promise<A
     // timelock vence, sem operador rodar script. Espaçado (~2 min) p/ não spammar RPC/Esplora.
     if (ticks % 24 === 0) { for (const d of await store.listDeals({ states: ['REFUNDING'] })) { if (!d.refunds.some(r => r.status === 'PENDING')) continue; try { await deals.retryRefunds(d.id); } catch (e) { logger.warn({ dealId: d.id, err: (e as Error).message }, 'retryRefunds agendado falhou'); } } }
     if (++ticks % 720 === 0) { const purged = await store.purge(now(), 24 * 3600_000); logger.info(purged, 'retenção'); } metrics.priceBreakerOpen.set(price.breakerState().open ? 1 : 0); for (const s of ['AWAITING_SIGNATURES', 'SETTLING', 'SETTLEMENT_VALIDATION', 'REFUNDING'] as const) metrics.activeDeals.set({ state: s }, (await store.listDeals({ states: [s] })).length); } catch (e) { logger.error({ err: (e as Error).message }, 'scheduler'); } };
-  return { config, store, adapters, local, verumEvm, verumSolana, verumTron, verumEvmKeyring, tronKeyring, registry, price, liquidity, router, signature, risk, audit, deals, settlement, auth, identity, rooms, proposals, mesa, api, sources: { price: priceSources, liquidity: liquiditySources },
+  return { config, store, adapters, local, verumEvm, verumSolana, verumTron, verumEvmKeyring, tronKeyring, registry, price, liquidity, router, signature, risk, audit, deals, settlement, auth, identity, rooms, proposals, mesa, lightning, lightningReal, api, sources: { price: priceSources, liquidity: liquiditySources },
     startScheduler() { if (!timer) timer = setInterval(() => { void tick(); }, config.EXPIRY_SCAN_MS); }, stopScheduler() { if (timer) clearInterval(timer); timer = null; },
     async close() { if (timer) clearInterval(timer); timer = null; await api.close(); await store.close(); } };
 }
