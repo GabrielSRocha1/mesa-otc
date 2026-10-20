@@ -3443,7 +3443,7 @@ window.addEventListener('unhandledrejection',function(e){try{console.warn('[veru
     // GATE DE SEQUÊNCIA: turnos adiados até o PM1 registrar o contrato on-chain — o participante
     // vê o porquê da espera (sem isso parecia travado). Some sozinho quando os turnos começam.
     const regWait=(d&&d.state==='AWAITING_SIGNATURES'&&!d.turnRole&&(d.validSignatures||0)<(d.requiredSignatures||9))
-      ?'<div style="margin-top:12px;padding:10px 12px;border:1px solid var(--line);border-radius:10px;font-size:12.5px;color:var(--ink-2)">⏳ Aguardando o <b>Pay Master 1</b> registrar a operação on-chain (createTradeV2). As assinaturas abrem em seguida — esta tela atualiza sozinha.</div>':'';
+      ?'<div style="margin-top:12px;padding:10px 12px;border:1px solid var(--line);border-radius:10px;font-size:12.5px;color:var(--ink-2)">⏳ O <b>Pay Master</b> está registrando o contrato da operação na rede (~1–2 min). As assinaturas abrem em seguida — esta tela atualiza sozinha.</div>':'';
     $('#pSigns').innerHTML=(d?('Ordem: Vendedor → Pay Master 1'+((m.chairs||[]).some(c=>c.role==='PAYMASTER_2')?' → Pay Master 2':'')+' → Comprador'
       +(d.turnRole?('<br>Vez atual: <b>'+esc(M3_ROLE[d.turnRole]||d.turnRole)+'</b>'):'')) : 'A coleta de assinaturas começa após a aprovação do Pay Master.')
       +(m.irreversible?'<br><span style="color:var(--amber)">🔒 Operação irreversível — fundos trancados; o contrato roda até a liquidação (preimage) ou o reembolso após o timelock.</span>':'')
@@ -3693,7 +3693,7 @@ window.addEventListener('unhandledrejection',function(e){try{console.warn('[veru
       // (o pull acontece no sign da vez); Solana escrow = nada on-chain (custódia no sign; o fund é
       // checagem de saldo); Solana HTLC (purpose htlc_lock) = a própria tx de lock, que É o depósito.
       if(mode==='deposit'){
-        if(step&&step.kind==='evm'){ st('Aprovando o token (approve)…'); await evmApproveOnly(step); return; }
+        if(step&&step.kind==='evm'){ st('Autorizando o valor na carteira…'); await evmApproveOnly(step); return; }
         if(!(step&&step.kind==='solana'&&step.purpose==='htlc_lock'&&step.transactionBase64)) return;
       }
       if(step&&step.kind==='solana'&&step.transactionBase64){
@@ -3797,13 +3797,36 @@ window.addEventListener('unhandledrejection',function(e){try{console.warn('[veru
   }
   // Caixa de erro PERSISTENTE (não some como o toast): a pessoa consegue LER e PRINTAR a mensagem
   // exata — essencial no celular/dapp-browser pra diagnosticar a falha.
+  // DICIONÁRIO DE ERROS: traduz o texto técnico para uma frase que um leigo entende e AGE.
+  // A tradução é SÓ na exibição — o texto cru segue intacto em "Ver detalhes"/"Copiar erro"
+  // (ferramenta de suporte) e nos regex de roteamento (/mempool|confirma/i etc.), que leem e.message.
+  function pHumanErr(msg){
+    var m=String(msg||'');
+    if(/mempool|na fila/i.test(m)) return 'Seu envio está na fila da rede — aguarde a confirmação (~10 min na testnet). Nada se perdeu.';
+    if(/FUNDING_REQUIRED|ainda não financiado|sem depósito|Deposite no escrow/i.test(m)) return 'O depósito ainda não foi confirmado na rede. Assim que confirmar, o passo seguinte abre sozinho.';
+    if(/não registrada on-chain|createTradeV2|registerPending/i.test(m)) return 'O contrato da operação ainda está sendo registrado na rede pelo Pay Master (~1–2 min). Tente de novo em instantes.';
+    if(/allowance|approve|Autorize o token/i.test(m)) return 'Falta autorizar o valor na sua carteira. Toque de novo e confirme a autorização quando a carteira abrir.';
+    if(/TIMEOUT|não respondeu|não devolveu a assinatura/i.test(m)) return 'A Verum Wallet não respondeu. Abra a carteira, confira se está desbloqueada e tente de novo.';
+    if(/USER_REJECTED|rejected|recusad/i.test(m)) return 'A ação foi recusada na carteira. Quando quiser continuar, toque de novo.';
+    if(/Sessão necessária|sessão|401/i.test(m)) return 'Sua sessão venceu. Reconecte a Verum Wallet para continuar.';
+    if(/DEAL_EXPIRED|expirad/i.test(m)) return 'O prazo desta operação venceu. Depósitos confirmados são devolvidos automaticamente.';
+    if(/prazo de 5 minutos|turn/i.test(m)) return 'A janela de assinatura desta vez (5 min) venceu.';
+    if(/saldo insuficiente|INSUFFICIENT/i.test(m)) return 'Saldo insuficiente na carteira para esta ação.';
+    if(/RPC|ADAPTER_UNAVAILABLE|indisponível|network|fetch/i.test(m)) return 'A rede está instável neste momento. Aguarde alguns segundos e tente de novo.';
+    return null; // sem tradução: mostra o texto original em destaque
+  }
   function pErrBox(title,msg){
     var old=document.getElementById('pErrBox'); if(old) old.remove();
+    var human=pHumanErr(msg);
     var el=document.createElement('div'); el.id='pErrBox';
     el.style.cssText='position:fixed;inset:0;background:rgba(2,6,16,.82);z-index:95;display:grid;place-items:center;padding:16px';
     el.innerHTML='<div style="background:var(--card);border:1px solid #b91c1c;border-radius:16px;max-width:460px;width:100%;padding:24px">'
       +'<div style="font-family:var(--f-head);font-weight:800;font-size:17px;margin-bottom:10px;color:#fecaca">'+esc(title)+'</div>'
-      +'<div style="font-size:13px;color:var(--ink-2);white-space:pre-wrap;word-break:break-word;background:var(--bg-2);border:1px solid var(--line);border-radius:10px;padding:12px;max-height:40vh;overflow:auto">'+esc(msg)+'</div>'
+      +(human
+        ?('<div style="font-size:14px;color:var(--ink);line-height:1.5;margin-bottom:10px">'+esc(human)+'</div>'
+          +'<details style="font-size:12px;color:var(--ink-3)"><summary style="cursor:pointer">Ver detalhes técnicos</summary>'
+          +'<pre style="white-space:pre-wrap;word-break:break-word;background:var(--bg-2);border:1px solid var(--line);border-radius:10px;padding:10px;max-height:32vh;overflow:auto;margin-top:8px;font-size:11.5px">'+esc(msg)+'</pre></details>')
+        :('<div style="font-size:13px;color:var(--ink-2);white-space:pre-wrap;word-break:break-word;background:var(--bg-2);border:1px solid var(--line);border-radius:10px;padding:12px;max-height:40vh;overflow:auto">'+esc(msg)+'</div>'))
       +'<div style="display:flex;gap:8px;margin-top:14px">'
       +'<button class="btn" id="pErrCopy" style="flex:1;height:42px">Copiar erro</button>'
       +'<button class="btn btn-primary" id="pErrClose" style="flex:1;height:42px">Fechar</button>'
@@ -3893,10 +3916,11 @@ window.addEventListener('unhandledrejection',function(e){try{console.warn('[veru
         const chR=await fetch(API+'/v1/mesas/'+encodeURIComponent(P_MESA)+'/reenter/challenge',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({network:'solana',address:solAddr,addresses})});
         const ch=await chR.json(); if(!chR.ok) throw new Error(ch.message||'Esta carteira não pertence a esta mesa.');
         const net=ch.network||'solana'; const signAddr=ch.address||solAddr;
-        // DIAGNÓSTICO visível: mostra em QUAL rede/endereço a reentrada vai assinar. Se aparecer
-        // "(solana …)" para um Vendedor BTC, o reenterChallenge está devolvendo a rede errada; se
-        // "(bitcoin tb1…)" a rede está certa e o problema é na assinatura da carteira.
-        btn.textContent='Deslize para assinar ('+net+(signAddr?(' '+String(signAddr).slice(0,8)+'…'):'')+')…';
+        // Texto leigo no botão; o DIAGNÓSTICO (rede/endereço que vai assinar) fica numa linha
+        // discreta abaixo — se aparecer "solana …" para um Vendedor BTC, o reenterChallenge
+        // devolveu a rede errada; "bitcoin tb1…" certa = problema na assinatura da carteira.
+        btn.textContent='Deslize para assinar na carteira…';
+        try{ let dg=document.getElementById('pReDiag'); if(!dg){ dg=document.createElement('div'); dg.id='pReDiag'; dg.style.cssText='font-size:11px;color:var(--ink-3);margin-top:6px;text-align:center'; btn.parentNode.insertBefore(dg,btn.nextSibling); } dg.textContent='rede: '+net+(signAddr?(' · '+String(signAddr).slice(0,8)+'…'):''); }catch(e){}
         const signature=await pReenterSign(net,signAddr,ch.message);
         btn.textContent='Entrando…';
         const reR=await fetch(API+'/v1/mesas/'+encodeURIComponent(P_MESA)+'/reenter',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({network:net,address:signAddr,nonce:ch.nonce,signature})});
