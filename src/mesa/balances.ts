@@ -92,6 +92,12 @@ export async function validateChairBalances(mesa: MesaRecord, readers: BalanceRe
   for (const chair of mesa.chairs) {
     const label = CHAIR_ROLE_LABEL[chair.role];
     const who = chair.firstName ? `${label} (${chair.firstName})` : label;
+    // Cadeira LIGHTNING (Vendedor market-maker): o BTC é entregue pelo NÓ, não há saldo on-chain da
+    // carteira para ler. A liquidez outbound do nó é checada no precheck de liquidez Lightning.
+    if (chair.expectedAsset.network === 'lightning') {
+      chairs.push({ chairId: chair.chairId, role: chair.role, roleLabel: label, firstName: chair.firstName ?? null, assetSymbol: chair.expectedAsset.symbol, assetAmount: null, assetRequired: null, assetOk: true, gasSymbol: null, gasAmount: null, gasUsd: null, gasOk: true });
+      continue;
+    }
     if (!chair.wallet) {
       failures.push(`${who}: carteira ainda não conectada`);
       chairs.push({ chairId: chair.chairId, role: chair.role, roleLabel: label, firstName: chair.firstName ?? null, assetSymbol: chair.expectedAsset.symbol, assetAmount: null, assetRequired: null, assetOk: null, gasSymbol: null, gasAmount: null, gasUsd: null, gasOk: null });
