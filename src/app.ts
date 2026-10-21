@@ -282,14 +282,11 @@ export async function createApp(config: Config, o: AppOverrides = {}): Promise<A
   // Propostas estruturadas de alteração de termos (§5.3/§6) — porta de entrada tipada para o amend.
   const proposals = new ProposalService({ deals, now, audit, notifier: { notify: dealId => logger.info({ dealId }, 'atualização de proposta de termos') } });
   // Mesas multi-instância (v3): cadeiras + convites por cadeira + prova de posse na conexão.
-  // Embrulho canônico por rede. SOL agora fica NATIVO em TODAS as rotas Solana — o escrow N-de-N
-  // ganhou perna nativa (seller_sign_sol/buyer_sign_sol: lamports no PDA; settle/refund nativos) e
-  // o HTLC cross-chain já era nativo. ETH→WETH continua (contrato EVM é só-token em qualquer rota);
-  // BTC fica de fora (HTLC nativo próprio).
-  const nativeWrapOf = (network: string, _counterpartyNetwork: string | null): { contractOrMint: string; decimals: number } | null => {
-    if (network === 'ethereum' && verumEvmCfg?.escrowV2) return { contractOrMint: WETH_SEPOLIA, decimals: 18 };
-    return null;
-  };
+  // Embrulho canônico por rede: NENHUM. SOL fica nativo em todas as rotas Solana (lamports no PDA)
+  // e, desde o escrow V2 com perna NATIVA (sentinela EIP-7528, signV2 payable), ETH também fica
+  // nativo — sem WETH no fluxo. BTC sempre teve HTLC nativo próprio. O hook permanece para uma
+  // futura rede que exija token na liquidação.
+  const nativeWrapOf = (_network: string, _counterpartyNetwork: string | null): { contractOrMint: string; decimals: number } | null => null;
   const mesa = new MesaService({ portal, store, audit, auth, getDeal: id => store.getDeal(id), baseUrl: `https://${config.APP_DOMAIN}`, now, nativeWrapOf, btcSimulated: () => adapters.get('bitcoin') instanceof LocalChainAdapter });
   // Web Push "é sua vez": serviço (gracioso se VAPID ausente) + hook real do DealEngine. Procura a
   // mesa do deal, acha a cadeira do papel da vez e dispara a notificação para a inscrição dela.

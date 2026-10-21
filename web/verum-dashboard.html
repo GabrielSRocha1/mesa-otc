@@ -1581,7 +1581,8 @@ window.addEventListener('unhandledrejection',function(e){try{console.warn('[veru
     const {p,from}=await evmApproveOnly(step);
     const sig=await evmSignCascade(p,from,step.typedData,step.digestHex); // v4→v3→personal_sign(digest)
     const res=await submit({signature:sig,deadline:step.deadline});
-    if(res&&res.kind==='txRequest'&&res.txRequest){ const h=await p.request({method:'eth_sendTransaction',params:[{from,to:res.txRequest.to,data:res.txRequest.data}]}); await evmWaitReceipt(p,h); }
+    // Perna NATIVA (ETH puro): o signV2 vai com value — o pagamento entra na própria assinatura.
+    if(res&&res.kind==='txRequest'&&res.txRequest){ const tx={from,to:res.txRequest.to,data:res.txRequest.data}; if(res.txRequest.value&&res.txRequest.value!=='0') tx.value='0x'+BigInt(res.txRequest.value).toString(16); const h=await p.request({method:'eth_sendTransaction',params:[tx]}); await evmWaitReceipt(p,h); }
   }
   async function connectWallet(network){
     const w=window;
@@ -3346,7 +3347,8 @@ window.addEventListener('unhandledrejection',function(e){try{console.warn('[veru
   async function m3SendTxRequest(txr){
     const p=await findVerumEthProvider(); if(!p) throw new Error('Provider EVM da Verum Wallet não foi injetado nesta aba.');
     const accs=await p.request({method:'eth_requestAccounts'}); const from=accs&&accs[0];
-    const h=await p.request({method:'eth_sendTransaction',params:[{from,to:txr.to,data:txr.data}]});
+    const tx={from,to:txr.to,data:txr.data}; if(txr.value&&txr.value!=='0') tx.value='0x'+BigInt(txr.value).toString(16); // perna nativa: value junto
+    const h=await p.request({method:'eth_sendTransaction',params:[tx]});
     await evmWaitReceipt(p,h);
   }
   async function m3SignWallet(){

@@ -22,6 +22,7 @@ import { privateKeyToAccount, type PrivateKeyAccount } from 'viem/accounts';
 import type { CanonicalAsset, ChainRef, Role } from '../../domain/types.js';
 import { DomainError } from '../../domain/errors.js';
 import { Role as OnchainRole, type WalletAttestation } from '../../onchain/types.js';
+import { NATIVE_ASSET_EVM } from '../../onchain/core/index.js';
 import { signApprovalEvm, signWalletAttestationEvm, computeTradeIdEvm, evmDomain, APPROVAL_TYPES } from '../../onchain/crypto/index.js';
 import { commissionAmountOf } from '../../engines/signature.js';
 import ESCROW_V2_ABI_JSON from '../../onchain/router/abi/verumOtcEscrowV2.js';
@@ -35,6 +36,8 @@ const ESCROW_V2_ABI = ESCROW_V2_ABI_JSON as Abi;
 const MIN_GAS_WEI = 1n * 10n ** 15n;
 const TOPUP_WEI = 4n * 10n ** 15n;
 const ZERO32 = ('0x' + '0'.repeat(64)) as Hex;
+/** Perna NATIVA (ETH puro, sentinela EIP-7528): deposita via msg.value no signV2; sem approve. */
+const isNativeAsset = (a: string): boolean => a.toLowerCase() === NATIVE_ASSET_EVM.toLowerCase();
 const ERC20_ABI = [
   { type: 'function', name: 'approve', stateMutability: 'nonpayable', inputs: [{ name: 's', type: 'address' }, { name: 'v', type: 'uint256' }], outputs: [{ type: 'bool' }] },
   { type: 'function', name: 'allowance', stateMutability: 'view', inputs: [{ name: 'o', type: 'address' }, { name: 's', type: 'address' }], outputs: [{ type: 'uint256' }] },
@@ -132,11 +135,14 @@ export function buildVerumTermsV2(c: DealCommitment, chainNow: number, externalE
   const pm2Bps = split[1] ?? 0;
   const commissionPm2 = commissionBps > 0 ? cTotal * BigInt(clamp(pm2Bps)) / BigInt(commissionBps) : 0n;
   const commissionPm1 = cTotal - commissionPm2;
+  // Perna EVM com contractOrMint NULO = ativo NATIVO (ETH puro) → sentinela EIP-7528 nos termos;
+  // address(0) fica reservado para a perna EXTERNA (leg em outra rede, HTLC).
+  const assetOf = (leg: typeof sellerLeg): Hex => (leg ? ((leg.asset.contractOrMint ?? NATIVE_ASSET_EVM) as Hex) : (zeroAddress as Hex));
   return {
     participants: present.map(p => ({ wallet: walletOf(p), role: ROLE_TO_ONCHAIN[p.role] })),
-    sellerAsset: (sellerLeg?.asset.contractOrMint ?? zeroAddress) as Hex,
+    sellerAsset: assetOf(sellerLeg),
     sellerAmount: BigInt((sellerLeg ?? externalLeg)?.amountBase ?? '0'),
-    buyerAsset: (buyerLeg?.asset.contractOrMint ?? zeroAddress) as Hex,
+    buyerAsset: assetOf(buyerLeg),
     buyerAmount: buyerBase,
     platformFeeBps: c.feeBps, commissionBps: clamp(c.terms.pricing.commissionBps), discountBps: clamp(c.terms.pricing.discountBps), slippageBps: clamp(c.terms.pricing.maxSlippageBps),
     createdAt: BigInt(chainNow), expiresAt: BigInt(chainNow + 2400), termsVersion: 2,
@@ -186,12 +192,18 @@ export class VerumEvmV2Adapter implements SettlementAdapter, ParticipantStepProv
     throw new DomainError('SETTLEMENT_FAILED', `${op} on-chain falhou: ${short}`);
   }
   private view<T>(fn: string, args: unknown[] = []): Promise<T> { return this.pub.readContract({ address: this.escrowV2, abi: ESCROW_V2_ABI, functionName: fn, args }) as Promise<T>; }
-  private async write(fn: string, args: unknown[], account: PrivateKeyAccount = this.keeper): Promise<string> {
+  private async write(fn: string, args: unknown[], account: PrivateKeyAccount = this.keeper, value = 0n): Promise<string> {
     const wallet = account === this.keeper ? this.keeperWallet : createWalletClient({ chain: this.viemChain, transport: http(this.cfg.rpcUrl), account });
-    const hash = await wallet.writeContract({ address: this.escrowV2, abi: ESCROW_V2_ABI, functionName: fn, args, account, chain: this.viemChain });
+    const hash = await wallet.writeContract({ address: this.escrowV2, abi: ESCROW_V2_ABI, functionName: fn, args, account, chain: this.viemChain, value });
     const rc = await this.pub.waitForTransactionReceipt({ hash, confirmations: this.cfg.confirmations });
     if (rc.status !== 'success') throw new Error(`tx ${fn} revertida (${hash})`);
     return hash;
+  }
+  /** msg.value exigido no signV2 do papel: perna NATIVA do depositante (0 nas demais). */
+  private signValueOf(role: OnchainRole, t: RawTradeV2): bigint {
+    if (role === OnchainRole.SELLER && !t.sellerExternal && isNativeAsset(t.sellerAsset)) return t.sellerAmount + t.feeAmount;
+    if (role === OnchainRole.BUYER && isNativeAsset(t.buyerAsset)) return t.buyerAmount + t.commissionPm1 + t.commissionPm2 + (t.sellerExternal ? t.feeAmount : 0n);
+    return 0n;
   }
   private async ensureGas(address: Hex): Promise<void> {
     if (!this.keyring) return;
@@ -233,7 +245,12 @@ export class VerumEvmV2Adapter implements SettlementAdapter, ParticipantStepProv
     const checkedAt = Date.now(); const reasons: string[] = [];
     try {
       if (asset.network !== 'ethereum' || asset.chainId !== this.chain.chainId) return { ok: false, reasons: ['rede/chainId não corresponde ao adaptador'], observed: { exists: false }, checkedAt };
-      if (asset.contractOrMint === null) return { ok: false, reasons: ['escrow Verum é só-token (sem moeda nativa)'], observed: { exists: false }, checkedAt };
+      // ETH NATIVO (perna nativa do escrow V2, sentinela EIP-7528): não há contrato para auditar —
+      // a "autorização" é o protocolo da rede. Só os decimais precisam bater (18).
+      if (asset.contractOrMint === null || isNativeAsset(asset.contractOrMint)) {
+        if (asset.decimals !== 18) return { ok: false, reasons: [`ETH nativo tem 18 decimais (registro: ${asset.decimals})`], observed: { exists: true, decimals: 18, symbol: 'ETH' }, checkedAt };
+        return { ok: true, reasons: [], observed: { exists: true, decimals: 18, symbol: 'ETH', standard: 'NATIVE' }, checkedAt };
+      }
       const addr = asset.contractOrMint as Hex;
       const code = await this.pub.getCode({ address: addr });
       if (!code || code === '0x') return { ok: false, reasons: ['contrato inexistente na rede'], observed: { exists: false }, checkedAt };
@@ -319,6 +336,13 @@ export class VerumEvmV2Adapter implements SettlementAdapter, ParticipantStepProv
       // Fee acompanha a perna que a paga: vendedor on-chain OU comprador quando a perna do vendedor é externa.
       const paysFee = isSellerLeg ? !t.sellerExternal : t.sellerExternal;
       const due = base + (paysFee ? t.feeAmount : 0n);
+      if (isNativeAsset(token)) {
+        // Perna NATIVA: não existe approve — o ETH entra como msg.value na PRÓPRIA assinatura
+        // (signV2 payable). O "depósito" aqui é só o gate de saldo da carteira.
+        const balance = await this.pub.getBalance({ address: owner });
+        if (balance >= due) return this.ref('native-onsign');
+        throw new DomainError('FUNDING_REQUIRED', `Saldo de ETH insuficiente para o pagamento na assinatura: tem ${balance} wei, precisa ${due} wei (+ gás)`, { owner, balance: balance.toString(), due: due.toString(), native: true });
+      }
       const allowance = await this.pub.readContract({ address: token, abi: ERC20_ABI, functionName: 'allowance', args: [owner, this.escrowV2] }) as bigint;
       if (allowance >= due) return this.ref('approved');
       // CARTEIRA REAL (sem chave dev): allowance insuficiente é FUNDING_REQUIRED nominal — com os
@@ -352,7 +376,9 @@ export class VerumEvmV2Adapter implements SettlementAdapter, ParticipantStepProv
       // SELLER/BUYER precisam ser msg.sender (depositam na assinatura); PMs são relayáveis pelo keeper.
       const sender = role === OnchainRole.SELLER || role === OnchainRole.BUYER ? this.devAccount(evmSigner) : this.keeper;
       if (sender !== this.keeper) await this.ensureGas(sender.address);
-      const tx = await this.write('signV2', [b.meta.tradeId as Hex, BigInt(deadline), approval.signature as Hex], sender);
+      // Perna NATIVA do papel: o depósito É o msg.value do signV2 (principal + fee/comissões).
+      const value = this.signValueOf(role, t);
+      const tx = await this.write('signV2', [b.meta.tradeId as Hex, BigInt(deadline), approval.signature as Hex], sender, value);
       return this.ref(tx);
     } catch (e) { this.fail(`recordApproval:${sig.role}`, e); }
   }
@@ -450,12 +476,14 @@ export class VerumEvmV2Adapter implements SettlementAdapter, ParticipantStepProv
       const bal = await this.pub.readContract({ address: token, abi: ERC20_ABI, functionName: 'balanceOf', args: [owner] }) as bigint;
       if (bal < due) wrap = { to: token, valueWei: (due - bal).toString(), data: '0xd0e30db0' /* deposit() */ };
     };
-    if (onRole === OnchainRole.SELLER && !t.sellerExternal) {
+    // Perna NATIVA (ETH puro): nada de wrap nem approve — o pagamento é o msg.value do signV2.
+    const valueWei = this.signValueOf(onRole, t);
+    if (onRole === OnchainRole.SELLER && !t.sellerExternal && valueWei === 0n) {
       const due = t.sellerAmount + t.feeAmount;
       const allowance = await this.pub.readContract({ address: t.sellerAsset, abi: ERC20_ABI, functionName: 'allowance', args: [signer as Hex, this.escrowV2] }) as bigint;
       if (allowance < due) approve = { token: t.sellerAsset, spender: this.escrowV2, amount: due.toString() };
       await wrapIfNeeded(t.sellerAsset, signer as Hex, due);
-    } else if (onRole === OnchainRole.BUYER) {
+    } else if (onRole === OnchainRole.BUYER && valueWei === 0n) {
       const due = t.buyerAmount + t.commissionPm1 + t.commissionPm2 + (t.sellerExternal ? t.feeAmount : 0n);
       const allowance = await this.pub.readContract({ address: t.buyerAsset, abi: ERC20_ABI, functionName: 'allowance', args: [signer as Hex, this.escrowV2] }) as bigint;
       if (allowance < due) approve = { token: t.buyerAsset, spender: this.escrowV2, amount: due.toString() };
@@ -464,6 +492,8 @@ export class VerumEvmV2Adapter implements SettlementAdapter, ParticipantStepProv
     const typedData = { domain: { ...evmDomain(this.cfg.chainId, this.escrowV2), chainId: this.cfg.chainId }, types: APPROVAL_TYPES, primaryType: 'Approval' as const, message: { tradeId: b.meta.tradeId as Hex, termsHash: b.meta.termsHash as Hex, role: onRole, deadline: BigInt(deadline) } };
     return {
       kind: 'evm', chainId: this.cfg.chainId, escrow: this.escrowV2, fn: 'signV2', deadline, approve, wrap,
+      // Perna nativa: a carteira envia o signV2 com ESTE value (string wei; '0' nas demais pernas).
+      valueWei: valueWei.toString(),
       typedData: { ...typedData, message: { ...typedData.message, deadline: String(deadline) } },
       // Digest EIP-712 pronto: fallback personal_sign p/ carteiras sem typed data (o contrato
       // aceita ECDSA sobre toEthSignedMessageHash(digest)) e hash de referência p/ ERC-1271.
@@ -482,6 +512,8 @@ export class VerumEvmV2Adapter implements SettlementAdapter, ParticipantStepProv
       catch (e) { this.fail(`participantStep:${role}`, e); }
     }
     const data = encodeFunctionData({ abi: ESCROW_V2_ABI, functionName: 'signV2', args: [b.meta.tradeId as Hex, BigInt(deadline), signature as Hex] });
-    return { kind: 'txRequest', txRequest: { to: this.escrowV2, data, value: '0', chainId: this.cfg.chainId } };
+    // Perna NATIVA do papel: o signV2 vai com o value do depósito (recalculado do estado on-chain).
+    const t = await this.rawTrade(b.meta.tradeId);
+    return { kind: 'txRequest', txRequest: { to: this.escrowV2, data, value: this.signValueOf(onRole, t).toString(), chainId: this.cfg.chainId } };
   }
 }

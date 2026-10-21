@@ -8,3 +8,7 @@ export const MAX_PLATFORM_FEE_BPS = 100; // teto 1%
 export const BPS_DENOMINATOR = 10_000n;
 export const TERMS_VERSION = 1;
 export const PARTICIPANT_COUNT = 4;
+/** Sentinela do ativo NATIVO EVM (EIP-7528) no escrow V2: perna em ETH puro, sem WETH — o
+ *  depósito vai como msg.value no signV2 (payable) e o payout/refund sai por call{value}.
+ *  Espelho de VerumOTCEscrowV2Base.NATIVE_ASSET. address(0) segue sendo perna EXTERNA (HTLC). */
+export const NATIVE_ASSET_EVM = "0xEeeeeEeeeEeEeeEeEeEeeEEEeeeeEeeeeeeeEEeE";

@@ -177,6 +177,19 @@ export default [
   },
   {
     "type": "function",
+    "name": "NATIVE_ASSET",
+    "inputs": [],
+    "outputs": [
+      {
+        "name": "",
+        "type": "address",
+        "internalType": "address"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
     "name": "TERMS_TYPEHASH",
     "inputs": [],
     "outputs": [
@@ -1786,7 +1799,7 @@ export default [
       }
     ],
     "outputs": [],
-    "stateMutability": "nonpayable"
+    "stateMutability": "payable"
   },
   {
     "type": "function",
