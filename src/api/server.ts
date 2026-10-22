@@ -1063,13 +1063,21 @@ export async function buildApi(deps: ApiDeps): Promise<FastifyInstance> {
     if (isDemoMesa(mesa)) return { ok: true as const, checkedAt: deps.mesa.nowMs(), chairs: [], failures: [] as string[], demo: true };
     // Papel que JÁ assinou a operação ativa depositou no escrow — o saldo saiu da carteira dele
     // de propósito; manter a exigência viraria falso "insuficiente" logo após a assinatura.
-    const signed = new Set<string>();
+    const waived = new Set<string>();
     if (mesa.dealId) {
       const d = await deps.deals.get(mesa.dealId).catch(() => null);
-      for (const s of d?.signatures ?? []) if (s.revision === d!.revision && s.status === 'valid') signed.add(s.role);
+      if (d) {
+        for (const s of d.signatures) if (s.revision === d.revision && s.status === 'valid') waived.add(s.role);
+        // LOCK ANTES DO OPEN (HTLC/BTC): o vendedor TRANCA o ativo no cofre ANTES de assinar — a
+        // janela de 40 min do escrow não pode esperar bloco. Depois do lock a carteira dele zera de
+        // propósito; exigir o saldo na carteira virava falso "saldo insuficiente" (vermelho) e
+        // podia travar a assinatura. Papel com a perna já FINAL (trancada) é dispensado como o que
+        // assinou — o ativo está comprovadamente no escrow, não mais na carteira.
+        for (const p of d.participants) if (p.fundingRequired && p.funding === 'FINAL') waived.add(p.role);
+      }
     }
     const req = requiredOfChair(mesa);
-    return validateChairBalances(mesa as Parameters<typeof validateChairBalances>[0], readers, deps.mesa.nowMs(), chair => signed.has(chair.role) ? null : req(chair));
+    return validateChairBalances(mesa as Parameters<typeof validateChairBalances>[0], readers, deps.mesa.nowMs(), chair => waived.has(chair.role) ? null : req(chair));
   };
   /**
    * balancePreCheck — gate ÚNICO antes de sacramentar a operação: todos na mesa veem os saldos das

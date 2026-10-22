@@ -8,6 +8,7 @@ import { z } from 'zod';
 import { computeDealHash, newId, randomHex, sha256Hex, canonicalize, NETWORK_KEY_SCHEME, ROLE_ORDER, SIGNING_ORDER, PRE_SETTLING_EXPIRABLE, TERMINAL_STATES, type Deal, type DealState, type Environment, type Leg, type Participant, type Role, type Terms, type CanonicalAsset, type Network } from '../domain/types.js';
 
 import { SIGN_WINDOW_MS } from '../domain/constants.js';
+import { CREATION_WINDOW_SECONDS } from '../onchain/core/constants.js';
 /** Janela rolante por assinante: cada papel tem SIGN_WINDOW_MINUTES QUANDO chega a vez dele. */
 const SIGNER_WINDOW_MS = SIGN_WINDOW_MS;
 import { DomainError } from '../domain/errors.js';
@@ -247,14 +248,46 @@ export class DealEngine {
   async startTurnsIfRegistered(dealId: string): Promise<Deal> {
     return this.withDeal(dealId, async deal => {
       if (deal.state !== 'AWAITING_SIGNATURES' || deal.turnRole !== null || deal.validSignatures >= deal.requiredSignatures) return deal;
+      const nowSec = Math.floor(this.now() / 1000);
       for (const chain of this.registerPendingChains(deal)) {
         const st = await this.d.adapters.require(chain).getDealState(deal.id).catch(() => null);
-        if (!st || st.status === 'NONE') return deal; // registro ainda não confirmou — segue adiado
+        if (!st || st.status === 'NONE') {
+          // Registro ainda não confirmou — segue adiado. MAS a janela de criação do escrow
+          // (CREATION_WINDOW) corre a partir do `createdAt` embutido no registerTx: se o criador
+          // (PM1) não minerou o createTradeV2 dentro dela, o contrato passa a REVERTER ("createdAt
+          // muito antigo"/TradeExpired) e o retry da UI reenvia o MESMO tx morto para sempre —
+          // operação presa em "Registro on-chain pendente: execution reverted". Quando a janela do
+          // tx atual já venceu (ele JAMAIS poderá ser criado), reconstruímos o registerTx com um
+          // `createdAt` fresco: o tradeId antigo nunca existirá, então trocá-lo não perde nada.
+          const meta = deal.onChain[chain]?.meta as Record<string, unknown> | undefined;
+          const createdAt = typeof meta?.onChainCreatedAt === 'number' ? meta.onChainCreatedAt : null;
+          if (meta?.registerPending && createdAt !== null && nowSec > createdAt + CREATION_WINDOW_SECONDS) {
+            await this.refreshPendingRegister(deal, chain);
+          }
+          return deal;
+        }
       }
       this.startTurn(deal);
       await this.persist(deal, 'turn.started', 'system', { turnRole: deal.turnRole, turnExpiresAt: deal.turnExpiresAt, reason: 'register-confirmed' });
       return deal;
     });
+  }
+  /**
+   * Reconstrói o registro on-chain PENDENTE (createTradeV2 da carteira real) quando a janela de
+   * criação do tx atual expirou sem ele ser minerado. Só é chamado com o estado on-chain em NONE
+   * (trade nunca criada) — re-chamar registerDeal regera `createdAt`/tradeId/atestados com um novo
+   * now, e re-clampa o teto da Deal à nova janela de 40 min. Sem off-chain signatures ainda (turnos
+   * adiados), então trocar o tradeId é seguro.
+   */
+  private async refreshPendingRegister(deal: Deal, chain: Network): Promise<void> {
+    const c = this.commitment(deal);
+    const tx = await this.d.adapters.require(chain).registerDeal(c); // estado NONE ⇒ reconstrói com createdAt fresco
+    deal.onChain[chain] = { registered: true, revision: deal.revision, ...(tx.meta ? { meta: tx.meta } : {}) };
+    const onChainExpiresAt = typeof tx.meta?.onChainExpiresAt === 'number' ? tx.meta.onChainExpiresAt : null;
+    // Ao RENOVAR a janela, o teto deve ESTENDER (não Math.min com o valor já vencido) — limitado só
+    // pelo prazo off-chain original dos termos.
+    if (onChainExpiresAt) deal.expiresAt = Math.min((deal.terms as Terms).expiresAt, onChainExpiresAt * 1000 - this.d.config.execMarginMs);
+    await this.persist(deal, 'chain.register.refreshed', 'keeper', { chain, tx: tx.ref, reason: 'creation-window-expired' });
   }
 
   /* ---------- 8. funding (dev: simulador; prod: indexer reporta) ---------- */

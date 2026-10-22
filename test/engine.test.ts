@@ -88,6 +88,38 @@ describe('Turnos adiados (registro on-chain pendente)', () => {
     expect(after.turnExpiresAt).not.toBeNull();
     await app.close();
   }, 30_000);
+
+  it('janela de criação expirada: reconstrói o registerTx com createdAt fresco (não reenvia tx morta) e mantém turnos adiados', async () => {
+    const { app, clock } = await makeApp({ autoSettle: false });
+    const parts: Parts = { SELLER: solWallet(), BUYER: solWallet(), PAYMASTER_1: solWallet() };
+    const d = await prepareDeal(app, parts);
+    // Simula o adapter de carteira real: registro PENDENTE (meta.registerPending) e trade nunca
+    // criada on-chain (getDealState=NONE). No 1º registro (no open) o createdAt já sai FORA da janela
+    // de 5 min — mas com expiresAt no futuro, para o open adiar os turnos sem expirar a Deal.
+    const sol = app.local!.solana as unknown as { getDealState: unknown; registerDeal: unknown };
+    sol.getDealState = async () => ({ status: 'NONE', revision: 0, deposits: {}, settledLegs: {} });
+    let regCalls = 0; let staleCreatedAt = true;
+    sol.registerDeal = async () => {
+      regCalls += 1; const t = Math.floor(clock.now() / 1000);
+      const createdAt = staleCreatedAt ? t - (5 * 60 + 120) : t; // open: tx morta; rebuild: fresca
+      return { chain: 'solana', ref: 'sim', submittedAt: clock.now(), meta: { registerPending: 1, onChainCreatedAt: createdAt, onChainExpiresAt: t + 2400 } };
+    };
+    await app.deals.open(d.id, parts.SELLER.address); // registerDeal #1 (createdAt velho) → turnos adiados
+    expect((await app.deals.get(d.id)).turnRole).toBeNull();
+
+    staleCreatedAt = false; regCalls = 0; // o rebuild deve regenerar com createdAt fresco
+    const after = await app.deals.startTurnsIfRegistered(d.id);
+    expect(regCalls).toBe(1);                 // reconstruiu 1x (não reenviou a tx morta)
+    expect(after.turnRole).toBeNull();        // registro ainda NONE → segue adiado
+    const meta = (after.onChain.solana as { meta?: Record<string, number> }).meta!;
+    expect(meta.onChainCreatedAt).toBeGreaterThan(Math.floor(clock.now() / 1000) - 60); // createdAt fresco
+
+    // createdAt dentro da janela agora: a próxima passada NÃO reconstrói de novo.
+    const before = regCalls;
+    await app.deals.startTurnsIfRegistered(d.id);
+    expect(regCalls).toBe(before);
+    await app.close();
+  }, 30_000);
 });
 
 describe('Signature Engine', () => {
