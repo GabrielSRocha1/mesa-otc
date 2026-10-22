@@ -32,7 +32,6 @@ const abi = parseAbi([
   'function isTokenActive(address) view returns (bool)',
   'function addToken(address token, uint8 decimals, string symbol)',
   'function transferOwnership(address newOwner)',
-  'function NATIVE_ASSET() view returns (address)',
 ]);
 
 const account = privateKeyToAccount(ownerKey);
@@ -61,16 +60,6 @@ if (!process.argv.includes('--skip-addtoken')) {
   } else {
     await send('addToken(WETH)', 'addToken', [WETH, 18, 'WETH']);
   }
-  // ETH NATIVO (sentinela EIP-7528): o fluxo atual da mesa negocia ETH puro (contractOrMint=null →
-  // NATIVE_ASSET nos termos). validateAssets exige o ativo ACTIVE no registry — SEM exceção para o
-  // nativo —, então sem este addToken o createTradeV2 reverte TOKEN_NOT_AUTHORIZED (incidente
-  // 'execution reverted' recorrente no registro do PM1). Idempotente, como o WETH acima.
-  const native = await pub.readContract({ address: escrow, abi, functionName: 'NATIVE_ASSET' });
-  if (await pub.readContract({ address: escrow, abi, functionName: 'isTokenActive', args: [native] })) {
-    console.log('addToken: ETH nativo já ativo — pulando.');
-  } else {
-    await send(`addToken(ETH nativo ${native})`, 'addToken', [native, 18, 'ETH']);
-  }
 }
 
 const transferIdx = process.argv.indexOf('--transfer-to');
@@ -88,7 +77,6 @@ if (transferIdx !== -1) {
 const finalOwner = await pub.readContract({ address: escrow, abi, functionName: 'owner' });
 console.log(JSON.stringify({
   wethActive: await pub.readContract({ address: escrow, abi, functionName: 'isTokenActive', args: [WETH] }),
-  nativeActive: await pub.readContract({ address: escrow, abi, functionName: 'isTokenActive', args: [await pub.readContract({ address: escrow, abi, functionName: 'NATIVE_ASSET' })] }),
   owner: finalOwner,
   ownerIsHotKeeper: finalOwner.toLowerCase() === keeper.toLowerCase(), // deve ser SEMPRE false
 }, null, 2));
