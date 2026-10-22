@@ -174,6 +174,7 @@ export class VerumEvmV2Adapter implements SettlementAdapter, ParticipantStepProv
   private readonly pub: PublicClient;
   private readonly keeper: PrivateKeyAccount;
   private readonly keeperWallet: WalletClient;
+  private nativeSupported: boolean | null = null; // cache do probe NATIVE_ASSET() do escrow configurado
   constructor(private readonly cfg: VerumEvmSettings, private readonly keyring: VerumEvmDevKeyring | null, private readonly deps: VerumAdapterDeps & { evmAddressOf?: (dealId: string, role: Role) => Promise<string | null> }) {
     if (!cfg.escrowV2) throw new DomainError('INVALID_INPUT', 'VERUM_EVM_V2_ESCROW_ADDRESS ausente');
     this.escrowV2 = cfg.escrowV2;
@@ -204,6 +205,24 @@ export class VerumEvmV2Adapter implements SettlementAdapter, ParticipantStepProv
     if (role === OnchainRole.SELLER && !t.sellerExternal && isNativeAsset(t.sellerAsset)) return t.sellerAmount + t.feeAmount;
     if (role === OnchainRole.BUYER && isNativeAsset(t.buyerAsset)) return t.buyerAmount + t.commissionPm1 + t.commissionPm2 + (t.sellerExternal ? t.feeAmount : 0n);
     return 0n;
+  }
+  /**
+   * Pré-checa que o escrow CONFIGURADO aceita os ativos das pernas EVM — senão o createTradeV2
+   * reverte de forma opaca ('execution reverted') na carteira do PM1 (loop no botão "Registrar
+   * on-chain"). NATIVO (sentinela EIP-7528): exige NATIVE_ASSET() no contrato — um escrow WETH-era
+   * NÃO tem essa função, sinal de que VERUM_EVM_V2_ESCROW_ADDRESS aponta para o escrow ERRADO.
+   * TOKEN: exige isTokenActive (addToken do owner). Falha com motivo ACIONÁVEL no backend em vez de
+   * entregar à carteira um tx fadado a reverter. `0x0…0` = perna EXTERNA (HTLC) → sem ativo aqui. */
+  private async assertAssetsAcceptable(terms: TermsV2Call): Promise<void> {
+    for (const asset of [terms.sellerAsset, terms.buyerAsset] as Hex[]) {
+      if (/^0x0{40}$/i.test(asset)) continue;
+      if (isNativeAsset(asset)) {
+        if (this.nativeSupported === null) this.nativeSupported = await this.view('NATIVE_ASSET').then(() => true, () => false);
+        if (!this.nativeSupported) throw new DomainError('SETTLEMENT_NOT_ALLOWED', `O escrow V2 configurado (${this.escrowV2}) NÃO suporta ETH nativo — aponte VERUM_EVM_V2_ESCROW_ADDRESS para o escrow nativo (EIP-7528) e reinicie o backend.`);
+      } else if (!(await this.view<boolean>('isTokenActive', [asset]).catch(() => false))) {
+        throw new DomainError('SETTLEMENT_NOT_ALLOWED', `Token ${asset} não está habilitado no escrow V2 (${this.escrowV2}) — o owner precisa rodar addToken antes de operar este ativo.`);
+      }
+    }
   }
   private async ensureGas(address: Hex): Promise<void> {
     if (!this.keyring) return;
@@ -287,6 +306,7 @@ export class VerumEvmV2Adapter implements SettlementAdapter, ParticipantStepProv
       const externalEvm = extPart && /^0x[0-9a-fA-F]{40}$/.test(extPart.address) ? extPart.address : await this.deps.evmAddressOf?.(c.dealId, extRole) ?? null;
       const terms = buildVerumTermsV2(c, now, externalEvm);
       const map = evmLegMapOf(c);
+      await this.assertAssetsAcceptable(terms); // falha cedo e claro se o escrow não aceitar o ativo (ex.: env no escrow errado)
       // Hash pelo PRÓPRIO contrato (função pure) — zero chance de divergência de EIP-712 off-chain.
       const termsHash = await this.view<Hex>('hashTermsV2', [terms]);
       const tradeId = computeTradeIdEvm(this.cfg.chainId, this.escrowV2, termsHash);
