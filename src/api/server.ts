@@ -1080,9 +1080,15 @@ export async function buildApi(deps: ApiDeps): Promise<FastifyInstance> {
     // Papel que JÁ assinou a operação ativa depositou no escrow — o saldo saiu da carteira dele
     // de propósito; manter a exigência viraria falso "insuficiente" logo após a assinatura.
     const waived = new Set<string>();
+    const dealRequired = new Map<string, number>(); // exigência por papel vinda dos termos do deal
     if (mesa.dealId) {
       const d = await deps.deals.get(mesa.dealId).catch(() => null);
       if (d) {
+        // Exigência AUTORITATIVA por papel a partir dos termos congelados (preço/câmbio já aplicados):
+        // cobre o valor que o COMPRADOR paga mesmo sem `buyerAmountInBase` configurado. Sem isto só o
+        // gás era checado do lado do pagamento e um comprador com gás mas sem ETH suficiente passava
+        // no gate e só falhava no depósito on-chain (signV2) — 'execution reverted' / saldo.
+        for (const leg of d.terms?.legs ?? []) dealRequired.set(leg.from, Number(BigInt(leg.amountBase)) / 10 ** leg.asset.decimals);
         for (const s of d.signatures) if (s.revision === d.revision && s.status === 'valid') waived.add(s.role);
         // LOCK ANTES DO OPEN (HTLC/BTC): o vendedor TRANCA o ativo no cofre ANTES de assinar — a
         // janela de 40 min do escrow não pode esperar bloco. Depois do lock a carteira dele zera de
@@ -1093,7 +1099,7 @@ export async function buildApi(deps: ApiDeps): Promise<FastifyInstance> {
       }
     }
     const req = requiredOfChair(mesa);
-    return validateChairBalances(mesa as Parameters<typeof validateChairBalances>[0], readers, deps.mesa.nowMs(), chair => waived.has(chair.role) ? null : req(chair));
+    return validateChairBalances(mesa as Parameters<typeof validateChairBalances>[0], readers, deps.mesa.nowMs(), chair => waived.has(chair.role) ? null : (dealRequired.get(chair.role) ?? req(chair)));
   };
   /**
    * balancePreCheck — gate ÚNICO antes de sacramentar a operação: todos na mesa veem os saldos das

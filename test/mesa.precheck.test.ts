@@ -96,4 +96,44 @@ describe('balancePreCheck — rota e gate de assinatura', () => {
     expect(cancel.statusCode, cancel.body).toBe(200);
     await app.close();
   }, 60_000);
+
+  it('exigência do COMPRADOR vem da perna do deal (ETH), não só do gás: comprador com gás mas sem ETH suficiente é barrado', async () => {
+    // Leitores mock: 0,01 ETH na conta (gás US$ 20 → passa), mas a perna do comprador pede 0,034 ETH.
+    const readers = {
+      native: async () => ({ amount: 0.01 }),
+      tokens: async () => [],
+      priceUsdOf: async () => 2000,
+      tokenDirect: async () => null,
+    };
+    const { app } = await makeApp({ balanceReaders: readers as never });
+    const r = await app.api.inject({ method: 'POST', url: '/v1/portal/register', payload: { name: 'PM', email: uniqueEmail('buyeramt'), password: 'senha-forte-1' } });
+    const token = r.json<{ token: string }>().token;
+    const mesaId = (await app.api.inject({ method: 'POST', url: '/v1/portal/mesas', headers: pmHeaders(token), payload: { network: 'ethereum', chairs: [
+      { role: 'SELLER', expectedAsset: { network: 'bitcoin', contractOrMint: null, decimals: 8, symbol: 'BTC' } },
+      { role: 'BUYER', expectedAsset: { network: 'ethereum', contractOrMint: null, decimals: 18, symbol: 'ETH' } },
+    ] } })).json<{ mesaId: string }>().mesaId;
+    // Conecta carteiras direto nas cadeiras (simula o join multichain).
+    const mesa = app.mesa.mesaById(mesaId)!;
+    mesa.chairs.find(c => c.role === 'SELLER')!.wallet = { network: 'bitcoin', address: 'tb1qseller', addresses: [{ network: 'bitcoin', address: 'tb1qseller' }] } as never;
+    mesa.chairs.find(c => c.role === 'BUYER')!.wallet = { network: 'ethereum', address: '0x1111111111111111111111111111111111111111', addresses: [{ network: 'ethereum', address: '0x1111111111111111111111111111111111111111' }] } as never;
+    // Deal vinculado com a perna do COMPRADOR exigindo 0,034 ETH; VENDEDOR já FINAL (dispensado).
+    const deal = {
+      id: 'OTC-buyeramt-1', state: 'AWAITING_SIGNATURES', revision: 1, createdAt: Date.now(), expiresAt: Date.now() + 3600_000, version: 1,
+      requiredSignatures: 2, validSignatures: 0, signatures: [],
+      participants: [
+        { role: 'SELLER', address: 'tb1qseller', fundingRequired: true, funding: 'FINAL' },
+        { role: 'BUYER', address: '0x1111111111111111111111111111111111111111', fundingRequired: true, funding: 'PENDING' },
+      ],
+      terms: { legs: [
+        { index: 0, from: 'SELLER', to: 'BUYER', asset: { network: 'bitcoin', contractOrMint: null, decimals: 8 }, amountBase: '20000', escrowChain: 'bitcoin', mode: 'HTLC' },
+        { index: 1, from: 'BUYER', to: 'SELLER', asset: { network: 'ethereum', contractOrMint: null, decimals: 18 }, amountBase: '34000000000000000', escrowChain: 'ethereum', mode: 'escrow' },
+      ] },
+    } as unknown as Deal;
+    await app.store.insertDeal(deal);
+    app.mesa.attachDeal(mesa, deal.id);
+    const body = (await app.api.inject({ method: 'GET', url: `/v1/portal/mesas/${mesaId}/precheck`, headers: pmHeaders(token) })).json<{ ok: boolean; failures: string[] }>();
+    expect(body.ok).toBe(false);
+    expect(body.failures.join(' | ')).toMatch(/Comprador: saldo de ETH insuficiente/);
+    await app.close();
+  }, 60_000);
 });
