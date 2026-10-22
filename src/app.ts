@@ -331,6 +331,12 @@ export async function createApp(config: Config, o: AppOverrides = {}): Promise<A
     // retentadas pelo keeper — é assim que o refund BTC pós-CSV (~48h) sai SOZINHO quando o
     // timelock vence, sem operador rodar script. Espaçado (~2 min) p/ não spammar RPC/Esplora.
     if (ticks % 24 === 0) { for (const d of await store.listDeals({ states: ['REFUNDING'] })) { if (!d.refunds.some(r => r.status === 'PENDING')) continue; try { await deals.retryRefunds(d.id); } catch (e) { logger.warn({ dealId: d.id, err: (e as Error).message }, 'retryRefunds agendado falhou'); } } }
+    // CURA DE FUNDOS PRESOS (incidente refund BTC 2026-10-22): deal que expirou ANTES do lock BTC
+    // confirmar nunca chegava a REFUNDING (reconciliação de expireNow é one-shot + exige confs).
+    // Relemos o on-chain das EXPIRED com funding exigido e ainda sem reembolso; se o depósito
+    // apareceu, abrimos o reembolso e o retry acima o completa quando o CSV vencer. Espaçado p/ não
+    // martelar o Esplora.
+    if (ticks % 24 === 0) { for (const d of await store.listDeals({ states: ['EXPIRED'] })) { if (!d.refunds.length && d.participants.some(p => p.fundingRequired)) { try { await deals.recoverExpiredFunding(d.id); } catch (e) { logger.warn({ dealId: d.id, err: (e as Error).message }, 'recoverExpiredFunding agendado falhou'); } } } }
     // FRENTE C (auditoria 2026-10-20): deal em LIQUIDITY_VERIFIED com perna HTLC cujo lock BTC JÁ
     // confirmou on-chain abre SOZINHA — sem depender de alguém tocar o endpoint de depósito. O open()
     // detecta o lock (registra o cofre sem tx + lê o Esplora) e segue; se ainda não confirmou, lança

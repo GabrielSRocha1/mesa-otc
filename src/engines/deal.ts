@@ -455,6 +455,27 @@ export class DealEngine {
   /** Reprocessa reembolsos pendentes (recuperação após falha de RPC). */
   async retryRefunds(dealId: string): Promise<Deal> { return this.withDeal(dealId, async deal => { if (deal.state !== 'REFUNDING') return deal; deal.refunds = deal.refunds.filter(r => r.status !== 'PENDING'); await this.refundAll(deal, 'keeper', false); return deal; }); }
 
+  /**
+   * CURA de fundos presos (incidente refund BTC 2026-10-22): a reconciliação de `expireNow` é
+   * ONE-SHOT e exige `confirmations` confirmações, mas a janela de turno (~5 min) vence muito antes
+   * do lock BTC confirmar (signet ~30 min p/ 3 confs). Um depósito que confirma DEPOIS da expiração
+   * nunca era reconciliado: a deal parava em EXPIRED, jamais ia a REFUNDING e o loop de retry
+   * (condicionado a REFUNDING) nunca engatava — fundos presos no HTLC sem caminho de volta. Aqui
+   * relemos o on-chain de uma deal EXPIRED e, se o funding apareceu, abrimos o reembolso
+   * (EXPIRED→REFUNDING é transição legal). NÃO liquida nada: devolve fundos de uma deal MORTA, sem
+   * ferir a invariante N/N. O refund BTC ainda respeita o timelock CSV — se imaturo, fica PENDING e
+   * o retry periódico o completa quando o CSV vencer. */
+  async recoverExpiredFunding(dealId: string): Promise<Deal> {
+    return this.withDeal(dealId, async deal => {
+      if (deal.state !== 'EXPIRED') return deal;
+      const { anyFunded } = await this.reconcileFundingFromChain(deal, 'system');
+      if (!anyFunded) return deal;
+      await this.transition(deal, 'REFUNDING', 'system');
+      await this.refundAll(deal, 'keeper', false);
+      return deal;
+    });
+  }
+
   /** Fachada estreita para o Settlement Engine (não expõe criação/assinatura). */
   mutator(): DealMutator { return { withDeal: (id, fn) => this.withDeal(id, fn), transition: (d, to, a, p) => this.transition(d, to, a, p), persist: (d, t, a, p) => this.persist(d, t, a, p), refundAll: (d, a) => this.refundAll(d, a, false) }; }
 

@@ -425,7 +425,7 @@ export async function buildApi(deps: ApiDeps): Promise<FastifyInstance> {
   /* ---------- backoffice ---------- */
   app.get('/ops/deals', async req => { requireOperator(req); return (await deps.store.listDeals()).map(short); });
   app.post('/ops/deals/:id/block', async (req, reply) => { const s = requireOperator(req); const { id } = req.params as { id: string }; const b = parse(z.object({ reason: z.string().min(5).max(500) }), req.body); return idempotent(req, reply, async () => deps.deals.view(await deps.deals.block(id, b.reason, 'OPS · manual', `op:${s.sub}`), null, true)); });
-  app.post('/ops/deals/:id/refund', async (req, reply) => { const s = requireOperator(req); const { id } = req.params as { id: string }; return idempotent(req, reply, async () => { await deps.audit.append({ actorType: 'operator', actorId: s.sub, category: 'ops.refund.retry', dealId: id, payload: {} }); return deps.deals.view(await deps.deals.retryRefunds(id), null, true); }); });
+  app.post('/ops/deals/:id/refund', async (req, reply) => { const s = requireOperator(req); const { id } = req.params as { id: string }; return idempotent(req, reply, async () => { await deps.audit.append({ actorType: 'operator', actorId: s.sub, category: 'ops.refund.retry', dealId: id, payload: {} }); const cur = await deps.deals.get(id).catch(() => null); const d = cur?.state === 'EXPIRED' ? await deps.deals.recoverExpiredFunding(id) : await deps.deals.retryRefunds(id); return deps.deals.view(d, null, true); }); });
   app.get('/ops/price/breaker', async req => { requireOperator(req); return deps.price.breakerState(); });
   app.post('/ops/price/breaker/reset', async (req, reply) => { const s = requireOperator(req); return idempotent(req, reply, async () => { deps.price.resetBreaker(); await deps.audit.append({ actorType: 'operator', actorId: s.sub, category: 'ops.price.breaker.reset', dealId: null, payload: {} }); return deps.price.breakerState(); }); });
   app.get('/ops/risk/:id', async req => { requireOperator(req); const { id } = req.params as { id: string }; return deps.store.listRiskEvents(id); });
@@ -926,6 +926,15 @@ export async function buildApi(deps: ApiDeps): Promise<FastifyInstance> {
     if (d && d.state === 'REFUNDING' && d.refunds.some(r => r.status === 'PENDING') && Date.now() - (refundRetryAt.get(id) ?? 0) > 90_000) {
       refundRetryAt.set(id, Date.now());
       try { d = await deps.deals.retryRefunds(id); } catch { /* fica PENDING até a próxima */ }
+    }
+    // CURA DE FUNDOS PRESOS (incidente refund BTC 2026-10-22): deal que expirou ANTES do lock BTC
+    // confirmar nunca chegava a REFUNDING (reconciliação de expireNow é one-shot + exige confs), e o
+    // retry acima — condicionado a REFUNDING — nunca engatava. Aqui relemos o on-chain de uma EXPIRED
+    // com funding exigido e sem reembolso; se o depósito apareceu, abrimos o reembolso (o retry o
+    // completa quando o CSV vencer). Mesmo throttle por instância (90 s): cada tentativa toca a rede.
+    if (d && d.state === 'EXPIRED' && !d.refunds.length && d.participants.some(p => p.fundingRequired) && Date.now() - (refundRetryAt.get(id) ?? 0) > 90_000) {
+      refundRetryAt.set(id, Date.now());
+      try { d = await deps.deals.recoverExpiredFunding(id); } catch { /* próxima rodada */ }
     }
     return { deal: d ? await mesaDealView(d) : null };
   });
@@ -1439,6 +1448,14 @@ export async function buildApi(deps: ApiDeps): Promise<FastifyInstance> {
     if (d.state === 'REFUNDING' && d.refunds.some(r => r.status === 'PENDING') && Date.now() - (refundRetryAt.get(dealId) ?? 0) > 90_000) {
       refundRetryAt.set(dealId, Date.now());
       try { await deps.deals.retryRefunds(dealId); } catch { /* fica PENDING até a próxima */ }
+    }
+    // CURA DE FUNDOS PRESOS (incidente refund BTC 2026-10-22): deal que expirou ANTES do lock BTC
+    // confirmar parava em EXPIRED e nunca ia a REFUNDING, então o retry acima nunca engatava.
+    // Relemos o on-chain e, se o depósito tardio apareceu, abrimos o reembolso (o retry o completa
+    // quando o CSV vencer). Mesmo throttle por instância (90 s).
+    if (d.state === 'EXPIRED' && !d.refunds.length && d.participants.some(p => p.fundingRequired) && Date.now() - (refundRetryAt.get(dealId) ?? 0) > 90_000) {
+      refundRetryAt.set(dealId, Date.now());
+      try { await deps.deals.recoverExpiredFunding(dealId); } catch { /* próxima rodada */ }
     }
   };
   app.get('/v1/mesas/:mesaId', async req => {
