@@ -373,9 +373,16 @@ export async function buildApi(deps: ApiDeps): Promise<FastifyInstance> {
   };
   app.get('/v1/deals/:id/onchain-tx', async req => {
     const s = requireSession(req); const { id } = req.params as { id: string };
-    const d = await deps.deals.get(id);
+    let d = await deps.deals.get(id);
     const me = requireParticipant(d, s);
     if (!d.terms?.legs.length) throw new DomainError('SETTLEMENT_NOT_ALLOWED', 'termos não congelados');
+    // REGISTRO PENDENTE SEMPRE FRESCO (incidente 'execution reverted' recorrente): o createTradeV2
+    // entregue à carteira do PM1 carrega um `createdAt` assado no open(); passados 5 min (CREATION_
+    // WINDOW) o contrato reverte 'createdAt muito antigo' e buildParticipantStep seguia servindo o
+    // MESMO tx morto. O refresh só vinha pelo poll — que pode nem rodar (mesa excluída/serverless),
+    // prendendo o registro. Aqui, no próprio fetch da carteira, reusamos a lógica testada que
+    // reconstrói o registerTx vencido quando o trade ainda é NONE on-chain, antes de entregá-lo.
+    if (d.state === 'AWAITING_SIGNATURES' && d.turnRole === null) { try { await deps.deals.startTurnsIfRegistered(id); d = await deps.deals.get(id); } catch { /* serve o atual */ } }
     return stepAdapterOf(d, me.role).buildParticipantStep(id, me.role, s.address);
   });
   app.post('/v1/deals/:id/onchain-tx', async (req, reply) => {
