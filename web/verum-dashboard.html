@@ -3548,7 +3548,7 @@ window.addEventListener('unhandledrejection',function(e){try{console.warn('[veru
         +'<b style="color:var(--amber)">Depósito BTC pendente</b>'
         +'<div style="font-size:12.5px;color:var(--ink-2);margin-top:4px">Envie <b class="mono">'+esc(btcHuman)+' BTC</b> ('+esc(String(d.htlcVault.requiredSat))+' sats) ao cofre desta operação.</div>'
         +sentHtml
-        +(!sentAt&&canPay?'<button class="btn btn-primary btn-block" id="pVaultPay" style="height:44px;margin:8px 0">Pagar com a carteira ('+esc(btcHuman)+' BTC)</button>':'')
+        +'' /* botão "Pagar com a carteira" REMOVIDO: "Revisar e assinar" já paga pela carteira (pFundBtcVault) e assina no mesmo ato — um CTA só, sem duplicar */
         +(sentAt?'':'<details'+(canPay?'':' open')+' style="margin-top:4px"><summary style="cursor:pointer;font-size:12px;color:var(--ink-3)">'+(canPay?'Prefere enviar manualmente?':'Enviar manualmente')+'</summary>'+manualBody+'</details>')
         +'<div style="font-size:11.5px;color:var(--ink-3);margin-top:6px">Você pode enviar a qualquer momento (independe da contraparte). Se a operação não se completar, o valor volta para você após o prazo de segurança.</div>'
         +'</div>';
@@ -3616,25 +3616,8 @@ window.addEventListener('unhandledrejection',function(e){try{console.warn('[veru
       catch(e){ if(!pStaleSession(e)) pErrBox('Invoice Lightning',((e&&e.code)?('['+e.code+'] '):'')+((e&&e.message)||String(e))); lns.disabled=false; lns.textContent='Gerar invoice de teste (ambiente simulado)'; }
     });
     if(fundHtml&&d&&d.htlcVault){
-      const bp=$('#pVaultPay'); if(bp) bp.addEventListener('click',async function(){
-        bp.disabled=true; bp.textContent='Confirme na Verum Wallet…';
-        try{
-          const prov=solProvider(); try{ await prov.connect(); }catch(e){}
-          const sats=String(d.htlcVault.requiredSat); const v=String(BigInt(sats)).padStart(9,'0'); const fr=v.slice(-8).replace(/0+$/,''); const amount=(v.slice(0,-8)||'0')+(fr?'.'+fr:'');
-          const r=await withSigTimeout(prov.signAndSendPayment({ network:'bitcoin', outputs:[{ address:d.htlcVault.address, amount:amount, asset:{kind:'native'} }], memo:null }),'bitcoin');
-          pBtcSentMark(d, r&&r.txHash); // card passa ao estado "enviado — aguardando" no próximo render
-          toast('BTC enviado ao cofre ✓ '+((r&&r.txHash)?shortAddr(r.txHash):''),'ok');
-          bp.textContent='Enviado — aguardando confirmação…';
-          // Verificação imediata: normalmente ainda está no mempool (aguardando bloco) — informa
-          // sem assustar; quando confirmar, o "Já enviei — verificar" (ou a assinatura) conclui.
-          try{ await pApi('/v1/deals/'+encodeURIComponent(d.id)+'/legs/'+d.htlcVault.legIndex+'/deposit',{method:'POST',idem:'fund-'+d.id+'-'+me.role}); toast('Depósito confirmado ✓','ok'); pRefresh(); }
-          catch(e2){ if(/mempool|confirma/i.test((e2&&e2.message)||'')) toast('No mempool — aguarde a confirmação do bloco e toque "Já enviei — verificar".','ok'); else if(!pStaleSession(e2)) pErrBox('Verificação do depósito',((e2&&e2.code)?('['+e2.code+'] '):'')+((e2&&e2.message)||String(e2))); }
-        }catch(e){
-          // UNSUPPORTED/flag off/toggle de rede errado → cai no fluxo manual (endereço continua no card).
-          pErrBox('Pagamento pela carteira falhou',(((e&&e.code)?('['+e.code+'] '):'')+((e&&e.message)||String(e)))+'\n\nAlternativa: envie manualmente os sats pelo caminho "Prefere enviar manualmente?" do card e toque "Já enviei — verificar". Se o erro citar rede/ambiente, confira se a Verum Wallet está no modo testnet.');
-        }
-        finally{ bp.disabled=false; bp.textContent='Pagar com a carteira'; }
-      });
+      // (handler do antigo "Pagar com a carteira" removido — o pagamento BTC é feito pelo
+      //  "Revisar e assinar" → pSign → pFundBtcVault, que já marca o enviado e retoma a assinatura.)
       const bc=$('#pVaultCopy'); if(bc) bc.addEventListener('click',function(){ clip(d.htlcVault.address); toast('Endereço do cofre copiado','ok'); });
       const bv=$('#pVaultCheck'); if(bv) bv.addEventListener('click',async function(){
         bv.disabled=true; bv.textContent='Verificando na rede…';
@@ -3661,7 +3644,15 @@ window.addEventListener('unhandledrejection',function(e){try{console.warn('[veru
     // sozinha e a assinatura segue, sem o participante tocar em mais nada. O card de depósito
     // continua como fallback manual (carteira antiga / envio por fora).
     const preOpenPay=!!(d&&d.state==='LIQUIDITY_VERIFIED'&&d.htlcVault&&d.htlcVault.from===me.role&&myFund);
-    $('#pSignBtn').style.display=(myTurn||preOpenPay)?'':'none';
+    const _psb=$('#pSignBtn');
+    _psb.style.display=(myTurn||preOpenPay)?'':'none';
+    // DEPÓSITO NO MEMPOOL: enviado o BTC e ainda sem confirmação do bloco, o botão "Revisar e
+    // assinar" fica INATIVO — não dá para assinar/avançar antes do lock confirmar e o Pay Master
+    // registrar o contrato on-chain. Antes de enviar (preciso pagar) e na minha vez de assinar,
+    // segue ativo. A tela retoma sozinha quando confirma (auto-sign).
+    const _waitConfirm=preOpenPay&&!!pBtcSentAt(d);
+    _psb.disabled=_waitConfirm;
+    _psb.textContent=_waitConfirm?'Aguardando confirmação do depósito…':'Revisar e assinar';
     // POP-UP para o PARTICIPANTE fora da vez: a cada avanço da rodada mostra quem está assinando
     // agora / quem acabou de assinar; na liquidação, confirma. (Na SUA vez o modal de assinatura
     // abre sozinho logo abaixo — o pop-up informativo não compete com ele.)
