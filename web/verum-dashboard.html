@@ -1121,6 +1121,24 @@ window.addEventListener('unhandledrejection',function(e){try{console.warn('[veru
           <div id="ixRows" class="op-deal-list" style="margin-top:6px"><p style="color:var(--ink-3);font-size:12.5px;margin:0">Carregando…</p></div>
         </section>
       </div>
+      <!-- Criação de operação indexada (lógica própria da aba) -->
+      <div id="ixCreate" style="display:none">
+        <section class="card" style="margin-bottom:16px">
+          <div class="card-h"><div class="t">Nova operação indexada</div><span class="badge info">Indexado ao Verum Swap</span></div>
+          <button class="btn" id="ixCreateBack" type="button" style="height:32px;font-size:12px;margin-bottom:10px"><svg viewBox="0 0 24 24"><path d="M19 12H5M11 6l-6 6 6 6"/></svg>Voltar</button>
+          <div class="form-row"><div><div class="fl">Rótulo (opcional)</div><div class="fh">Só você vê</div></div><input class="inp" id="ixcLabel" placeholder="ex.: cliente de terça" style="max-width:240px"></div>
+          <div class="form-row"><div><div class="fl">Moeda do Vendedor</div><div class="fh">Ativo que o Vendedor entrega</div></div><div class="netfield" id="ixcSellField" style="max-width:300px" title="Escolher moeda">Escolher moeda</div></div>
+          <div class="form-row"><div><div class="fl">Moeda do Comprador</div><div class="fh">Ativo que o Comprador entrega</div></div><div class="netfield" id="ixcBuyField" style="max-width:300px" title="Escolher moeda">Escolher moeda</div></div>
+          <div class="form-row"><div><div class="fl">Quantidade do Vendedor</div><div class="fh" id="ixcAmountHint">Valor-base da indexação</div></div><div style="text-align:right"><input class="inp" id="ixcAmount" inputmode="decimal" placeholder="Ex.: 250" style="min-width:150px;text-align:right"><div class="fh mono" id="ixcAmountBase" style="margin-top:4px"></div></div></div>
+          <div class="form-row"><div><div class="fl">Spread (bps)</div><div class="fh">Positivo = a favor do Vendedor · negativo = a favor do Comprador</div></div><input class="inp" id="ixcSpread" type="number" step="1" value="0" style="max-width:120px;text-align:right"></div>
+          <div class="form-row"><div><div class="fl">Deságio (%)</div><div class="fh">Desconto no ativo do Vendedor</div></div><input class="inp" id="ixcDiscount" type="number" min="0" max="20" step="0.1" value="0" style="max-width:110px;text-align:right"></div>
+          <div class="form-row"><div><div class="fl">Comissão (%)</div><div class="fh">Paga aos Pay Masters</div></div><input class="inp" id="ixcCommission" type="number" min="0" max="50" step="0.1" value="0" style="max-width:110px;text-align:right"></div>
+          <div class="form-row" style="border-bottom:none"><div><div class="fl">Pay Masters</div><div class="fh">1 ou 2 custodiantes</div></div><select class="inp" id="ixcPMs" style="max-width:150px"><option value="1">1 Pay Master</option><option value="2">2 Pay Masters</option></select></div>
+          <div class="fh" id="ixcPlanHint" style="margin:8px 0;min-height:16px;color:var(--ink-3)"></div>
+          <button class="btn btn-primary btn-block" id="ixCreateSubmit" type="button"><svg viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg>Criar operação indexada</button>
+          <div class="fh" style="margin-top:10px;color:var(--ink-3);line-height:1.5">Após criar: convide os participantes, e quando todos conectarem toque em <b>Fixar preço agora</b>. O preço é congelado no momento do fixing.</div>
+        </section>
+      </div>
       <!-- Painel de uma operação -->
       <div id="ixPanel" style="display:none">
         <section class="card" style="margin-bottom:16px">
@@ -1348,7 +1366,7 @@ window.addEventListener('unhandledrejection',function(e){try{console.warn('[veru
     // Hub de Operações: carrega lista de mesas + todas as operações.
     if(view==='carteiras'){ try{ if(typeof m3LoadList==='function') m3LoadList(); if(typeof opLoadAll==='function') opLoadAll(); }catch(e){} }
     // Operar Indexado: ao entrar na aba, mostra a lista; ao sair, para o polling do painel.
-    if(view==='indexado'){ try{ ixSel=null; if(typeof ixShow==='function'){ ixShow(false); ixLoadList(); } }catch(e){} }
+    if(view==='indexado'){ try{ ixSel=null; if(typeof ixView==='function'){ ixView('list'); ixLoadList(); } }catch(e){} }
     else { try{ if(ixPoll){ clearInterval(ixPoll); ixPoll=null; } if(ixTickTimer){ clearInterval(ixTickTimer); ixTickTimer=null; } }catch(e){} }
   }
   // ── Sidebar responsiva (mobile): gaveta aberta pelo hambúrguer ──────────────
@@ -2731,7 +2749,6 @@ window.addEventListener('unhandledrejection',function(e){try{console.warn('[veru
     m3OpenCreate();
   }
   function m3ExitCreate(){
-    window.__ixFlow=false; // não vaza o fluxo "Operar Indexado" para uma próxima criação normal
     m3Step(0);
     ['#m3ListCard','#opAllCard','#mesaSlots','#mesaSlotsHead'].forEach(sel=>{ const el=$(sel); if(el) el.style.display=''; });
     const t=$('#m3HubTitle'); if(t) t.textContent='Operações';
@@ -2833,8 +2850,6 @@ window.addEventListener('unhandledrejection',function(e){try{console.warn('[veru
       // Config salva na sequência — a mesa já nasce pronta para convidar e aprovar.
       await pmApi('/v1/portal/mesas/'+mesa.mesaId+'/config',{method:'PATCH',body:{ amountInBase:d.amountInBase, buyerAmountInBase:d.buyerAmountInBase, discountBps:d.discountBps, commissionBps:d.commissionBps, commissionPayer:d.commissionPayer }});
       toast('Mesa '+mesa.code+' criada · operação '+(mesa.operationCode||''),'ok');
-      // Operar Indexado: criada pela aba dedicada → marca a mesa como indexada e vai para o painel indexado.
-      if(window.__ixFlow){ window.__ixFlow=false; try{ await pmApi('/v1/mesas/'+mesa.mesaId+'/indexed-pricing',{method:'POST',body:{spreadBps:0,baseAmount:d.amountInBase}}); }catch(e){} m3ExitCreate(); showView('indexado'); if(typeof ixOpen==='function') ixOpen(mesa.mesaId); return; }
       m3ExitCreate(); showView('operacao'); await m3LoadList(); m3Open(mesa.mesaId);
     }catch(e){ toast(e.message||'Falha ao criar mesa','err'); }
     finally{ btn.disabled=false; }
@@ -3359,7 +3374,52 @@ window.addEventListener('unhandledrejection',function(e){try{console.warn('[veru
   const IX_ORDER={SELLER:0,PAYMASTER_1:1,PAYMASTER_2:2,BUYER:3};
   const ixChairOf=(role)=>((ixMesa&&ixMesa.chairs)||[]).find(c=>c.role===role);
   const ixFmt=(base,ch)=>ch&&base?baseToHuman(base,ch.expectedAsset.decimals)+' '+ch.expectedAsset.symbol:(base||'—');
-  function ixShow(panel){ const l=$('#ixList'), p=$('#ixPanel'); if(l) l.style.display=panel?'none':''; if(p) p.style.display=panel?'':'none'; }
+  let ixPick={sell:null,buy:null};
+  function ixView(name){ [['list','#ixList'],['create','#ixCreate'],['panel','#ixPanel']].forEach(([n,sel])=>{ const el=$(sel); if(el) el.style.display=(n===name)?'':'none'; }); }
+  function ixRenderCreateFields(){
+    const sf=$('#ixcSellField'); if(sf) sf.innerHTML=m3FieldInner(ixPick.sell);
+    const bf=$('#ixcBuyField'); if(bf) bf.innerHTML=m3FieldInner(ixPick.buy);
+    const p=(typeof m3Plan==='function')?m3Plan(ixPick.sell,ixPick.buy):null; const ph=$('#ixcPlanHint'); if(ph) ph.textContent=p?('Liquidação: '+p.txt):'';
+    const sell=ixPick.sell; const h=$('#ixcAmountHint'); if(h) h.textContent=sell?('Em '+sell.symbol):'Valor-base da indexação';
+    const amt=$('#ixcAmount'), base=$('#ixcAmountBase'); if(amt&&base){ const v=(amt.value||'').trim(); base.textContent=(v&&sell)?(humanToBase(v,sell.decimals)?('= '+v+' '+sell.symbol):'valor inválido'):''; }
+  }
+  async function ixCreateOpen(){ ixView('create'); try{ await m3LoadCatalog(); }catch(e){} if(!ixPick.sell) ixPick.sell=(m3Catalog||[]).find(a=>a.network==='solana'&&a.contractOrMint==null)||(m3Catalog||[])[0]||null; if(!ixPick.buy) ixPick.buy=(m3Catalog||[]).find(a=>a.symbol==='USDC'&&a.network==='solana')||(m3Catalog||[]).find(a=>!m3SameAsset(a,ixPick.sell))||null; ixRenderCreateFields(); }
+  function ixOpenAssetModal(side){
+    const cur=ixPick[side]; const list=m3Catalog||[]; const title=side==='sell'?'Moeda do Vendedor':'Moeda do Comprador';
+    const row=(a,i)=>'<div class="netrow'+(m3SameAsset(a,cur)?' sel':'')+'" data-ai="'+i+'">'+netBadge({icon:a.icon,glyph:(a.symbol||'?').slice(0,3),color:a.color},32)+'<div><div class="nm">'+esc(a.symbol)+'</div><div class="sub">'+esc(a.networkLabel||a.network)+'</div></div></div>';
+    $('#modalRoot').innerHTML='<div class="modal-back" id="ixAmBack"><div class="modal"><h3>'+esc(title)+'</h3><input class="inp" id="ixAmSearch" placeholder="Filtrar por moeda ou rede…" style="width:100%;margin-bottom:10px"><div class="netlist" id="ixAmList">'+list.map(row).join('')+'</div><div class="modal-actions" style="margin-top:14px"><button class="btn" id="ixAmCancel">Fechar</button></div></div></div>';
+    $('#ixAmBack').addEventListener('click',e=>{ if(e.target.id==='ixAmBack') closeModal(); });
+    $('#ixAmCancel').addEventListener('click',closeModal);
+    const bind=()=>$$('#ixAmList [data-ai]').forEach(el=>el.addEventListener('click',()=>{ const a=list[Number(el.dataset.ai)]; const other=side==='sell'?'buy':'sell'; if(m3SameAsset(a,ixPick[other])) ixPick[other]=cur; ixPick[side]=a; closeModal(); ixRenderCreateFields(); }));
+    bind();
+    const sb=$('#ixAmSearch'); if(sb) sb.addEventListener('input',()=>{ const q=sb.value.trim().toLowerCase(); $('#ixAmList').innerHTML=list.map((a,i)=>({a,i})).filter(o=>!q||((o.a.symbol+' '+(o.a.networkLabel||o.a.network)).toLowerCase().indexOf(q)>=0)).map(o=>row(o.a,o.i)).join(''); bind(); });
+    setTimeout(()=>{ const s=$('#ixAmSearch'); if(s) s.focus(); },30);
+  }
+  async function ixCreate(){
+    const sell=ixPick.sell, buy=ixPick.buy;
+    if(!sell||!buy){ toast('Escolha a moeda do Vendedor e do Comprador','err'); return; }
+    if(m3SameAsset(sell,buy)){ toast('Os ativos do Vendedor e do Comprador devem ser diferentes','err'); return; }
+    const amountInBase=humanToBase($('#ixcAmount').value,sell.decimals);
+    if(!amountInBase){ toast('Quantidade do Vendedor inválida','err'); return; }
+    const spreadBps=parseInt(($('#ixcSpread').value||'0'),10)||0;
+    const discountBps=pctToBps($('#ixcDiscount').value), commissionBps=pctToBps($('#ixcCommission').value);
+    if(discountBps==null||discountBps>2000){ toast('Deságio inválido (máx. 20%)','err'); return; }
+    if(commissionBps==null||commissionBps>5000){ toast('Comissão inválida (máx. 50%)','err'); return; }
+    const net=(sell.network==='bitcoin')?buy.network:sell.network;
+    const gas=M3_GAS[net]||{symbol:'GAS',decimals:18};
+    const pms=Number($('#ixcPMs').value||'1');
+    const chairs=[ {role:'SELLER',expectedAsset:{network:sell.network,contractOrMint:sell.contractOrMint,decimals:sell.decimals,symbol:sell.symbol}}, {role:'BUYER',expectedAsset:{network:buy.network,contractOrMint:buy.contractOrMint,decimals:buy.decimals,symbol:buy.symbol}}, {role:'PAYMASTER_1',expectedAsset:{network:net,contractOrMint:null,decimals:gas.decimals,symbol:gas.symbol}} ];
+    if(pms===2) chairs.push({role:'PAYMASTER_2',expectedAsset:{network:net,contractOrMint:null,decimals:gas.decimals,symbol:gas.symbol}});
+    const btn=$('#ixCreateSubmit'); if(btn){ btn.disabled=true; btn.textContent='Criando…'; }
+    try{
+      const mesa=await pmApi('/v1/portal/mesas',{method:'POST',body:{ label:($('#ixcLabel').value.trim()||undefined), network:net, chairs:chairs }});
+      await pmApi('/v1/portal/mesas/'+mesa.mesaId+'/config',{method:'PATCH',body:{ amountInBase:amountInBase, discountBps:discountBps, commissionBps:commissionBps }});
+      await pmApi('/v1/mesas/'+mesa.mesaId+'/indexed-pricing',{method:'POST',body:{ spreadBps:spreadBps, baseAmount:amountInBase }});
+      toast('Operação indexada '+(mesa.operationCode||mesa.code)+' criada ✓','ok');
+      ixPick={sell:null,buy:null}; ixOpen(mesa.mesaId);
+    }catch(e){ toast((e&&e.message)||'Falha ao criar a operação','err'); }
+    finally{ if(btn){ btn.disabled=false; btn.innerHTML='<svg viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg>Criar operação indexada'; } }
+  }
   async function ixLoadList(){
     const box=$('#ixRows'); if(!box) return;
     try{
@@ -3369,9 +3429,8 @@ window.addEventListener('unhandledrejection',function(e){try{console.warn('[veru
       box.querySelectorAll('[data-ix-open]').forEach(b=>b.addEventListener('click',()=>ixOpen(b.dataset.ixOpen)));
     }catch(e){ /* silencioso */ }
   }
-  function ixOpen(mesaId){ ixSel=mesaId; ixState=null; ixMesa=null; ixShow(true); ixRefresh(); if(!ixPoll) ixPoll=setInterval(ixRefresh,5000); if(!ixTickTimer) ixTickTimer=setInterval(ixTick,1000); }
-  function ixBack(){ ixSel=null; ixShow(false); ixLoadList(); }
-  function ixNewOperation(){ window.__ixFlow=true; if(typeof m3OpenCreate==='function') m3OpenCreate(); else toast('Assistente de criação indisponível','err'); }
+  function ixOpen(mesaId){ ixSel=mesaId; ixState=null; ixMesa=null; ixView('panel'); ixRefresh(); if(!ixPoll) ixPoll=setInterval(ixRefresh,5000); if(!ixTickTimer) ixTickTimer=setInterval(ixTick,1000); }
+  function ixBack(){ ixSel=null; if(ixPoll){ clearInterval(ixPoll); ixPoll=null; } ixView('list'); ixLoadList(); }
   async function ixInvite(chairId){ try{ const inv=await pmApi('/v1/portal/mesas/'+ixSel+'/chairs/'+chairId+'/invite',{method:'POST',body:{}}); clip(inv.link||inv.code||''); toast('Convite gerado — link copiado. Envie ao participante.','ok'); ixRefresh(); }catch(e){ toast(e.message||'Falha ao gerar convite','err'); } }
   async function ixRefresh(){
     if(!ixSel) return;
@@ -3547,11 +3606,17 @@ window.addEventListener('unhandledrejection',function(e){try{console.warn('[veru
     ['sellNet','sellSym','sellContract','sellDec','buyNet','buySym','buyContract','buyDec'].forEach(k=>{ const el=document.querySelector('[data-m3adv="'+k+'"]'); if(el){ el.addEventListener('input',m3PlanHint); el.addEventListener('change',m3PlanHint); } });
     const sc=$('#m3dSaveCfg'); if(sc) sc.addEventListener('click',m3SaveCfg);
     // Operar Indexado — aba dedicada
-    const ixN=$('#ixNew'); if(ixN) ixN.addEventListener('click',ixNewOperation);
+    const ixN=$('#ixNew'); if(ixN) ixN.addEventListener('click',ixCreateOpen);
     const ixB=$('#ixBack'); if(ixB) ixB.addEventListener('click',ixBack);
     const ixFx=$('#ixFix'); if(ixFx) ixFx.addEventListener('click',()=>ixFix(false));
     const ixAp=$('#ixApprove'); if(ixAp) ixAp.addEventListener('click',ixApprove);
     const ixRm=$('#ixRemove'); if(ixRm) ixRm.addEventListener('click',ixRemove);
+    // Criação indexada (formulário próprio)
+    const ixcB=$('#ixCreateBack'); if(ixcB) ixcB.addEventListener('click',()=>{ ixView('list'); ixLoadList(); });
+    const ixcS=$('#ixCreateSubmit'); if(ixcS) ixcS.addEventListener('click',ixCreate);
+    const ixcSel=$('#ixcSellField'); if(ixcSel) ixcSel.addEventListener('click',()=>ixOpenAssetModal('sell'));
+    const ixcBuy=$('#ixcBuyField'); if(ixcBuy) ixcBuy.addEventListener('click',()=>ixOpenAssetModal('buy'));
+    const ixcAmt=$('#ixcAmount'); if(ixcAmt) ixcAmt.addEventListener('input',ixRenderCreateFields);
     // Troca de token no Gerenciar: abre o modal de moedas e salva no ativo da cadeira (PATCH), recarrega.
     const tkSell=$('#m3dSellToken'); if(tkSell) tkSell.addEventListener('click',()=>{ const c=m3dChairToken.SELLER; if(c) pickChairToken(m3Sel, c.chairId, 'SELLER', c.expectedAsset, ()=>{ m3CfgDirty=false; m3Refresh(); }); });
     const tkBuy=$('#m3dBuyToken'); if(tkBuy) tkBuy.addEventListener('click',()=>{ const c=m3dChairToken.BUYER; if(c) pickChairToken(m3Sel, c.chairId, 'BUYER', c.expectedAsset, ()=>{ m3CfgDirty=false; m3Refresh(); }); });
