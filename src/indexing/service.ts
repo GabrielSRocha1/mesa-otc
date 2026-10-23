@@ -85,15 +85,24 @@ export class IndexedPricingService {
     const baseAmountStr = cur.baseAmount ?? mesa.config?.amountInBase ?? null;
     if (!baseAmountStr || !/^[1-9][0-9]*$/.test(baseAmountStr)) throw new DomainError('INVALID_INPUT', 'Defina o valor-base (quantidade do Vendedor) antes de fixar');
     const baseAmount = BigInt(baseAmountStr);
-    const snapshot = await this.d.provider.snapshot({ baseAsset: assetRefOf(seller), quoteAsset: assetRefOf(buyer), baseAmount, maxAgeMs: cur.fixingTtlSec * 1000 });
-    const priceFinalE18 = applySpreadE18(snapshot.priceE18, cur.spreadBps);
-    const { quoteAmount, residual } = computeQuoteAmount(baseAmount, priceFinalE18, seller.expectedAsset.decimals, buyer.expectedAsset.decimals);
-    // Re-fixing com desvio > maxMoveBps do fixing anterior exige confirmação explícita do admin.
-    if (prevFixing && prevFixing > 0n) {
-      const moveBps = (abs(priceFinalE18 - prevFixing) * BPS) / prevFixing;
-      if (moveBps > BigInt(cur.maxMoveBps) && !input.confirmMove) {
-        throw new DomainError('INDEX_MOVE_CONFIRM', `Novo preço diverge ${moveBps} bps do fixing anterior (limite ${cur.maxMoveBps} bps) — confirme para prosseguir`, { moveBps: moveBps.toString(), maxMoveBps: cur.maxMoveBps, previousPriceE18: prevFixing.toString(), newPriceE18: priceFinalE18.toString(), previousQuoteAmount: cur.quoteAmount, newQuoteAmount: quoteAmount.toString() });
+    // Índice + cálculo: qualquer rejeição (índice não confiável, sem rota, desvio > max_move) é
+    // AUDITADA (append-only) antes de propagar — a mesa NÃO muda em nenhuma falha (falha fechado).
+    let snapshot, priceFinalE18: bigint, quoteAmount: bigint, residual: bigint;
+    try {
+      snapshot = await this.d.provider.snapshot({ baseAsset: assetRefOf(seller), quoteAsset: assetRefOf(buyer), baseAmount, maxAgeMs: cur.fixingTtlSec * 1000 });
+      priceFinalE18 = applySpreadE18(snapshot.priceE18, cur.spreadBps);
+      ({ quoteAmount, residual } = computeQuoteAmount(baseAmount, priceFinalE18, seller.expectedAsset.decimals, buyer.expectedAsset.decimals));
+      // Re-fixing com desvio > maxMoveBps do fixing anterior exige confirmação explícita do admin.
+      if (prevFixing && prevFixing > 0n) {
+        const moveBps = (abs(priceFinalE18 - prevFixing) * BPS) / prevFixing;
+        if (moveBps > BigInt(cur.maxMoveBps) && !input.confirmMove) {
+          throw new DomainError('INDEX_MOVE_CONFIRM', `Novo preço diverge ${moveBps} bps do fixing anterior (limite ${cur.maxMoveBps} bps) — confirme para prosseguir`, { moveBps: moveBps.toString(), maxMoveBps: cur.maxMoveBps, previousPriceE18: prevFixing.toString(), newPriceE18: priceFinalE18.toString(), previousQuoteAmount: cur.quoteAmount, newQuoteAmount: quoteAmount.toString() });
+        }
       }
+    } catch (e) {
+      const code = e instanceof DomainError ? e.code : 'INDEX_UNRELIABLE';
+      await this.d.audit.append({ actorType: 'user', actorId, category: 'mesa.indexed.rejeitado', dealId: null, payload: { mesaId: mesa.mesaId, termsVersion: cur.termsVersion, reason: code, message: (e as Error).message } });
+      throw e;
     }
     const t = this.now();
     const fixingExpiresAt = t + cur.fixingTtlSec * 1000;

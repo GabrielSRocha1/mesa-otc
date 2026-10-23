@@ -70,6 +70,20 @@ describe('indexado · refixing e max_move', () => {
     expect(second.record.termsVersion).toBe(2);
     expect(second.record.status).toBe('FIXED');
   });
+  it('rejeição do índice é AUDITADA (append-only) e a mesa não muda', async () => {
+    // provedor devolve 1 só fonte → INDEX_UNRELIABLE
+    const { svc, store } = makeService({ grossOut: () => [100_000_000n, 100_000_000n] });
+    // força minProviders falhando: injeta provider com 1 fonte via quotesFor custom
+    const store2 = store; void store2;
+    const mesa = makeMesa(); await svc.configure(mesa, { spreadBps: 0 }, 'pm-1');
+    // sobrescreve: usa um provedor que lança (dispersão enorme)
+    const bad = makeService({ grossOut: () => [100_000_000n, 500_000_000n] }); // ~dispersão gigante > 100 bps
+    const mesaB = makeMesa(); await bad.svc.configure(mesaB, { spreadBps: 0 }, 'pm-1');
+    await expect(bad.svc.fix(mesaB, {}, 'pm-1')).rejects.toMatchObject({ code: 'INDEX_UNRELIABLE' });
+    const audit = await bad.store.listAudit();
+    expect(audit.some(a => a.category === 'mesa.indexed.rejeitado')).toBe(true);
+    expect(await bad.store.getIndexedPricing(mesaB.mesaId)).toMatchObject({ status: 'CONFIGURED', fixingHash: null });
+  });
   it('desvio > max_move exige confirmação explícita', async () => {
     let factor = 10_000n; // bps
     const { svc } = makeService({ grossOut: () => { const g = (100_000_000n * factor) / 10_000n; return [g, g]; } });
