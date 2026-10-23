@@ -1600,6 +1600,40 @@ export async function buildApi(deps: ApiDeps): Promise<FastifyInstance> {
     const { mesa } = adminMesa(req, mesaId, false);
     return balancePreCheck(mesa);
   });
+  // RECIBO DE SALDOS pós-liquidação: quando o deal está SETTLED, devolve por papel que RECEBE ativo
+  // (Vendedor e Comprador) a moeda recebida, o valor recebido e o saldo ATUAL on-chain no endereço
+  // de recebimento (rede do ativo recebido). O frontend mostra "antes" = max(0, agora − recebido).
+  // Participante da própria mesa OU admin dono. Leitura on-chain reusa os balanceReaders (sticky).
+  app.get('/v1/mesas/:mesaId/receipt-balances', async req => {
+    const { mesaId } = req.params as { mesaId: string };
+    const mesaClaim = req.session?.mesa;
+    let mesa: ReturnType<typeof deps.mesa.mesaById>;
+    if (mesaClaim && mesaClaim.mesaId === mesaId) { mesa = deps.mesa.mesaById(mesaId); if (!mesa) throw new DomainError('INVALID_INPUT', 'Mesa não encontrada'); }
+    else mesa = adminMesa(req, mesaId, false).mesa;
+    const d = mesa.dealId ? await deps.deals.get(mesa.dealId).catch(() => null) : null;
+    if (!d || d.state !== 'SETTLED' || !d.terms) return { settled: false as const };
+    const balances: Array<Record<string, unknown>> = [];
+    for (const role of ['SELLER', 'BUYER'] as const) {
+      const leg = (d.terms.legs || []).find(l => l.to === role); // perna que PAGA a este papel = o que ele recebe
+      if (!leg) continue;
+      const asset = leg.asset; const net = asset.network;
+      const chair = (mesa.chairs || []).find(c => c.role === role);
+      const address = chair ? addressOn(chair, net) : null;
+      const received = Number(BigInt(leg.amountBase)) / 10 ** asset.decimals;
+      let current: number | null = null;
+      if (address) {
+        try {
+          if (asset.contractOrMint == null) { const n = await readers.native(net, address); current = n ? n.amount : null; }
+          else {
+            current = (await readers.tokenDirect?.(net, asset.contractOrMint, address, asset.decimals)) ?? null;
+            if (current == null) { const toks = await readers.tokens(net, address); const hit = toks.find(t => (t.contract || '').toLowerCase() === (asset.contractOrMint || '').toLowerCase() || t.symbol === asset.code); current = hit ? hit.amount : null; }
+          }
+        } catch { current = null; }
+      }
+      balances.push({ role, network: net, symbol: asset.code, decimals: asset.decimals, address, received, current, before: current != null ? Math.max(0, current - received) : null });
+    }
+    return { settled: true as const, balances };
+  });
   // Operação ESPECÍFICA da mesa (deep link /mesa?mesa=&op=): resumo somente-leitura de um deal do
   // histórico/ativo. Participante da própria mesa OU admin dono. Verifica que o deal pertence à mesa.
   app.get('/v1/mesas/:mesaId/deal/:dealId', async req => {

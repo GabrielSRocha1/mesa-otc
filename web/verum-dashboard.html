@@ -1180,6 +1180,11 @@ window.addEventListener('unhandledrejection',function(e){try{console.warn('[veru
       <button class="btn btn-block" id="pUnwrapBtn" type="button" style="display:none;margin-top:8px;height:44px">Desembrulhar wSOL → SOL</button>
       <button class="btn btn-block" id="pUnwrapWeth" type="button" style="display:none;margin-top:8px;height:44px">Desembrulhar WETH → ETH</button>
     </section>
+    <!-- Pós-liquidação: saldo da moeda RECEBIDA (antes/agora) p/ Vendedor e Comprador. -->
+    <section class="card" id="pReceiptCard" style="margin-top:14px;display:none">
+      <div class="card-h"><div class="t">Suas moedas</div></div>
+      <div id="pReceipt" style="font-size:13px;color:var(--ink-2)"></div>
+    </section>
   </div>
 </div>
 
@@ -3676,6 +3681,8 @@ window.addEventListener('unhandledrejection',function(e){try{console.warn('[veru
     // WETH→ETH: aparece após a operação terminar (reembolso/liquidação) numa perna EVM — quem
     // ficou com WETH na mão (comprador no refund, vendedor no settle) converte com um toque.
     const puw=$('#pUnwrapWeth'); if(puw){ const evmSide=(m.chairs||[]).some(c=>c.expectedAsset&&c.expectedAsset.network==='ethereum'); puw.style.display=(evmSide&&d&&['SETTLED','REFUNDED','EXPIRED','REFUNDING'].includes(d.state))?'':'none'; }
+    // Pós-liquidação: "Suas moedas" — saldo on-chain da moeda recebida (antes/agora). Fire-and-forget.
+    try{ pRenderReceipt(d); }catch(e){}
     // "SER PUXADO PARA ASSINAR": na SUA vez (QUALQUER papel — Vendedor/PM/Comprador — em QUALQUER
     // rede), abre automaticamente a tela de revisão/assinatura em vez de só o aviso de turno. O modal
     // é apenas revisão; a carteira só é acionada no clique "Assinar e continuar" (pSign cobre
@@ -3696,6 +3703,39 @@ window.addEventListener('unhandledrejection',function(e){try{console.warn('[veru
         }
       } else if(!d || d.turnRole!==me.role){ pAutoTurnKey=null; }
     }catch(e){}
+  }
+  // "Suas moedas" (pós-liquidação): lê o saldo on-chain da moeda RECEBIDA por Vendedor/Comprador e
+  // mostra recebido / antes (=agora−recebido) / agora. Só no SETTLED; cacheia quando leu tudo.
+  let pReceiptDone=null, pReceiptBusy=false;
+  async function pRenderReceipt(d){
+    const card=document.getElementById('pReceiptCard'), box=document.getElementById('pReceipt'); if(!card||!box) return;
+    if(!d||d.state!=='SETTLED'){ card.style.display='none'; pReceiptDone=null; return; }
+    if(pReceiptBusy) return;
+    if(pReceiptDone===d.id){ card.style.display=''; return; }
+    pReceiptBusy=true;
+    try{
+      const r=await pApi('/v1/mesas/'+encodeURIComponent(P_MESA)+'/receipt-balances');
+      if(!r||!r.settled||!((r.balances||[]).length)){ card.style.display='none'; return; }
+      const me=(pDto&&pDto.viewer)?pDto.viewer.role:null;
+      const fmt=function(n){ return (n==null)?'—':Number(n).toLocaleString('pt-BR',{maximumFractionDigits:8}); };
+      const row=function(b){
+        const mine=b.role===me; const nm=(M3_ROLE[b.role]||b.role);
+        return '<div style="padding:10px 12px;border:1px solid '+(mine?'rgba(201,168,76,.55)':'var(--line)')+';border-radius:10px;margin-bottom:8px">'
+          +'<div style="font-weight:700;margin-bottom:6px">'+esc(nm)+(mine?' (você)':'')+' — recebeu '+esc(b.symbol)+'</div>'
+          +'<div class="kv">'
+          +'<div class="r"><span class="k">Recebido nesta operação</span><span class="v">+'+fmt(b.received)+' '+esc(b.symbol)+'</span></div>'
+          +'<div class="r"><span class="k">Saldo antes</span><span class="v">'+fmt(b.before)+' '+esc(b.symbol)+'</span></div>'
+          +'<div class="r"><span class="k">Saldo agora</span><span class="v" style="color:#c9a84c;font-weight:700">'+fmt(b.current)+' '+esc(b.symbol)+'</span></div>'
+          +'</div>'
+          +(b.current==null?'<div style="font-size:11.5px;color:var(--ink-3);margin-top:4px">Não foi possível ler o saldo on-chain agora — atualiza em instantes.</div>':'')
+          +'</div>';
+      };
+      const ordered=(r.balances||[]).slice().sort(function(a,b){ return (a.role===me?-1:0)-(b.role===me?-1:0); });
+      box.innerHTML='<div style="font-size:12.5px;color:var(--ink-2);margin-bottom:8px">Operação concluída ✓ — confira o saldo da moeda que você recebeu.</div>'+ordered.map(row).join('');
+      card.style.display='';
+      if((r.balances||[]).every(function(b){ return b.current!=null; })) pReceiptDone=d.id; // leu tudo → não re-busca
+    }catch(e){ /* tenta no próximo poll */ }
+    finally{ pReceiptBusy=false; }
   }
   function pTick(){
     const m=pDto; if(!m) return;
