@@ -1491,7 +1491,16 @@ window.addEventListener('unhandledrejection',function(e){try{console.warn('[veru
     if(t) headers['authorization']='Bearer '+t;
     const res=await fetch(API+path,{method:opts.method||'GET',headers,body:opts.body!==undefined?JSON.stringify(opts.body):undefined});
     let data=null; try{ data=await res.json(); }catch(e){}
-    if(!res.ok){ if(res.status===401||res.status===403) goToRegister(); const m=(data&&(data.message||data.error))||('Erro '+res.status); const e=new Error(m); e.status=res.status; e.code=(data&&data.error)||null; throw e; }
+    if(!res.ok){
+      const code=(data&&data.error)||null; const msg=(data&&data.message)||'';
+      // Só DESLOGA quando a sessão realmente morreu (401, ou 403 de sessão — a mensagem do backend
+      // diz "Sessão …"). Um 403 de AUTORIZAÇÃO ("Somente o Pay Master 1…", "Mesa não encontrada…")
+      // NÃO é logout: o usuário continua logado e a ação só mostra o erro. (Bug: qualquer 403 jogava
+      // para /cadastro.) Mesmo critério usado no fluxo do participante.
+      const sessaoMorta = res.status===401 || (res.status===403 && code==='FORBIDDEN' && /sess[ãa]o/i.test(msg));
+      if(sessaoMorta) goToRegister();
+      const m=msg||code||('Erro '+res.status); const e=new Error(m); e.status=res.status; e.code=code; throw e;
+    }
     return data;
   }
   // Cópia resiliente: a Clipboard API (writeText) REJEITA sem permissão/gesto e dentro de
