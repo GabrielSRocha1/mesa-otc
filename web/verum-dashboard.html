@@ -714,6 +714,7 @@ window.addEventListener('unhandledrejection',function(e){try{console.warn('[veru
     <nav class="nav">
       <a href="#" class="active" data-view="carteiras"><svg viewBox="0 0 24 24"><rect x="4" y="4" width="16" height="16" rx="2"/><path d="M8 9h8M8 13h5"/></svg>Operações</a>
       <a href="#" data-view="mesa"><svg viewBox="0 0 24 24"><rect x="3" y="6" width="18" height="13" rx="2"/><path d="M16 12h2M3 10h18"/></svg>Mesa</a>
+      <a href="#" data-view="indexado"><svg viewBox="0 0 24 24"><path d="M3 17l6-6 4 4 7-7M14 8h6v6"/></svg>Operar Indexado</a>
       <a href="#" data-view="seguranca"><svg viewBox="0 0 24 24"><path d="M12 3l7 3v5c0 5-3 8-7 10-4-2-7-5-7-10V6z"/><path d="M9 12l2 2 4-4"/></svg>Segurança</a>
       <a href="#" data-view="config"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3.2"/><path d="M19 12a7 7 0 00-.1-1.3l2-1.5-2-3.4-2.3 1a7 7 0 00-2.2-1.3L14 3h-4l-.4 2.5a7 7 0 00-2.2 1.3l-2.3-1-2 3.4 2 1.5A7 7 0 005 12c0 .4 0 .9.1 1.3l-2 1.5 2 3.4 2.3-1a7 7 0 002.2 1.3L10 21h4l.4-2.5a7 7 0 002.2-1.3l2.3 1 2-3.4-2-1.5c.1-.4.1-.9.1-1.3z"/></svg>Configurações</a>
     </nav>
@@ -1020,26 +1021,6 @@ window.addEventListener('unhandledrejection',function(e){try{console.warn('[veru
             <div id="m3dCfgStatus" class="fh" style="margin-top:10px;min-height:16px"></div>
             <button class="btn btn-primary btn-block" id="m3dSaveCfg" type="button" style="margin-top:4px"><svg viewBox="0 0 24 24"><path d="M19 21H5a2 2 0 01-2-2V5a2 2 0 012-2h11l5 5v11a2 2 0 01-2 2z"/><path d="M17 21v-8H7v8M7 3v5h8"/></svg>Salvar alterações na mesa</button>
             <button class="btn btn-block" id="m3dReopen" type="button" style="margin-top:8px;display:none;border-color:var(--amber);color:#fde68a"><svg viewBox="0 0 24 24"><path d="M3 12a9 9 0 019-9 9 9 0 018 5M21 12a9 9 0 01-9 9 9 9 0 01-8-5"/><path d="M17 8h4V4M7 16H3v4"/></svg>Reabrir para editar (invalida assinaturas)</button>
-            <!-- Operar Indexado: preço indexado ao Verum Swap (off-chain, congelado em valores fixos antes das assinaturas) -->
-            <div id="m3dIdx" style="margin-top:14px;border-top:1px solid var(--line);padding-top:12px">
-              <div class="card-h" style="margin-bottom:6px"><div class="t" style="font-size:13.5px">Preço <span style="color:var(--ink-3);font-weight:400">· Fixo ou Indexado</span></div><span class="badge info" id="m3dIdxSeal" style="display:none">Indexado ao Verum Swap</span></div>
-              <div class="form-row" style="border-bottom:none">
-                <label style="display:flex;align-items:center;gap:8px;cursor:pointer"><input type="radio" name="m3dPriceMode" id="m3dModeFixed" value="FIXED" checked><span style="font-size:12.5px;color:var(--ink-2);font-weight:600">Fixo</span></label>
-                <label style="display:flex;align-items:center;gap:8px;cursor:pointer;margin-left:18px"><input type="radio" name="m3dPriceMode" id="m3dModeIndexed" value="INDEXED_VERUM_SWAP"><span style="font-size:12.5px;color:var(--ink-2);font-weight:600">Indexado ao Verum Swap</span></label>
-              </div>
-              <div id="m3dIdxPanel" style="display:none;margin-top:8px">
-                <div id="m3dIdxDisabled" class="fh" style="display:none;color:var(--amber);border:1px solid var(--line);border-radius:10px;padding:8px 10px;margin-bottom:8px"></div>
-                <div class="form-row"><div><div class="fl">Spread (bps)</div><div class="fh">Positivo = a favor do Vendedor · negativo = a favor do Comprador</div></div><input class="inp" id="m3dIdxSpread" type="number" step="1" value="0" style="max-width:120px;text-align:right"></div>
-                <button class="btn btn-primary btn-block" id="m3dIdxFix" type="button" style="margin-top:8px"><svg viewBox="0 0 24 24"><path d="M12 1v22M17 5H9.5a3.5 3.5 0 000 7h5a3.5 3.5 0 010 7H6"/></svg>Fixar preço agora</button>
-                <div id="m3dIdxCard" style="display:none;margin-top:10px;border:1px solid var(--line);border-radius:12px;padding:12px;background:var(--blue-soft)">
-                  <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px"><span class="badge ok" id="m3dIdxStatus">Fixado</span><span class="fh mono" id="m3dIdxTimer">—</span></div>
-                  <div class="kv" id="m3dIdxKv"></div>
-                  <div class="fh" id="m3dIdxSources" style="margin-top:6px"></div>
-                </div>
-                <button class="btn btn-block" id="m3dIdxRemove" type="button" style="margin-top:8px;border-color:var(--ink-4)">Voltar ao preço fixo</button>
-                <div class="fh" style="margin-top:10px;color:var(--ink-3);line-height:1.5">⚠️ O preço é congelado no momento do fixing; variações posteriores não alteram os valores assinados.<br>Pernas fora da plataforma continuam <b>NÃO GARANTIDAS POR CONTRATO</b>.</div>
-              </div>
-            </div>
           </div>
           <div>
             <div class="card-h" style="margin-bottom:6px"><div class="t" style="font-size:13.5px">Saldos e aprovação</div></div>
@@ -1119,6 +1100,55 @@ window.addEventListener('unhandledrejection',function(e){try{console.warn('[veru
       </div>
       <div class="vgrid wide" id="mesaSlots">
         <section class="card"><div class="state" style="padding:8px 0"><div class="spin" style="width:22px;height:22px;border:2px solid rgba(255,255,255,.25);border-top-color:#fff;border-radius:50%;animation:sp .7s linear infinite;margin:0 auto"></div></div></section>
+      </div>
+    </section>
+
+    <!-- ===================== VIEW: OPERAR INDEXADO ===================== -->
+    <section class="view" id="view-indexado">
+      <div class="page-head">
+        <div><h1 class="page-title">Operar Indexado</h1><p class="page-sub">Preço indexado ao Verum Swap · congelado em valores fixos antes das assinaturas</p></div>
+        <span class="badge info">Indexado ao Verum Swap</span>
+      </div>
+      <!-- Lista de operações -->
+      <div id="ixList">
+        <section class="card" style="margin-bottom:16px">
+          <div class="card-h"><div class="t">Nova operação indexada</div></div>
+          <p style="color:var(--ink-2);font-size:13px;margin:4px 0 12px">Crie a operação (par, valor do Vendedor, cadeiras), convide os participantes e, quando todos conectarem, <b>fixe o preço</b> indexado ao Verum Swap e aprove — tudo aqui.</p>
+          <button class="btn btn-primary" id="ixNew" type="button"><svg viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg>Nova operação indexada</button>
+        </section>
+        <section class="card">
+          <div class="card-h"><div class="t">Suas operações</div></div>
+          <div id="ixRows" class="op-deal-list" style="margin-top:6px"><p style="color:var(--ink-3);font-size:12.5px;margin:0">Carregando…</p></div>
+        </section>
+      </div>
+      <!-- Painel de uma operação -->
+      <div id="ixPanel" style="display:none">
+        <section class="card" style="margin-bottom:16px">
+          <div class="card-h"><div class="t" id="ixTitle">Operação</div><span id="ixStatus"></span></div>
+          <button class="btn" id="ixBack" type="button" style="height:32px;font-size:12px;margin-bottom:10px"><svg viewBox="0 0 24 24"><path d="M19 12H5M11 6l-6 6 6 6"/></svg>Voltar à lista</button>
+          <div class="grid" style="grid-template-columns:1fr 1fr">
+            <div>
+              <div class="card-h" style="margin-bottom:6px"><div class="t" style="font-size:13.5px">Participantes</div></div>
+              <div class="kv" id="ixChairs"></div>
+            </div>
+            <div>
+              <div class="card-h" style="margin-bottom:6px"><div class="t" style="font-size:13.5px">Preço indexado</div><span class="badge info">Verum Swap</span></div>
+              <div id="ixDisabled" class="fh" style="display:none;color:var(--amber);border:1px solid var(--line);border-radius:10px;padding:8px 10px;margin-bottom:8px"></div>
+              <div class="form-row"><div><div class="fl">Spread (bps)</div><div class="fh">Positivo = a favor do Vendedor · negativo = a favor do Comprador</div></div><input class="inp" id="ixSpread" type="number" step="1" value="0" style="max-width:120px;text-align:right"></div>
+              <div class="fh" id="ixHint" style="margin:8px 0;min-height:16px;color:var(--ink-3)"></div>
+              <button class="btn btn-primary btn-block" id="ixFix" type="button"><svg viewBox="0 0 24 24"><path d="M12 1v22M17 5H9.5a3.5 3.5 0 000 7h5a3.5 3.5 0 010 7H6"/></svg>Fixar preço agora</button>
+              <div id="ixCard" style="display:none;margin-top:10px;border:1px solid var(--line);border-radius:12px;padding:12px;background:var(--blue-soft)">
+                <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px"><span class="badge ok" id="ixCardStatus">Fixado</span><span class="fh mono" id="ixTimer"></span></div>
+                <div class="kv" id="ixKv"></div>
+                <div class="fh" id="ixSources" style="margin-top:6px"></div>
+              </div>
+              <button class="btn btn-primary btn-block" id="ixApprove" type="button" style="display:none;margin-top:10px;border-color:var(--green)">Aprovar e liberar assinaturas</button>
+              <button class="btn btn-block" id="ixRemove" type="button" style="margin-top:8px;border-color:var(--ink-4)">Voltar ao preço fixo</button>
+              <div id="ixApprovedNote" style="display:none;margin-top:8px;font-size:12px;color:var(--amber)">Operação aprovada — fixing congelado. Para refixar, reabra a operação (as assinaturas serão invalidadas).</div>
+              <div class="fh" style="margin-top:10px;color:var(--ink-3);line-height:1.5">⚠️ O preço é congelado no momento do fixing; variações posteriores não alteram os valores assinados.<br>Pernas fora da plataforma continuam <b>NÃO GARANTIDAS POR CONTRATO</b>.</div>
+            </div>
+          </div>
+        </section>
       </div>
     </section>
 
@@ -1317,6 +1347,9 @@ window.addEventListener('unhandledrejection',function(e){try{console.warn('[veru
     window.scrollTo(0,0);
     // Hub de Operações: carrega lista de mesas + todas as operações.
     if(view==='carteiras'){ try{ if(typeof m3LoadList==='function') m3LoadList(); if(typeof opLoadAll==='function') opLoadAll(); }catch(e){} }
+    // Operar Indexado: ao entrar na aba, mostra a lista; ao sair, para o polling do painel.
+    if(view==='indexado'){ try{ ixSel=null; if(typeof ixShow==='function'){ ixShow(false); ixLoadList(); } }catch(e){} }
+    else { try{ if(ixPoll){ clearInterval(ixPoll); ixPoll=null; } if(ixTickTimer){ clearInterval(ixTickTimer); ixTickTimer=null; } }catch(e){} }
   }
   // ── Sidebar responsiva (mobile): gaveta aberta pelo hambúrguer ──────────────
   function setNav(open){
@@ -2698,6 +2731,7 @@ window.addEventListener('unhandledrejection',function(e){try{console.warn('[veru
     m3OpenCreate();
   }
   function m3ExitCreate(){
+    window.__ixFlow=false; // não vaza o fluxo "Operar Indexado" para uma próxima criação normal
     m3Step(0);
     ['#m3ListCard','#opAllCard','#mesaSlots','#mesaSlotsHead'].forEach(sel=>{ const el=$(sel); if(el) el.style.display=''; });
     const t=$('#m3HubTitle'); if(t) t.textContent='Operações';
@@ -2799,6 +2833,8 @@ window.addEventListener('unhandledrejection',function(e){try{console.warn('[veru
       // Config salva na sequência — a mesa já nasce pronta para convidar e aprovar.
       await pmApi('/v1/portal/mesas/'+mesa.mesaId+'/config',{method:'PATCH',body:{ amountInBase:d.amountInBase, buyerAmountInBase:d.buyerAmountInBase, discountBps:d.discountBps, commissionBps:d.commissionBps, commissionPayer:d.commissionPayer }});
       toast('Mesa '+mesa.code+' criada · operação '+(mesa.operationCode||''),'ok');
+      // Operar Indexado: criada pela aba dedicada → marca a mesa como indexada e vai para o painel indexado.
+      if(window.__ixFlow){ window.__ixFlow=false; try{ await pmApi('/v1/mesas/'+mesa.mesaId+'/indexed-pricing',{method:'POST',body:{spreadBps:0,baseAmount:d.amountInBase}}); }catch(e){} m3ExitCreate(); showView('indexado'); if(typeof ixOpen==='function') ixOpen(mesa.mesaId); return; }
       m3ExitCreate(); showView('operacao'); await m3LoadList(); m3Open(mesa.mesaId);
     }catch(e){ toast(e.message||'Falha ao criar mesa','err'); }
     finally{ btn.disabled=false; }
@@ -3218,7 +3254,6 @@ window.addEventListener('unhandledrejection',function(e){try{console.warn('[veru
       // Mesa aprovada mas ainda NÃO irreversível → oferece reabrir para editar (invalida assinaturas).
       const canReopen=frozen && !m.irreversible;
       const rb=$('#m3dReopen'); if(rb) rb.style.display=canReopen?'':'none';
-      void idxLoad(); // Operar Indexado: reflete modo/fixing/timer a cada refresh (admin)
       if(frozen && !m3CfgDirty){ const st=$('#m3dCfgStatus'); if(st) st.innerHTML = m.irreversible
         ? '<span style="color:var(--ink-3)">🔒 Operação irreversível — configuração travada.</span>'
         : '<span style="color:var(--amber)">Operação aprovada — configuração congelada. Clique em "Reabrir para editar" para alterar (as assinaturas serão invalidadas e os participantes reassinam).</span>'; }
@@ -3319,53 +3354,80 @@ window.addEventListener('unhandledrejection',function(e){try{console.warn('[veru
     try{ await pmApi('/v1/portal/mesas/'+m3Sel+'/config',{method:'PATCH',body}); m3CfgDirty=false; m3CfgDirtyUI(true); toast('Alterações salvas na mesa','ok'); m3Refresh(); }
     catch(e){ toast(e.message,'err'); }
   }
-  /* ---------- Operar Indexado (preço indexado ao Verum Swap) ---------- */
-  let idxState=null, idxTickOn=false;
-  const idxFmt=(base,ch)=>ch&&base?baseToHuman(base,ch.expectedAsset.decimals)+' '+ch.expectedAsset.symbol:(base||'—');
-  async function idxLoad(){ if(!m3Sel) return; try{ idxState=await pmApi('/v1/mesas/'+m3Sel+'/indexed-pricing'); }catch(e){ idxState=null; } idxRender(); }
-  function idxBaseFromForm(){ const sellCh=((m3Cache&&m3Cache.chairs)||[]).find(c=>c.role==='SELLER'); const amt=($('#m3dAmount').value||'').trim(); return sellCh&&amt?humanToBase(amt,sellCh.expectedAsset.decimals):null; }
-  async function idxSetMode(mode){
-    if(!m3Sel) return;
+  /* ---------- Operar Indexado — aba dedicada (preço indexado ao Verum Swap) ---------- */
+  let ixSel=null, ixMesa=null, ixState=null, ixPoll=null, ixTickTimer=null;
+  const IX_ORDER={SELLER:0,PAYMASTER_1:1,PAYMASTER_2:2,BUYER:3};
+  const ixChairOf=(role)=>((ixMesa&&ixMesa.chairs)||[]).find(c=>c.role===role);
+  const ixFmt=(base,ch)=>ch&&base?baseToHuman(base,ch.expectedAsset.decimals)+' '+ch.expectedAsset.symbol:(base||'—');
+  function ixShow(panel){ const l=$('#ixList'), p=$('#ixPanel'); if(l) l.style.display=panel?'none':''; if(p) p.style.display=panel?'':'none'; }
+  async function ixLoadList(){
+    const box=$('#ixRows'); if(!box) return;
     try{
-      if(mode==='INDEXED_VERUM_SWAP'){ const spreadBps=parseInt($('#m3dIdxSpread').value||'0',10)||0; const baseAmount=idxBaseFromForm(); await pmApi('/v1/mesas/'+m3Sel+'/indexed-pricing',{method:'POST',body:Object.assign({spreadBps},baseAmount?{baseAmount:baseAmount}:{})}); }
-      else { await pmApi('/v1/mesas/'+m3Sel+'/indexed-pricing',{method:'DELETE'}); toast('De volta ao preço fixo','ok'); }
-    }catch(e){ toast((e&&e.message)||'Falha ao mudar o modo de preço','err'); }
-    idxState=null; await idxLoad();
+      const r=await pmApi('/v1/portal/mesas'); const mesas=(r.mesas||[]).filter(m=>m.owner);
+      box.innerHTML = mesas.length ? mesas.map(m=>'<div class="m3-row"><div class="m3-info"><span class="mono" style="font-size:12.5px">'+esc(m.code)+'</span>'+(m.operationCode?' <span class="mono" style="color:var(--blue);font-size:12px">· '+esc(m.operationCode)+'</span>':'')+(m.label?' <span style="color:var(--ink-3);font-size:12px">· '+esc(m.label)+'</span>':'')+'<div style="font-size:12px;color:var(--ink-3)">'+m.chairs.map(c=>esc(M3_ROLE[c.role]||c.role)+(c.connected?' ✓':'')).join(' · ')+'</div></div><div class="m3-acts">'+m3Badge(m.status)+'<button class="btn btn-primary" data-ix-open="'+esc(m.mesaId)+'" style="height:34px;font-size:12.5px">Abrir indexado</button></div></div>').join('')
+        : '<p style="color:var(--ink-3);font-size:12.5px;margin:0">Nenhuma operação ainda. Toque em "Nova operação indexada".</p>';
+      box.querySelectorAll('[data-ix-open]').forEach(b=>b.addEventListener('click',()=>ixOpen(b.dataset.ixOpen)));
+    }catch(e){ /* silencioso */ }
   }
-  async function idxFix(confirmMove){
-    if(!m3Sel) return;
-    const spreadBps=parseInt($('#m3dIdxSpread').value||'0',10)||0; const baseAmount=idxBaseFromForm();
-    if(!baseAmount){ toast('Defina a Quantidade do Vendedor antes de fixar','err'); return; }
-    const btn=$('#m3dIdxFix'); if(btn){ btn.disabled=true; btn.textContent='Consultando o Verum Swap…'; }
+  function ixOpen(mesaId){ ixSel=mesaId; ixState=null; ixMesa=null; ixShow(true); ixRefresh(); if(!ixPoll) ixPoll=setInterval(ixRefresh,5000); if(!ixTickTimer) ixTickTimer=setInterval(ixTick,1000); }
+  function ixBack(){ ixSel=null; ixShow(false); ixLoadList(); }
+  function ixNewOperation(){ window.__ixFlow=true; if(typeof m3OpenCreate==='function') m3OpenCreate(); else toast('Assistente de criação indisponível','err'); }
+  async function ixInvite(chairId){ try{ const inv=await pmApi('/v1/portal/mesas/'+ixSel+'/chairs/'+chairId+'/invite',{method:'POST',body:{}}); clip(inv.link||inv.code||''); toast('Convite gerado — link copiado. Envie ao participante.','ok'); ixRefresh(); }catch(e){ toast(e.message||'Falha ao gerar convite','err'); } }
+  async function ixRefresh(){
+    if(!ixSel) return;
+    try{ ixMesa=await pmApi('/v1/portal/mesas/'+encodeURIComponent(ixSel)); }catch(e){ return; }
+    try{ ixState=await pmApi('/v1/mesas/'+encodeURIComponent(ixSel)+'/indexed-pricing'); }catch(e){ ixState=null; }
+    const m=ixMesa; if(!m) return; const frozen=!!m.approvedAt;
+    if($('#ixTitle')) $('#ixTitle').textContent='Operação '+(m.operationCode||m.label||m.code);
+    if($('#ixStatus')) $('#ixStatus').innerHTML=m3Badge(m.status);
+    const chairs=(m.chairs||[]).slice().sort((a,b)=>(IX_ORDER[a.role]-IX_ORDER[b.role]));
+    const cb=$('#ixChairs'); if(cb){
+      cb.innerHTML=chairs.map(c=>{ const nm=esc((M3_ROLE[c.role]||c.role)+(c.firstName?(' · '+c.firstName):'')); const ok=!!c.connected||!!c.wallet; const can=!ok&&!frozen&&c.role!=='PAYMASTER_1'; return '<div class="r"><span class="k">'+nm+'</span><span class="v">'+(ok?'<span style="color:var(--green)">conectado ✓</span>':(can?'<button class="btn" data-ix-inv="'+esc(c.chairId)+'" style="height:28px;font-size:11.5px">Gerar convite</button>':'<span style="color:var(--ink-3)">aguardando</span>'))+'</span></div>'; }).join('');
+      cb.querySelectorAll('[data-ix-inv]').forEach(b=>b.addEventListener('click',()=>ixInvite(b.dataset.ixInv)));
+    }
+    const st=ixState||{enabled:true,mode:'FIXED',record:null}; const r=st.record;
+    const sp=$('#ixSpread'); if(r&&sp&&document.activeElement!==sp) sp.value=r.spreadBps;
+    const dis=$('#ixDisabled'); if(dis){ if(st.enabled===false){ dis.style.display=''; dis.textContent='Modo indexado indisponível neste ambiente (motor Verum Swap não configurado).'; } else dis.style.display='none'; }
+    const allConnected=(m.chairs||[]).every(c=>c.connected||c.wallet); const hasBase=!!(m.config&&m.config.amountInBase);
+    if(sp) sp.disabled=frozen; if($('#ixRemove')) $('#ixRemove').style.display=frozen?'none':'';
+    const fixBtn=$('#ixFix'); if(fixBtn) fixBtn.disabled=frozen||st.enabled===false||!allConnected||!hasBase;
+    if($('#ixHint')) $('#ixHint').textContent=frozen?'Operação aprovada — fixing travado.':(!hasBase?'Defina o valor-base (quantidade do Vendedor) ao criar a operação.':(!allConnected?'Aguardando todas as cadeiras conectarem para fixar o preço.':'Pronto para fixar o preço.'));
+    const card=$('#ixCard');
+    if(card){ if(r&&r.fixingHash&&(r.status==='FIXED'||r.status==='LOCKED')){
+      const sellCh=ixChairOf('SELLER'), buyCh=ixChairOf('BUYER'); const row=(k,v)=>'<div class="r"><span class="k">'+k+'</span><span class="v mono">'+esc(String(v))+'</span></div>';
+      $('#ixKv').innerHTML=row('Vendedor entrega',ixFmt(r.baseAmount,sellCh))+row('Comprador entrega',ixFmt(r.quoteAmount,buyCh))+row('Spread',r.spreadBps+' bps')+row('Dispersão',(r.fixingDispersionBps||'—')+' bps')+row('Resíduo',r.roundingResidual||'0');
+      $('#ixSources').textContent='Fontes: '+((r.fixingSources||[]).length)+' · Verum Swap · fixing '+String(r.fixingHash).slice(0,12)+'…';
+      $('#ixCardStatus').textContent=r.status==='LOCKED'?'Travado (assinaturas)':'Fixado'; card.style.display='';
+    } else card.style.display='none'; }
+    const canApprove=!frozen&&allConnected&&r&&r.status==='FIXED'&&!!r.fixingHash;
+    if($('#ixApprove')) $('#ixApprove').style.display=canApprove?'':'none';
+    if($('#ixApprovedNote')) $('#ixApprovedNote').style.display=frozen?'':'none';
+  }
+  function ixTick(){ const el=$('#ixTimer'); if(!el) return; const r=ixState&&ixState.record; if(!r||!r.fixingExpiresAt||!(r.status==='FIXED'||r.status==='LOCKED')){ el.textContent=''; return; } const ms=r.fixingExpiresAt-Date.now(); if(ms<=0){ el.style.color='var(--red)'; el.textContent='fixing expirado — fixe novamente'; return; } const s=Math.floor(ms/1000); el.style.color='var(--ink-3)'; el.textContent='expira em '+String(Math.floor(s/60)).padStart(2,'0')+':'+String(s%60).padStart(2,'0'); }
+  async function ixFix(confirmMove){
+    if(!ixSel) return; const spreadBps=parseInt(($('#ixSpread').value||'0'),10)||0;
+    const baseAmount=(ixMesa&&ixMesa.config&&ixMesa.config.amountInBase)||null;
+    if(!baseAmount){ toast('Defina o valor-base (quantidade do Vendedor) ao criar a operação','err'); return; }
+    const btn=$('#ixFix'); if(btn){ btn.disabled=true; btn.textContent='Consultando o Verum Swap…'; }
     try{
-      await pmApi('/v1/mesas/'+m3Sel+'/indexed-pricing',{method:'POST',body:{spreadBps:spreadBps,baseAmount:baseAmount}});
-      await pmApi('/v1/mesas/'+m3Sel+'/indexed-pricing/fix',{method:'POST',body:confirmMove?{confirmMove:true}:{}});
-      toast('Preço fixado ✓ — congelado em valores concretos','ok'); idxState=null; await idxLoad(); m3Refresh();
+      await pmApi('/v1/mesas/'+ixSel+'/indexed-pricing',{method:'POST',body:{spreadBps:spreadBps,baseAmount:String(baseAmount)}});
+      await pmApi('/v1/mesas/'+ixSel+'/indexed-pricing/fix',{method:'POST',body:confirmMove?{confirmMove:true}:{}});
+      toast('Preço fixado ✓ — congelado em valores concretos','ok'); ixRefresh();
     }catch(e){
-      if(e&&e.code==='INDEX_MOVE_CONFIRM'){ const d=(e.details)||{}; if(confirm('O novo preço diverge '+(d.moveBps||'?')+' bps do fixing anterior (limite '+(d.maxMoveBps||'?')+' bps).\nConfirmar o novo fixing?')){ if(btn){ btn.disabled=false; } return idxFix(true); } }
+      if(e&&e.code==='INDEX_MOVE_CONFIRM'){ const d=(e.details)||{}; if(confirm('O novo preço diverge '+(d.moveBps||'?')+' bps do fixing anterior (limite '+(d.maxMoveBps||'?')+' bps).\nConfirmar o novo fixing?')){ return ixFix(true); } }
       else toast((e&&e.message)||'Falha ao fixar o preço','err');
-    }finally{ if(btn){ btn.disabled=false; btn.innerHTML='<svg viewBox="0 0 24 24"><path d="M12 1v22M17 5H9.5a3.5 3.5 0 000 7h5a3.5 3.5 0 010 7H6"/></svg>Fixar preço agora'; } }
+    }finally{ if(btn){ btn.disabled=false; btn.textContent='Fixar preço agora'; } }
   }
-  function idxTimer(){ const el=$('#m3dIdxTimer'); if(!el) return; const r=idxState&&idxState.record; if(!r||!r.fixingExpiresAt){ el.textContent='—'; return; } const ms=r.fixingExpiresAt-Date.now(); if(ms<=0){ el.style.color='var(--red)'; el.textContent='fixing expirado — fixe novamente'; return; } const s=Math.floor(ms/1000); el.style.color='var(--ink-3)'; el.textContent='expira em '+String(Math.floor(s/60)).padStart(2,'0')+':'+String(s%60).padStart(2,'0'); }
-  function idxRender(){
-    if(!$('#m3dIdx')) return;
-    const st=idxState||{enabled:true,mode:'FIXED',record:null}; const indexed=st.mode==='INDEXED_VERUM_SWAP'; const frozen=!!(m3Cache&&m3Cache.approvedAt);
-    const fm=$('#m3dModeFixed'), im=$('#m3dModeIndexed');
-    if(fm&&document.activeElement!==fm) fm.checked=!indexed; if(im&&document.activeElement!==im) im.checked=indexed;
-    $('#m3dIdxSeal').style.display=indexed?'':'none'; $('#m3dIdxPanel').style.display=indexed?'':'none';
-    const dis=$('#m3dIdxDisabled'); if(dis){ if(st.enabled===false){ dis.style.display=''; dis.textContent='Modo indexado indisponível neste ambiente (motor Verum Swap não configurado).'; } else dis.style.display='none'; }
-    ['m3dModeFixed','m3dModeIndexed','m3dIdxSpread','m3dIdxRemove'].forEach(id=>{ const el=document.getElementById(id); if(el) el.disabled=frozen; });
-    const fixBtn=$('#m3dIdxFix'); if(fixBtn) fixBtn.disabled=frozen||st.enabled===false;
-    const r=st.record; const sp=$('#m3dIdxSpread'); if(r&&sp&&document.activeElement!==sp) sp.value=r.spreadBps;
-    const card=$('#m3dIdxCard');
-    if(indexed&&r&&r.fixingHash&&(r.status==='FIXED'||r.status==='LOCKED')){
-      const chairs=(m3Cache&&m3Cache.chairs)||[]; const sellCh=chairs.find(c=>c.role==='SELLER'), buyCh=chairs.find(c=>c.role==='BUYER');
-      const row=(k,v)=>'<div class="r"><span class="k">'+k+'</span><span class="v mono">'+esc(String(v))+'</span></div>';
-      $('#m3dIdxKv').innerHTML=row('Vendedor entrega',idxFmt(r.baseAmount,sellCh))+row('Comprador entrega',idxFmt(r.quoteAmount,buyCh))+row('Spread',r.spreadBps+' bps')+row('Dispersão',(r.fixingDispersionBps||'—')+' bps')+row('Resíduo',r.roundingResidual||'0');
-      $('#m3dIdxSources').textContent='Fontes: '+((r.fixingSources||[]).length)+' · Verum Swap · fixing '+String(r.fixingHash).slice(0,12)+'…';
-      $('#m3dIdxStatus').textContent=r.status==='LOCKED'?'Travado (assinaturas)':'Fixado';
-      card.style.display=''; if(!idxTickOn){ idxTickOn=true; setInterval(idxTimer,1000); } idxTimer();
-    } else if(card) card.style.display='none';
+  async function ixRemove(){ if(!ixSel) return; if(!confirm('Voltar esta operação ao preço fixo?')) return; try{ await pmApi('/v1/mesas/'+ixSel+'/indexed-pricing',{method:'DELETE'}); toast('De volta ao preço fixo','ok'); ixRefresh(); }catch(e){ toast(e.message||'Falha','err'); } }
+  async function ixApprove(){
+    const btn=$('#ixApprove'); if(btn){ btn.disabled=true; btn.textContent='Aprovando…'; }
+    try{
+      const ap=await pmApi('/v1/portal/mesas/'+ixSel+'/approve',{method:'POST',body:{}});
+      const regTx=ap&&((ap.deal&&ap.deal.registerTx)||ap.registerTx);
+      if(regTx&&regTx.to){ try{ const p=await findVerumEthProvider(); if(p){ const accs=await p.request({method:'eth_requestAccounts'}); const from=accs&&accs[0]; const h=await p.request({method:'eth_sendTransaction',params:[{from,to:regTx.to,data:regTx.data}]}); await evmWaitReceipt(p,h); } }catch(e){ toast('Aprovado — registro on-chain pendente: '+((e&&e.message)||'recusado'),'err'); } }
+      toast('Operação aprovada — termos congelados','ok'); ixRefresh();
+    }catch(e){ const det=(e&&e.details&&e.details.motivos)||null; toast(det?('Não aprovou: '+det.join(' · ')):((e&&e.message)||'Falha na aprovação'),'err'); }
+    finally{ if(btn){ btn.disabled=false; btn.textContent='Aprovar e liberar assinaturas'; } }
   }
   // Overlay de progresso do approve: a assinatura do registro na carteira deixa de ser "susto" —
   // o PM vê o que vem antes de a carteira abrir. Fora do #modalRoot (usado pelo convite).
@@ -3484,11 +3546,12 @@ window.addEventListener('unhandledrejection',function(e){try{console.warn('[veru
     ['sellNet','buyNet'].forEach(k=>{ const el=document.querySelector('[data-m3adv="'+k+'"]'); if(el) el.innerHTML=advNets; });
     ['sellNet','sellSym','sellContract','sellDec','buyNet','buySym','buyContract','buyDec'].forEach(k=>{ const el=document.querySelector('[data-m3adv="'+k+'"]'); if(el){ el.addEventListener('input',m3PlanHint); el.addEventListener('change',m3PlanHint); } });
     const sc=$('#m3dSaveCfg'); if(sc) sc.addEventListener('click',m3SaveCfg);
-    // Operar Indexado: alterna modo Fixo|Indexado, fixa/refixa e volta a FIXED.
-    const imI=$('#m3dModeIndexed'); if(imI) imI.addEventListener('change',()=>idxSetMode('INDEXED_VERUM_SWAP'));
-    const fmI=$('#m3dModeFixed'); if(fmI) fmI.addEventListener('change',()=>idxSetMode('FIXED'));
-    const ixF=$('#m3dIdxFix'); if(ixF) ixF.addEventListener('click',()=>idxFix(false));
-    const ixR=$('#m3dIdxRemove'); if(ixR) ixR.addEventListener('click',()=>idxSetMode('FIXED'));
+    // Operar Indexado — aba dedicada
+    const ixN=$('#ixNew'); if(ixN) ixN.addEventListener('click',ixNewOperation);
+    const ixB=$('#ixBack'); if(ixB) ixB.addEventListener('click',ixBack);
+    const ixFx=$('#ixFix'); if(ixFx) ixFx.addEventListener('click',()=>ixFix(false));
+    const ixAp=$('#ixApprove'); if(ixAp) ixAp.addEventListener('click',ixApprove);
+    const ixRm=$('#ixRemove'); if(ixRm) ixRm.addEventListener('click',ixRemove);
     // Troca de token no Gerenciar: abre o modal de moedas e salva no ativo da cadeira (PATCH), recarrega.
     const tkSell=$('#m3dSellToken'); if(tkSell) tkSell.addEventListener('click',()=>{ const c=m3dChairToken.SELLER; if(c) pickChairToken(m3Sel, c.chairId, 'SELLER', c.expectedAsset, ()=>{ m3CfgDirty=false; m3Refresh(); }); });
     const tkBuy=$('#m3dBuyToken'); if(tkBuy) tkBuy.addEventListener('click',()=>{ const c=m3dChairToken.BUYER; if(c) pickChairToken(m3Sel, c.chairId, 'BUYER', c.expectedAsset, ()=>{ m3CfgDirty=false; m3Refresh(); }); });
