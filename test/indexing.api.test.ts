@@ -67,6 +67,30 @@ describe('Operar Indexado · e2e pela API', () => {
     await app.close();
   }, 120_000);
 
+  it('criação indexada (sequência da UI) persiste no backend e é relida', async () => {
+    const { app } = await makeApp({ balanceReaders: readers });
+    const pm = (await app.api.inject({ method: 'POST', url: '/v1/portal/register', payload: { name: 'PM CR', email: email(), password: 'senha-forte-1' } })).json<{ token: string }>().token;
+    const pmW = solWallet();
+    await app.api.inject({ method: 'POST', url: '/v1/portal/wallet/connect', headers: H(pm), payload: { address: pmW.address, network: 'solana' } });
+    // 1) cria a mesa (cadeiras) — como o formulário da aba faz
+    const mesa = (await app.api.inject({ method: 'POST', url: '/v1/portal/mesas', headers: H(pm), payload: { label: 'Op indexada', network: 'solana', chairs: [
+      { role: 'SELLER', expectedAsset: USDT }, { role: 'BUYER', expectedAsset: USDC }, { role: 'PAYMASTER_1', expectedAsset: USDT },
+    ] } })).json<{ mesaId: string }>();
+    // 2) grava a config (só amountInBase — o buyer vem do fixing)
+    const cfg = await app.api.inject({ method: 'PATCH', url: `/v1/portal/mesas/${mesa.mesaId}/config`, headers: H(pm), payload: { amountInBase: '250000000', discountBps: 0, commissionBps: 0 } });
+    expect(cfg.statusCode, cfg.body).toBe(200);
+    // 3) marca o modo indexado + spread + baseAmount
+    const ix = await app.api.inject({ method: 'POST', url: `/v1/mesas/${mesa.mesaId}/indexed-pricing`, headers: H(pm), payload: { spreadBps: 150, baseAmount: '250000000' } });
+    expect(ix.statusCode, ix.body).toBe(201);
+    // relê de um GET independente: o registro ficou salvo (mesa_indexed_pricing)
+    const got = (await app.api.inject({ method: 'GET', url: `/v1/mesas/${mesa.mesaId}/indexed-pricing`, headers: H(pm) })).json<{ mode: string; record: { status: string; spreadBps: number; baseAmount: string } }>();
+    expect(got.mode).toBe('INDEXED_VERUM_SWAP');
+    expect(got.record.status).toBe('CONFIGURED');
+    expect(got.record.spreadBps).toBe(150);
+    expect(got.record.baseAmount).toBe('250000000');
+    await app.close();
+  }, 120_000);
+
   it('só o Pay Master 1 escreve — participante recebe 403', async () => {
     const { app } = await makeApp({ balanceReaders: readers });
     const { mesaId, sellerTok } = await setupMesa(app);
