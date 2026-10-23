@@ -27,9 +27,6 @@ export function buildSnapshot(req: IndexRequest, quotes: RawQuote[], policy: Sna
 
 export interface VerumSwapConfig { baseUrl: string; apiKey: string; timeoutMs: number; minProviders: number; maxDispersionBps: number }
 
-/** Resposta esperada do motor: lista de cotações válidas por provedor (preço BRUTO, antes da fee do swap). */
-interface EngineQuote { provider?: unknown; grossOut?: unknown; quoteId?: unknown; expiresAt?: unknown }
-
 export class VerumSwapIndexProvider implements IndexPriceProvider {
   readonly label = 'Verum Swap';
   constructor(private readonly cfg: VerumSwapConfig, private readonly fetchFn: typeof fetch = fetch, private readonly now: () => number = () => Date.now()) {}
@@ -54,17 +51,70 @@ export class VerumSwapIndexProvider implements IndexPriceProvider {
       const msg = (e as Error).name === 'AbortError' ? `timeout após ${this.cfg.timeoutMs} ms` : (e as Error).message;
       throw new DomainError('INDEX_UNRELIABLE', `Falha ao consultar o Verum Swap (${msg})`);
     } finally { clearTimeout(timer); }
-    const list = Array.isArray(payload) ? payload : Array.isArray((payload as { quotes?: unknown })?.quotes) ? (payload as { quotes: unknown[] }).quotes : null;
+    const list = asQuoteList(payload);
     if (!list) throw new DomainError('INDEX_UNRELIABLE', 'Resposta do Verum Swap em formato inesperado');
     const quotes: RawQuote[] = [];
-    for (const raw of list as EngineQuote[]) {
-      const provider = typeof raw?.provider === 'string' ? raw.provider : null;
-      const grossOutStr = typeof raw?.grossOut === 'string' || typeof raw?.grossOut === 'number' ? String(raw.grossOut) : null;
-      if (!provider || !grossOutStr || !/^[0-9]+$/.test(grossOutStr)) continue; // descarta item malformado (não derruba o servidor)
-      quotes.push({ provider, grossOut: BigInt(grossOutStr), ...(typeof raw.quoteId === 'string' ? { quoteId: raw.quoteId } : {}), ...(typeof raw.expiresAt === 'number' ? { expiresAt: raw.expiresAt } : {}) });
+    let idx = 0;
+    for (const item of list) {
+      idx++;
+      const raw = (item && typeof item === 'object') ? item as Record<string, unknown> : null;
+      if (!raw) continue;
+      const grossOut = coerceMinUnits(pickFirst(raw, GROSS_OUT_KEYS));
+      if (grossOut === null) continue;               // sem saída inteira em unidades mínimas → item malformado (ignora, não derruba)
+      const provider = pickString(raw, PROVIDER_KEYS) ?? `src-${idx}`; // provedor é só rótulo; sem nome, numera (não descarta cotação válida)
+      const quoteId = pickString(raw, QUOTE_ID_KEYS);
+      const expiresAt = coerceEpochMs(pickFirst(raw, EXPIRES_KEYS));
+      quotes.push({ provider, grossOut, ...(quoteId ? { quoteId } : {}), ...(expiresAt !== null ? { expiresAt } : {}) });
     }
     return buildSnapshot(req, quotes, { minProviders: this.cfg.minProviders, maxDispersionBps: this.cfg.maxDispersionBps }, this.now());
   }
+}
+
+// ---- Tolerância de formato do motor de swap (campos/invólucros variam entre versões/agregadores) ----
+const GROSS_OUT_KEYS = ['grossOut', 'grossAmountOut', 'amountOut', 'outAmount', 'outputAmount', 'toAmount', 'dstAmount', 'destAmount', 'toTokenAmount', 'out'];
+const PROVIDER_KEYS = ['provider', 'source', 'name', 'dex', 'aggregator', 'venue', 'exchange', 'pool'];
+const QUOTE_ID_KEYS = ['quoteId', 'quote_id', 'id', 'routeId', 'ref'];
+const EXPIRES_KEYS = ['expiresAt', 'expires_at', 'expiry', 'validUntil', 'valid_until', 'deadline'];
+const LIST_KEYS = ['quotes', 'data', 'results', 'routes', 'items', 'offers', 'sources'];
+
+/** Acha a lista de cotações no payload: array direto ou sob um invólucro comum ({quotes|data|results|…}). */
+function asQuoteList(payload: unknown): unknown[] | null {
+  if (Array.isArray(payload)) return payload;
+  if (payload && typeof payload === 'object') {
+    const o = payload as Record<string, unknown>;
+    for (const k of LIST_KEYS) if (Array.isArray(o[k])) return o[k] as unknown[];
+    // às vezes vem aninhado: { data: { quotes: [...] } }
+    for (const k of LIST_KEYS) { const inner = o[k]; if (inner && typeof inner === 'object') { for (const k2 of LIST_KEYS) if (Array.isArray((inner as Record<string, unknown>)[k2])) return (inner as Record<string, unknown>)[k2] as unknown[]; } }
+  }
+  return null;
+}
+
+function pickFirst(obj: Record<string, unknown>, keys: string[]): unknown {
+  for (const k of keys) if (obj[k] !== undefined && obj[k] !== null) return obj[k];
+  return undefined;
+}
+function pickString(obj: Record<string, unknown>, keys: string[]): string | undefined {
+  const v = pickFirst(obj, keys);
+  return typeof v === 'string' && v.length > 0 ? v : undefined;
+}
+/**
+ * Coage um valor em unidades mínimas INTEIRAS para bigint. Aceita string decimal-inteira ou number inteiro
+ * (inclusive aninhado em { amount|value|raw }). Rejeita fração/float (unidades mínimas são inteiras) e lixo.
+ */
+function coerceMinUnits(v: unknown): bigint | null {
+  if (typeof v === 'object' && v !== null) return coerceMinUnits(pickFirst(v as Record<string, unknown>, ['amount', 'value', 'raw', 'wei', 'lamports']));
+  if (typeof v === 'bigint') return v > 0n ? v : null;
+  if (typeof v === 'number') return Number.isInteger(v) && v > 0 ? BigInt(v) : null;
+  if (typeof v === 'string') { const s = v.trim(); if (!/^[0-9]+$/.test(s)) return null; try { const b = BigInt(s); return b > 0n ? b : null; } catch { return null; } }
+  return null;
+}
+/** Normaliza expiração para epoch ms: segundos (< 1e12) viram ms; strings numéricas aceitas. undefined → null. */
+function coerceEpochMs(v: unknown): number | null {
+  let n: number | null = null;
+  if (typeof v === 'number') n = v;
+  else if (typeof v === 'string' && /^[0-9]+$/.test(v.trim())) n = Number(v.trim());
+  if (n === null || !Number.isFinite(n) || n <= 0) return null;
+  return n < 1e12 ? Math.round(n * 1000) : Math.round(n); // < 1e12 ⇒ está em segundos
 }
 
 /**

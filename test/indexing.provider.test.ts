@@ -77,4 +77,26 @@ describe('indexado · VerumSwapIndexProvider (robustez de rede)', () => {
     const p = new VerumSwapIndexProvider(cfg, ok([{ provider: 'mm1', grossOut: '1000000' }, { grossOut: 'xyz' }, { provider: 'mm2' }]));
     await expect(p.snapshot(REQ)).rejects.toMatchObject({ code: 'INDEX_UNRELIABLE' }); // só 1 válida < minProviders
   });
+
+  it('tolera invólucros e nomes de campo alternativos do motor', async () => {
+    // lista sob {data:{quotes}}, grossOut como "amountOut"/"toAmount", provider como "dex"/"source", number inteiro
+    const p = new VerumSwapIndexProvider(cfg, ok({ data: { quotes: [
+      { dex: 'uni', amountOut: '1000000', id: 'q1', expiry: 9999999999 },      // expiry em SEGUNDOS
+      { source: 'curve', toAmount: 1000500, routeId: 'q2' },                   // number inteiro
+    ] } }));
+    const s = await p.snapshot(REQ);
+    expect(s.sources).toHaveLength(2);
+    expect(s.sources.map(x => x.provider).sort()).toEqual(['curve', 'uni']);
+  });
+  it('grossOut aninhado em {amount} e sem provider (numera a fonte)', async () => {
+    const p = new VerumSwapIndexProvider(cfg, ok({ results: [
+      { out: { amount: '1000000' } }, { out: { amount: '1000400' } },
+    ] }));
+    const s = await p.snapshot(REQ);
+    expect(s.sources).toHaveLength(2); // provider ausente → rotulado src-1/src-2, cotações mantidas
+  });
+  it('fração em grossOut é rejeitada (unidades mínimas são inteiras)', async () => {
+    const p = new VerumSwapIndexProvider(cfg, ok([{ provider: 'a', grossOut: '1000000.5' }, { provider: 'b', grossOut: '1000000' }]));
+    await expect(p.snapshot(REQ)).rejects.toMatchObject({ code: 'INDEX_UNRELIABLE' }); // só 1 inteira válida < minProviders
+  });
 });
