@@ -3985,7 +3985,7 @@ window.addEventListener('unhandledrejection',function(e){try{console.warn('[veru
         }
       }catch(e){}
       pRender(); pTick();
-    }catch(e){ if(e.status===401||e.status===403){ try{ sessionStorage.removeItem('verum_mesa_pt_'+P_MESA); localStorage.removeItem('verum_mesa_pt_'+P_MESA); }catch(x){} P_TOK=''; pReentry('Sessão expirada — reconecte para continuar vendo a operação.'); } }
+    }catch(e){ const semSessao=!!(e&&(e.status===401||(e.code==='FORBIDDEN'&&/sess[ãa]o/i.test(e.message||'')))); if(semSessao){ try{ sessionStorage.removeItem('verum_mesa_pt_'+P_MESA); localStorage.removeItem('verum_mesa_pt_'+P_MESA); }catch(x){} P_TOK=''; pReentry('Sessão expirada — reconecte para continuar vendo a operação.'); } }
   }
   // AUTO-CURA do passo ON-CHAIN órfão: quem assinou a MESA enquanto o contrato ainda não existia
   // (operações antigas / corrida rara) fica com o signV2 pendente — a liquidação morreria na
