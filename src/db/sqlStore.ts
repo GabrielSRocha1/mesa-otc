@@ -8,6 +8,7 @@ import path from 'node:path';
 import type { AuditEvent, Deal, DealEvent, RiskEvent, SettlementRecord, SignatureRecord } from '../domain/types.js';
 import { DomainError } from '../domain/errors.js';
 import type { MesaInviteRow, NonceRow, Store } from './repository.js';
+import type { IndexedPricingRecord, IndexFixingSource } from '../indexing/types.js';
 
 export interface SqlClient { query<T = Record<string, unknown>>(sql: string, params?: unknown[]): Promise<{ rows: T[] }>; /** Executa script com múltiplas instruções (migrações). */ exec?(sql: string): Promise<void>; close?(): Promise<void> }
 
@@ -72,6 +73,20 @@ export class SqlStore implements Store {
   async listAudit(limit = 1000): Promise<AuditEvent[]> { const r = await this.sql.query<Record<string, unknown>>('SELECT * FROM audit_events ORDER BY seq DESC LIMIT $1', [limit]); return r.rows.map(x => this.mapAudit(x)).reverse(); }
   async getIdempotent(key: string, actorId: string): Promise<{ requestHash: string; response: unknown } | null> { const r = await this.sql.query<Record<string, unknown>>('SELECT request_hash, response FROM idempotency_keys WHERE key=$1 AND actor_id=$2', [key, actorId]); const x = r.rows[0]; return x ? { requestHash: x.request_hash as string, response: parseDoc<unknown>(x.response) } : null; }
   async putIdempotent(key: string, actorId: string, requestHash: string, response: unknown, at: number): Promise<void> { await this.sql.query('INSERT INTO idempotency_keys (key, actor_id, request_hash, response, created_at) VALUES ($1,$2,$3,$4,$5) ON CONFLICT DO NOTHING', [key, actorId, requestHash, JSON.stringify(response), at]); }
+  /* ---------- Operar Indexado ---------- */
+  private mapIndexedPricing(x: Record<string, unknown>): IndexedPricingRecord {
+    return { mesaId: x.mesa_id as string, termsVersion: Number(x.terms_version), mode: x.mode as IndexedPricingRecord['mode'], indexSource: 'VERUM_SWAP', spreadBps: Number(x.spread_bps), maxMoveBps: Number(x.max_move_bps), fixingTtlSec: Number(x.fixing_ttl_sec), status: x.status as IndexedPricingRecord['status'], baseAmount: (x.base_amount as string | null) ?? null, fixingPriceE18: (x.fixing_price_e18 as string | null) ?? null, fixingSources: x.fixing_sources == null ? null : parseDoc<IndexFixingSource[]>(x.fixing_sources), fixingDispersionBps: (x.fixing_dispersion_bps as string | null) ?? null, quoteAmount: (x.quote_amount as string | null) ?? null, roundingResidual: (x.rounding_residual as string | null) ?? null, fixingHash: (x.fixing_hash as string | null) ?? null, fixedAt: x.fixed_at === null || x.fixed_at === undefined ? null : Number(x.fixed_at), fixingExpiresAt: x.fixing_expires_at === null || x.fixing_expires_at === undefined ? null : Number(x.fixing_expires_at), createdBy: x.created_by as string, createdAt: Number(x.created_at), updatedAt: Number(x.updated_at) };
+  }
+  async getIndexedPricing(mesaId: string): Promise<IndexedPricingRecord | null> { const r = await this.sql.query<Record<string, unknown>>('SELECT * FROM mesa_indexed_pricing WHERE mesa_id=$1 ORDER BY terms_version DESC LIMIT 1', [mesaId]); const x = r.rows[0]; return x ? this.mapIndexedPricing(x) : null; }
+  async upsertIndexedPricing(rec: IndexedPricingRecord): Promise<void> {
+    const sources = rec.fixingSources == null ? null : JSON.stringify(rec.fixingSources);
+    await this.sql.query(
+      `INSERT INTO mesa_indexed_pricing (mesa_id, terms_version, mode, index_source, spread_bps, max_move_bps, fixing_ttl_sec, status, base_amount, fixing_price_e18, fixing_sources, fixing_dispersion_bps, quote_amount, rounding_residual, fixing_hash, fixed_at, fixing_expires_at, created_by, created_at, updated_at)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20)
+       ON CONFLICT (mesa_id, terms_version) DO UPDATE SET mode=$3, index_source=$4, spread_bps=$5, max_move_bps=$6, fixing_ttl_sec=$7, status=$8, base_amount=$9, fixing_price_e18=$10, fixing_sources=$11, fixing_dispersion_bps=$12, quote_amount=$13, rounding_residual=$14, fixing_hash=$15, fixed_at=$16, fixing_expires_at=$17, updated_at=$20`,
+      [rec.mesaId, rec.termsVersion, rec.mode, rec.indexSource, rec.spreadBps, rec.maxMoveBps, rec.fixingTtlSec, rec.status, rec.baseAmount, rec.fixingPriceE18, sources, rec.fixingDispersionBps, rec.quoteAmount, rec.roundingResidual, rec.fixingHash, rec.fixedAt, rec.fixingExpiresAt, rec.createdBy, rec.createdAt, rec.updatedAt]);
+  }
+  async deleteIndexedPricing(mesaId: string, termsVersion: number): Promise<void> { await this.sql.query('DELETE FROM mesa_indexed_pricing WHERE mesa_id=$1 AND terms_version=$2', [mesaId, termsVersion]); }
   async close(): Promise<void> { await this.sql.close?.(); }
 }
 

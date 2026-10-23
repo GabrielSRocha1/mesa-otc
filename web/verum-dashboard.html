@@ -1020,6 +1020,26 @@ window.addEventListener('unhandledrejection',function(e){try{console.warn('[veru
             <div id="m3dCfgStatus" class="fh" style="margin-top:10px;min-height:16px"></div>
             <button class="btn btn-primary btn-block" id="m3dSaveCfg" type="button" style="margin-top:4px"><svg viewBox="0 0 24 24"><path d="M19 21H5a2 2 0 01-2-2V5a2 2 0 012-2h11l5 5v11a2 2 0 01-2 2z"/><path d="M17 21v-8H7v8M7 3v5h8"/></svg>Salvar alterações na mesa</button>
             <button class="btn btn-block" id="m3dReopen" type="button" style="margin-top:8px;display:none;border-color:var(--amber);color:#fde68a"><svg viewBox="0 0 24 24"><path d="M3 12a9 9 0 019-9 9 9 0 018 5M21 12a9 9 0 01-9 9 9 9 0 01-8-5"/><path d="M17 8h4V4M7 16H3v4"/></svg>Reabrir para editar (invalida assinaturas)</button>
+            <!-- Operar Indexado: preço indexado ao Verum Swap (off-chain, congelado em valores fixos antes das assinaturas) -->
+            <div id="m3dIdx" style="margin-top:14px;border-top:1px solid var(--line);padding-top:12px">
+              <div class="card-h" style="margin-bottom:6px"><div class="t" style="font-size:13.5px">Preço <span style="color:var(--ink-3);font-weight:400">· Fixo ou Indexado</span></div><span class="badge info" id="m3dIdxSeal" style="display:none">Indexado ao Verum Swap</span></div>
+              <div class="form-row" style="border-bottom:none">
+                <label style="display:flex;align-items:center;gap:8px;cursor:pointer"><input type="radio" name="m3dPriceMode" id="m3dModeFixed" value="FIXED" checked><span style="font-size:12.5px;color:var(--ink-2);font-weight:600">Fixo</span></label>
+                <label style="display:flex;align-items:center;gap:8px;cursor:pointer;margin-left:18px"><input type="radio" name="m3dPriceMode" id="m3dModeIndexed" value="INDEXED_VERUM_SWAP"><span style="font-size:12.5px;color:var(--ink-2);font-weight:600">Indexado ao Verum Swap</span></label>
+              </div>
+              <div id="m3dIdxPanel" style="display:none;margin-top:8px">
+                <div id="m3dIdxDisabled" class="fh" style="display:none;color:var(--amber);border:1px solid var(--line);border-radius:10px;padding:8px 10px;margin-bottom:8px"></div>
+                <div class="form-row"><div><div class="fl">Spread (bps)</div><div class="fh">Positivo = a favor do Vendedor · negativo = a favor do Comprador</div></div><input class="inp" id="m3dIdxSpread" type="number" step="1" value="0" style="max-width:120px;text-align:right"></div>
+                <button class="btn btn-primary btn-block" id="m3dIdxFix" type="button" style="margin-top:8px"><svg viewBox="0 0 24 24"><path d="M12 1v22M17 5H9.5a3.5 3.5 0 000 7h5a3.5 3.5 0 010 7H6"/></svg>Fixar preço agora</button>
+                <div id="m3dIdxCard" style="display:none;margin-top:10px;border:1px solid var(--line);border-radius:12px;padding:12px;background:var(--blue-soft)">
+                  <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px"><span class="badge ok" id="m3dIdxStatus">Fixado</span><span class="fh mono" id="m3dIdxTimer">—</span></div>
+                  <div class="kv" id="m3dIdxKv"></div>
+                  <div class="fh" id="m3dIdxSources" style="margin-top:6px"></div>
+                </div>
+                <button class="btn btn-block" id="m3dIdxRemove" type="button" style="margin-top:8px;border-color:var(--ink-4)">Voltar ao preço fixo</button>
+                <div class="fh" style="margin-top:10px;color:var(--ink-3);line-height:1.5">⚠️ O preço é congelado no momento do fixing; variações posteriores não alteram os valores assinados.<br>Pernas fora da plataforma continuam <b>NÃO GARANTIDAS POR CONTRATO</b>.</div>
+              </div>
+            </div>
           </div>
           <div>
             <div class="card-h" style="margin-bottom:6px"><div class="t" style="font-size:13.5px">Saldos e aprovação</div></div>
@@ -3198,6 +3218,7 @@ window.addEventListener('unhandledrejection',function(e){try{console.warn('[veru
       // Mesa aprovada mas ainda NÃO irreversível → oferece reabrir para editar (invalida assinaturas).
       const canReopen=frozen && !m.irreversible;
       const rb=$('#m3dReopen'); if(rb) rb.style.display=canReopen?'':'none';
+      void idxLoad(); // Operar Indexado: reflete modo/fixing/timer a cada refresh (admin)
       if(frozen && !m3CfgDirty){ const st=$('#m3dCfgStatus'); if(st) st.innerHTML = m.irreversible
         ? '<span style="color:var(--ink-3)">🔒 Operação irreversível — configuração travada.</span>'
         : '<span style="color:var(--amber)">Operação aprovada — configuração congelada. Clique em "Reabrir para editar" para alterar (as assinaturas serão invalidadas e os participantes reassinam).</span>'; }
@@ -3297,6 +3318,54 @@ window.addEventListener('unhandledrejection',function(e){try{console.warn('[veru
     body.discountBps=d; body.commissionBps=c; body.commissionPayer=$('#m3dPayer').value||'SELLER';
     try{ await pmApi('/v1/portal/mesas/'+m3Sel+'/config',{method:'PATCH',body}); m3CfgDirty=false; m3CfgDirtyUI(true); toast('Alterações salvas na mesa','ok'); m3Refresh(); }
     catch(e){ toast(e.message,'err'); }
+  }
+  /* ---------- Operar Indexado (preço indexado ao Verum Swap) ---------- */
+  let idxState=null, idxTickOn=false;
+  const idxFmt=(base,ch)=>ch&&base?baseToHuman(base,ch.expectedAsset.decimals)+' '+ch.expectedAsset.symbol:(base||'—');
+  async function idxLoad(){ if(!m3Sel) return; try{ idxState=await pmApi('/v1/mesas/'+m3Sel+'/indexed-pricing'); }catch(e){ idxState=null; } idxRender(); }
+  function idxBaseFromForm(){ const sellCh=((m3Cache&&m3Cache.chairs)||[]).find(c=>c.role==='SELLER'); const amt=($('#m3dAmount').value||'').trim(); return sellCh&&amt?humanToBase(amt,sellCh.expectedAsset.decimals):null; }
+  async function idxSetMode(mode){
+    if(!m3Sel) return;
+    try{
+      if(mode==='INDEXED_VERUM_SWAP'){ const spreadBps=parseInt($('#m3dIdxSpread').value||'0',10)||0; const baseAmount=idxBaseFromForm(); await pmApi('/v1/mesas/'+m3Sel+'/indexed-pricing',{method:'POST',body:Object.assign({spreadBps},baseAmount?{baseAmount:baseAmount}:{})}); }
+      else { await pmApi('/v1/mesas/'+m3Sel+'/indexed-pricing',{method:'DELETE'}); toast('De volta ao preço fixo','ok'); }
+    }catch(e){ toast((e&&e.message)||'Falha ao mudar o modo de preço','err'); }
+    idxState=null; await idxLoad();
+  }
+  async function idxFix(confirmMove){
+    if(!m3Sel) return;
+    const spreadBps=parseInt($('#m3dIdxSpread').value||'0',10)||0; const baseAmount=idxBaseFromForm();
+    if(!baseAmount){ toast('Defina a Quantidade do Vendedor antes de fixar','err'); return; }
+    const btn=$('#m3dIdxFix'); if(btn){ btn.disabled=true; btn.textContent='Consultando o Verum Swap…'; }
+    try{
+      await pmApi('/v1/mesas/'+m3Sel+'/indexed-pricing',{method:'POST',body:{spreadBps:spreadBps,baseAmount:baseAmount}});
+      await pmApi('/v1/mesas/'+m3Sel+'/indexed-pricing/fix',{method:'POST',body:confirmMove?{confirmMove:true}:{}});
+      toast('Preço fixado ✓ — congelado em valores concretos','ok'); idxState=null; await idxLoad(); m3Refresh();
+    }catch(e){
+      if(e&&e.code==='INDEX_MOVE_CONFIRM'){ const d=(e.details)||{}; if(confirm('O novo preço diverge '+(d.moveBps||'?')+' bps do fixing anterior (limite '+(d.maxMoveBps||'?')+' bps).\nConfirmar o novo fixing?')){ if(btn){ btn.disabled=false; } return idxFix(true); } }
+      else toast((e&&e.message)||'Falha ao fixar o preço','err');
+    }finally{ if(btn){ btn.disabled=false; btn.innerHTML='<svg viewBox="0 0 24 24"><path d="M12 1v22M17 5H9.5a3.5 3.5 0 000 7h5a3.5 3.5 0 010 7H6"/></svg>Fixar preço agora'; } }
+  }
+  function idxTimer(){ const el=$('#m3dIdxTimer'); if(!el) return; const r=idxState&&idxState.record; if(!r||!r.fixingExpiresAt){ el.textContent='—'; return; } const ms=r.fixingExpiresAt-Date.now(); if(ms<=0){ el.style.color='var(--red)'; el.textContent='fixing expirado — fixe novamente'; return; } const s=Math.floor(ms/1000); el.style.color='var(--ink-3)'; el.textContent='expira em '+String(Math.floor(s/60)).padStart(2,'0')+':'+String(s%60).padStart(2,'0'); }
+  function idxRender(){
+    if(!$('#m3dIdx')) return;
+    const st=idxState||{enabled:true,mode:'FIXED',record:null}; const indexed=st.mode==='INDEXED_VERUM_SWAP'; const frozen=!!(m3Cache&&m3Cache.approvedAt);
+    const fm=$('#m3dModeFixed'), im=$('#m3dModeIndexed');
+    if(fm&&document.activeElement!==fm) fm.checked=!indexed; if(im&&document.activeElement!==im) im.checked=indexed;
+    $('#m3dIdxSeal').style.display=indexed?'':'none'; $('#m3dIdxPanel').style.display=indexed?'':'none';
+    const dis=$('#m3dIdxDisabled'); if(dis){ if(st.enabled===false){ dis.style.display=''; dis.textContent='Modo indexado indisponível neste ambiente (motor Verum Swap não configurado).'; } else dis.style.display='none'; }
+    ['m3dModeFixed','m3dModeIndexed','m3dIdxSpread','m3dIdxRemove'].forEach(id=>{ const el=document.getElementById(id); if(el) el.disabled=frozen; });
+    const fixBtn=$('#m3dIdxFix'); if(fixBtn) fixBtn.disabled=frozen||st.enabled===false;
+    const r=st.record; const sp=$('#m3dIdxSpread'); if(r&&sp&&document.activeElement!==sp) sp.value=r.spreadBps;
+    const card=$('#m3dIdxCard');
+    if(indexed&&r&&r.fixingHash&&(r.status==='FIXED'||r.status==='LOCKED')){
+      const chairs=(m3Cache&&m3Cache.chairs)||[]; const sellCh=chairs.find(c=>c.role==='SELLER'), buyCh=chairs.find(c=>c.role==='BUYER');
+      const row=(k,v)=>'<div class="r"><span class="k">'+k+'</span><span class="v mono">'+esc(String(v))+'</span></div>';
+      $('#m3dIdxKv').innerHTML=row('Vendedor entrega',idxFmt(r.baseAmount,sellCh))+row('Comprador entrega',idxFmt(r.quoteAmount,buyCh))+row('Spread',r.spreadBps+' bps')+row('Dispersão',(r.fixingDispersionBps||'—')+' bps')+row('Resíduo',r.roundingResidual||'0');
+      $('#m3dIdxSources').textContent='Fontes: '+((r.fixingSources||[]).length)+' · Verum Swap · fixing '+String(r.fixingHash).slice(0,12)+'…';
+      $('#m3dIdxStatus').textContent=r.status==='LOCKED'?'Travado (assinaturas)':'Fixado';
+      card.style.display=''; if(!idxTickOn){ idxTickOn=true; setInterval(idxTimer,1000); } idxTimer();
+    } else if(card) card.style.display='none';
   }
   // Overlay de progresso do approve: a assinatura do registro na carteira deixa de ser "susto" —
   // o PM vê o que vem antes de a carteira abrir. Fora do #modalRoot (usado pelo convite).
@@ -3415,6 +3484,11 @@ window.addEventListener('unhandledrejection',function(e){try{console.warn('[veru
     ['sellNet','buyNet'].forEach(k=>{ const el=document.querySelector('[data-m3adv="'+k+'"]'); if(el) el.innerHTML=advNets; });
     ['sellNet','sellSym','sellContract','sellDec','buyNet','buySym','buyContract','buyDec'].forEach(k=>{ const el=document.querySelector('[data-m3adv="'+k+'"]'); if(el){ el.addEventListener('input',m3PlanHint); el.addEventListener('change',m3PlanHint); } });
     const sc=$('#m3dSaveCfg'); if(sc) sc.addEventListener('click',m3SaveCfg);
+    // Operar Indexado: alterna modo Fixo|Indexado, fixa/refixa e volta a FIXED.
+    const imI=$('#m3dModeIndexed'); if(imI) imI.addEventListener('change',()=>idxSetMode('INDEXED_VERUM_SWAP'));
+    const fmI=$('#m3dModeFixed'); if(fmI) fmI.addEventListener('change',()=>idxSetMode('FIXED'));
+    const ixF=$('#m3dIdxFix'); if(ixF) ixF.addEventListener('click',()=>idxFix(false));
+    const ixR=$('#m3dIdxRemove'); if(ixR) ixR.addEventListener('click',()=>idxSetMode('FIXED'));
     // Troca de token no Gerenciar: abre o modal de moedas e salva no ativo da cadeira (PATCH), recarrega.
     const tkSell=$('#m3dSellToken'); if(tkSell) tkSell.addEventListener('click',()=>{ const c=m3dChairToken.SELLER; if(c) pickChairToken(m3Sel, c.chairId, 'SELLER', c.expectedAsset, ()=>{ m3CfgDirty=false; m3Refresh(); }); });
     const tkBuy=$('#m3dBuyToken'); if(tkBuy) tkBuy.addEventListener('click',()=>{ const c=m3dChairToken.BUYER; if(c) pickChairToken(m3Sel, c.chairId, 'BUYER', c.expectedAsset, ()=>{ m3CfgDirty=false; m3Refresh(); }); });

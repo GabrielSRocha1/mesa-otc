@@ -89,6 +89,19 @@ const Schema = z.object({
   // Demo: adia o financiamento do escrow para a 1ª assinatura (em vez de financiar ao criar o deal).
   // Assim a mesa aprovada fica "não irreversível" e o botão "Reabrir para editar" aparece no demo.
   DEMO_DEFER_FUNDING: z.coerce.boolean().default(false),
+  // ---- Operar Indexado (preço indexado ao Verum Swap) — grupo all-or-nothing ----
+  // Endpoint SERVER-SIDE do motor de swap da Verum (POST {URL}/api/swap/quote) + chave. Ausente em prod
+  // ⇒ modo indexado DESLIGADO (fail-closed, nunca simula preço em produção). Em dev/testnet sem URL, um
+  // MockIndexProvider in-process é usado (preço de dev; nunca em prod).
+  VERUM_SWAP_ENGINE_URL: z.string().optional(),
+  VERUM_SWAP_ENGINE_KEY: z.string().optional(),
+  VERUM_SWAP_TIMEOUT_MS: z.coerce.number().int().min(500).max(15_000).default(3_000),
+  VERUM_SWAP_MIN_PROVIDERS: z.coerce.number().int().min(1).max(20).default(2),
+  VERUM_SWAP_MAX_DISPERSION_BPS: z.coerce.number().int().min(1).max(5_000).default(100),
+  VERUM_SWAP_SPREAD_BPS_MIN: z.coerce.number().int().min(-5_000).max(0).default(-500),
+  VERUM_SWAP_SPREAD_BPS_MAX: z.coerce.number().int().min(0).max(5_000).default(500),
+  VERUM_SWAP_MAX_MOVE_BPS: z.coerce.number().int().min(1).max(5_000).default(100),
+  VERUM_SWAP_FIXING_TTL_SEC: z.coerce.number().int().min(60).max(3_600).default(600),
   // Web Push (notificação "é sua vez de assinar"). Sem as chaves → push simplesmente desligado
   // (degradação graciosa). Gere com `npx web-push generate-vapid-keys`.
   VAPID_PUBLIC_KEY: z.string().optional(),
@@ -118,6 +131,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
     ['TRON', [c.TRON_FULL_HOST, c.TRON_CHAIN_ID, c.TRON_ESCROW_ADDRESS, c.TRON_EXECUTOR_KEY, c.TRON_ATTESTOR_KEY, c.TRON_TUSDT, c.TRON_TBTC]],
     ['BITCOIN', [c.BITCOIN_ESPLORA_URL, c.BITCOIN_NETWORK, c.BITCOIN_CLAIM_KEY, c.BITCOIN_REFUND_KEY]],
     ['LND', [c.LND_REST_URL, c.LND_MACAROON, c.LND_TLS_CERT]],
+    ['VERUM_SWAP_ENGINE', [c.VERUM_SWAP_ENGINE_URL, c.VERUM_SWAP_ENGINE_KEY]],
   ];
   for (const [name, keys] of groups) {
     const set = keys.filter(Boolean).length;
@@ -154,6 +168,13 @@ export function bitcoinConfig(c: Config): BitcoinSettingsCfg | null {
   if (c.BITCOIN_SIMULATE === '1') return null;
   if (!c.BITCOIN_ESPLORA_URL || !c.BITCOIN_NETWORK || !c.BITCOIN_CLAIM_KEY || !c.BITCOIN_REFUND_KEY) return null;
   return { esploraUrl: c.BITCOIN_ESPLORA_URL, network: c.BITCOIN_NETWORK, claimKey: c.BITCOIN_CLAIM_KEY, refundKey: c.BITCOIN_REFUND_KEY, confirmations: c.BITCOIN_CONFIRMATIONS, csvBlocks: c.BITCOIN_CSV_BLOCKS, feeFloorSatVb: c.BITCOIN_FEE_FLOOR_SAT_VB };
+}
+
+/** Operar Indexado — motor de swap da Verum. null = grupo ausente (modo indexado desligado / mock em dev). */
+export interface VerumSwapSettings { baseUrl: string; apiKey: string; timeoutMs: number; minProviders: number; maxDispersionBps: number }
+export function verumSwapEngineConfig(c: Config): VerumSwapSettings | null {
+  if (!c.VERUM_SWAP_ENGINE_URL || !c.VERUM_SWAP_ENGINE_KEY) return null;
+  return { baseUrl: c.VERUM_SWAP_ENGINE_URL.replace(/\/$/, ''), apiKey: c.VERUM_SWAP_ENGINE_KEY, timeoutMs: c.VERUM_SWAP_TIMEOUT_MS, minProviders: c.VERUM_SWAP_MIN_PROVIDERS, maxDispersionBps: c.VERUM_SWAP_MAX_DISPERSION_BPS };
 }
 
 /** Escrow canônico Verum — Tron (Nile). null = grupo ausente. */

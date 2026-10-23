@@ -3,6 +3,7 @@
  * Regras impostas aqui e no schema: lock otimista por versão, uma liquidação por Deal, eventos append-only.
  */
 import type { AuditEvent, Deal, DealEvent, RiskEvent, SettlementRecord, SignatureRecord } from '../domain/types.js';
+import type { IndexedPricingRecord } from '../indexing/types.js';
 
 export interface NonceRow { value: string; kind: 'challenge' | 'approval'; dealId: string | null; revision: number | null; role: string | null; subject: string | null; issuedAt: number; expiresAt: number; consumedAt: number | null }
 
@@ -55,5 +56,12 @@ export interface Store {
   revokeMesaInvite(inviteId: string, mesaId: string): Promise<boolean>;
   getIdempotent(key: string, actorId: string): Promise<{ requestHash: string; response: unknown } | null>;
   putIdempotent(key: string, actorId: string, requestHash: string, response: unknown, at: number): Promise<void>;
+  /* ---------- Operar Indexado (fixing do preço indexado, 1:1 com a mesa, versionado) ---------- */
+  /** Versão CORRENTE do fixing (maior terms_version) da mesa. null = mesa em modo FIXED (padrão). */
+  getIndexedPricing(mesaId: string): Promise<IndexedPricingRecord | null>;
+  /** Insere/atualiza uma versão do fixing. Linhas LOCKED são imutáveis (trigger) — refixar cria nova versão. */
+  upsertIndexedPricing(rec: IndexedPricingRecord): Promise<void>;
+  /** Remove uma versão NÃO travada (volta a FIXED antes das assinaturas). */
+  deleteIndexedPricing(mesaId: string, termsVersion: number): Promise<void>;
   close(): Promise<void>;
 }

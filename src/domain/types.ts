@@ -90,6 +90,11 @@ export interface Pricing {
   networkCostEstimateUsd: { in: string; out: string };
   netAmountSellerBase: string;  // líquido do vendedor em assetOut
   priceSnapshotId: string;
+  /** Operar Indexado: SHA-256 do fixing (preço indexado congelado) quando o preço veio do Verum Swap.
+   *  Entra no dealHash (via pricingHash) para que os 4 assinem o fixing concreto. undefined em FIXED
+   *  (omitido por canonicalize → hash byte-idêntico ao fluxo atual). O contrato on-chain NÃO muda:
+   *  ele sempre liquida os valores fixos das pernas; este campo é só do envelope off-chain assinado. */
+  indexedFixingHash?: string;
 }
 
 export interface RouteLegPlan { escrowChain: Network; escrowContract: string; mode: SettlementMode; fundingOrder: number; timelockSec: number }
@@ -164,6 +169,11 @@ export interface DealDraft {
   assetIn: CanonicalAsset; assetOut: CanonicalAsset; amountInBase: string;
   discountBps: number; commissionBps: number; commissionSplitBps: number[]; maxSlippageBps: number; maxPriceDriftBps: number; expiresInSec: number;
   participants: Participant[];
+  /** Operar Indexado: hash do fixing a congelar em terms.pricing.indexedFixingHash (ausente em FIXED). */
+  indexedFixingHash?: string;
+  /** Operar Indexado: quantidade do COMPRADOR já FIXADA (quoteAmount). Quando presente, substitui o
+   *  amountOut derivado do oráculo na perna do Comprador — o preço indexado é congelado em valor concreto. */
+  fixedAmountOutBase?: string;
 }
 
 export interface RiskEvent { id: string; dealId: string | null; wallet: string | null; rule: string; severity: 'LOW' | 'MEDIUM' | 'HIGH' | 'CRITICAL'; decision: 'ALLOW' | 'REVIEW' | 'BLOCK'; evidence: Record<string, unknown>; at: number }

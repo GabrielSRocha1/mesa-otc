@@ -44,7 +44,12 @@ export const CreateDealInput = z.object({
   // LIGHTNING_SWAP: o hashlock e a invoice vêm do COMPRADOR (a mesa não gera a preimage). payment_hash
   // da invoice == lightningHtlcHash == htlcHash do deal. Só válidos quando a perna é lightning.
   lightningHtlcHash: z.string().regex(/^[0-9a-f]{64}$/i).optional(),
-  lightningInvoice: z.string().min(10).optional()
+  lightningInvoice: z.string().min(10).optional(),
+  // Operar Indexado: hash do fixing (preço indexado já congelado em valores fixos antes das assinaturas).
+  // Quando presente, entra em terms.pricing.indexedFixingHash → dealHash → assinaturas. Opcional (FIXED não envia).
+  indexedFixingHash: z.string().regex(/^[0-9a-f]{64}$/i).optional(),
+  // Operar Indexado: quoteAmount já fixado (perna do Comprador). Substitui o amountOut do oráculo.
+  fixedAmountOutBase: z.string().regex(/^[1-9][0-9]*$/).optional()
 });
 export type CreateDealInputT = z.infer<typeof CreateDealInput>;
 
@@ -134,7 +139,7 @@ export class DealEngine {
     // LIGHTNING: a perna BTC (assetIn 'lightning', do VENDEDOR/market-maker) é ENTREGUE no settle —
     // o Vendedor NÃO deposita. fundingRequired do Vendedor = false; só o Comprador (USDT) financia.
     const lnSell = assetIn.network === 'lightning';
-    const deal: Deal = { id, version: 1, state: 'DRAFT', revision: 1, terms: null, hash: null, draft: { assetIn, assetOut, amountInBase: input.amountInBase, discountBps: input.discountBps, commissionBps: input.commissionBps, commissionSplitBps: split, maxSlippageBps: input.maxSlippageBps, maxPriceDriftBps: input.maxPriceDriftBps, expiresInSec: input.expiresInSec, participants },
+    const deal: Deal = { id, version: 1, state: 'DRAFT', revision: 1, terms: null, hash: null, draft: { assetIn, assetOut, amountInBase: input.amountInBase, discountBps: input.discountBps, commissionBps: input.commissionBps, commissionSplitBps: split, maxSlippageBps: input.maxSlippageBps, maxPriceDriftBps: input.maxPriceDriftBps, expiresInSec: input.expiresInSec, participants, ...(input.indexedFixingHash ? { indexedFixingHash: input.indexedFixingHash.toLowerCase() } : {}), ...(input.fixedAmountOutBase ? { fixedAmountOutBase: input.fixedAmountOutBase } : {}) },
       participants: participants.map(p => { const fundReq = (p.role === 'SELLER' && !lnSell) || p.role === 'BUYER'; return { ...p, connected: p.address.toLowerCase() === actor.toLowerCase(), fundingRequired: fundReq, funding: fundReq ? 'PENDING' : 'N/A', riskLevel: 'UNKNOWN' }; }),
       requiredSignatures: participants.length, validSignatures: 0, signatures: [], settlement: null, refunds: [], risk: null, createdBy: actor, createdAt: t, updatedAt: t, expiresAt: t + input.expiresInSec * 1000, turnRole: null, turnExpiresAt: null, shareToken: randomHex(32), onChain: {},
       ...(input.lightningHtlcHash ? { lightningHtlcHash: input.lightningHtlcHash.toLowerCase() } : {}), ...(input.lightningInvoice ? { lightningInvoice: input.lightningInvoice } : {}) } as Deal;
@@ -181,9 +186,14 @@ export class DealEngine {
       if (!liq.sufficient) { await this.persist(deal, 'liquidity.insufficient', actor, { reasons: liq.reasons }); throw new DomainError('LIQUIDITY_INSUFFICIENT', liq.reasons.join('; '), { assessment: liq }); }
       const routes = await this.d.router.plan({ assetIn: dr.assetIn, assetOut: dr.assetOut, participants: dr.participants, expiresInSec: Math.max(60, Math.floor((deal.expiresAt - this.now()) / 1000)) }); const route = this.d.router.select(routes);
       const escrowFor = (n: Network) => route.legs.find(l => l.escrowChain === n) as Terms['route']['legs'][number];
+      // Operar Indexado: a perna do Comprador é a quantidade JÁ FIXADA (quoteAmount do fixing), não o
+      // amountOut do oráculo. FIXED mantém o amountOut do oráculo (comportamento atual, intacto). O fee de
+      // protocolo (líquido do Vendedor) acompanha a perna efetivamente entregue ao Vendedor.
+      const amountOutBase = dr.fixedAmountOutBase ?? econ.amountOutBase;
+      const feeBase = BigInt(amountOutBase) * BigInt(this.d.config.platformFeeBps) / 10000n;
       const legs: Leg[] = [
         { index: 0, asset: dr.assetIn, amountBase: econ.amountInEffectiveBase, from: 'SELLER', to: 'BUYER', escrowChain: dr.assetIn.network, escrowContract: escrowFor(dr.assetIn.network).escrowContract, mode: escrowFor(dr.assetIn.network).mode },
-        { index: 1, asset: dr.assetOut, amountBase: econ.amountOutBase, from: 'BUYER', to: 'SELLER', escrowChain: dr.assetOut.network, escrowContract: escrowFor(dr.assetOut.network).escrowContract, mode: escrowFor(dr.assetOut.network).mode }
+        { index: 1, asset: dr.assetOut, amountBase: amountOutBase, from: 'BUYER', to: 'SELLER', escrowChain: dr.assetOut.network, escrowContract: escrowFor(dr.assetOut.network).escrowContract, mode: escrowFor(dr.assetOut.network).mode }
       ];
       // HTLC on-chain: a mesa GERA a preimage (exposta só ao Vendedor; override no runner resumível).
       // LIGHTNING_SWAP: o htlcHash vem do COMPRADOR (deal.lightningHtlcHash) — a mesa NÃO conhece a
@@ -192,7 +202,12 @@ export class DealEngine {
       const htlc = route.kind === 'HTLC' ? { preimage: this.d.config.htlcPreimageHex && /^[0-9a-f]{64}$/i.test(this.d.config.htlcPreimageHex) ? this.d.config.htlcPreimageHex.toLowerCase() : randomHex(32) } : null;
       const htlcHash = route.kind === 'LIGHTNING_SWAP' ? lnHash : (htlc ? htlcHashOf(htlc.preimage) : undefined);
       if (route.kind === 'LIGHTNING_SWAP' && !htlcHash) throw new DomainError('INVALID_INPUT', 'operação Lightning exige lightningHtlcHash (payment_hash da invoice do Comprador)');
-      const terms: Terms = { schemaVersion: 1, environment: this.d.config.env, dealId: deal.id, revision: deal.revision, createdAt: deal.createdAt, expiresAt: deal.expiresAt, participants: dr.participants, requiredSignatures: deal.requiredSignatures, legs, pricing: econ.pricing, route: { routeId: route.routeId, kind: route.kind, legs: route.legs, ...(htlcHash ? { htlcHash } : {}) }, dealNonce: randomHex(16) };
+      // Operar Indexado: o fixing (preço indexado já congelado) entra no pricing congelado → dealHash →
+      // envelope assinado pelos 4. FIXED não tem fixing: campo omitido (canonicalize ignora undefined → hash idêntico).
+      const pricing = (dr.indexedFixingHash || dr.fixedAmountOutBase)
+        ? { ...econ.pricing, ...(dr.indexedFixingHash ? { indexedFixingHash: dr.indexedFixingHash } : {}), ...(dr.fixedAmountOutBase ? { netAmountSellerBase: (BigInt(amountOutBase) - feeBase).toString() } : {}) }
+        : econ.pricing;
+      const terms: Terms = { schemaVersion: 1, environment: this.d.config.env, dealId: deal.id, revision: deal.revision, createdAt: deal.createdAt, expiresAt: deal.expiresAt, participants: dr.participants, requiredSignatures: deal.requiredSignatures, legs, pricing, route: { routeId: route.routeId, kind: route.kind, legs: route.legs, ...(htlcHash ? { htlcHash } : {}) }, dealNonce: randomHex(16) };
       deal.terms = terms; deal.hash = computeDealHash(terms); (deal as Deal & { htlcPreimage?: string }).htlcPreimage = htlc?.preimage;
       await this.transition(deal, 'LIQUIDITY_VERIFIED', actor, { dealHash: deal.hash.dealHash, routeId: route.routeId, priceSnapshotId: snapshot.id, liquidity: { depthUsd: liq.depthUsd, slippageBps: liq.slippageBps } });
       // O registro on-chain acontece no OPEN (não aqui): escrow real tem janela FIXA de 40 min a
