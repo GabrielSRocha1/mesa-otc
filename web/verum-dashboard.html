@@ -3775,13 +3775,16 @@ window.addEventListener('unhandledrejection',function(e){try{console.warn('[veru
       // TERMINOLOGIA por papel: o COMPRADOR não "financia o contrato" — ele AUTORIZA o pagamento
       // (approve); quem financia o ativo à venda é sempre o Vendedor (regra derivada da operação).
       const isBuyerDep=me.role==='BUYER';
-      fundHtml='<div style="margin-top:12px;padding:12px;border:1px solid var(--amber);border-radius:10px">'
-        +'<b style="color:var(--amber)">'+(isBuyerDep?'Autorização de pagamento pendente':'Depósito do ativo à venda pendente')+'</b>'
-        +'<div style="font-size:12.5px;color:var(--ink-2);margin-top:4px">'+(isBuyerDep
-          ?'Autorize o valor do PAGAMENTO pela Verum Wallet (não é o ativo à venda — esse é depositado pelo Vendedor). Pode fazer agora, sem esperar sua vez de assinar.'
-          :'Seu papel deposita o ativo à venda no contrato. Você pode fazer isso agora pela Verum Wallet — não precisa esperar sua vez de assinar.')+'</div>'
-        +'<button class="btn btn-primary btn-block" id="pEscrowDep" style="height:44px;margin-top:8px">'+(isBuyerDep?'Autorizar pagamento agora':'Depositar no escrow agora')+'</button>'
-        +'</div>';
+      // UM CTA SÓ no COMPRADOR: ele NÃO vê botão separado de autorizar — o "Revisar e assinar"
+      // autoriza o pagamento (approve) e assina no MESMO ato (ver pSign). O Vendedor mantém o
+      // depósito explícito (deposita o ativo à venda e assina primeiro na ordem).
+      if(!isBuyerDep){
+        fundHtml='<div style="margin-top:12px;padding:12px;border:1px solid var(--amber);border-radius:10px">'
+          +'<b style="color:var(--amber)">Depósito do ativo à venda pendente</b>'
+          +'<div style="font-size:12.5px;color:var(--ink-2);margin-top:4px">Seu papel deposita o ativo à venda no contrato. Você pode fazer isso agora pela Verum Wallet — não precisa esperar sua vez de assinar.</div>'
+          +'<button class="btn btn-primary btn-block" id="pEscrowDep" style="height:44px;margin-top:8px">Depositar no escrow agora</button>'
+          +'</div>';
+      }
     }
     // PRÓXIMO PASSO SEMPRE VISÍVEL: uma frase derivada do estado dizendo o que falta e de quem —
     // acaba com tela "parada" sem instrução. Puro derive (try/catch no chamador; nunca mata o render).
@@ -4231,6 +4234,13 @@ window.addEventListener('unhandledrejection',function(e){try{console.warn('[veru
         if(fd&&fd.state==='AWAITING_SIGNATURES'&&fd.turnRole!==(pDto.viewer&&pDto.viewer.role)){
           closeModal(); toast('BTC trancado no cofre ✓ — operação aberta. Você assina quando chegar a sua vez.','ok'); pRefresh(); return;
         }
+      }
+      // TOKEN (não-BTC): se a MINHA perna ainda não foi autorizada/depositada, faço no MESMO ato antes
+      // de assinar — o COMPRADOR vê só "Revisar e assinar", que AUTORIZA o pagamento (approve) e assina.
+      if(!btcFirst && myF && myF.status!=='FINAL' && myF.legIndex!=null){
+        if(btn) btn.textContent=(pDto.viewer&&pDto.viewer.role==='BUYER')?'Autorizando o pagamento…':'Depositando no escrow…';
+        await pOnchainStep(d,function(t){ if(btn) btn.textContent=t; },'deposit');
+        try{ await pApi('/v1/deals/'+encodeURIComponent(d.id)+'/legs/'+myF.legIndex+'/deposit',{method:'POST',idem:'fund-'+d.id+'-'+(pDto.viewer&&pDto.viewer.role)}); }catch(e){ /* idempotente; o passo on-chain abaixo revalida */ }
       }
       // 1) Passo ON-CHAIN pela própria carteira (escrow real).
       pStepsAt(stepBase);
