@@ -439,6 +439,34 @@ export async function buildApi(deps: ApiDeps): Promise<FastifyInstance> {
   app.get('/ops/risk/:id', async req => { requireOperator(req); const { id } = req.params as { id: string }; return deps.store.listRiskEvents(id); });
   app.get('/ops/audit/verify', async req => { requireOperator(req); const events = await deps.store.listAudit(100_000); return { ...AuditLog.verify(events), count: events.length }; });
   app.post('/ops/settlement/recover', async req => { requireOperator(req); return deps.settlement.recover(); });
+  // Cron serverless (Vercel não tem setInterval): varredura GLOBAL que substitui o scheduler — expira
+  // operações vencidas (→ reembolso), retenta reembolsos PENDENTES (ex.: BTC após o CSV), cura fundos
+  // presos de EXPIRED e auto-abre HTLC com lock confirmado. Assim o reembolso é automático mesmo com o
+  // painel fechado. Protegido por CRON_SECRET (a Vercel envia `Authorization: Bearer $CRON_SECRET`);
+  // sem o segredo definido, exige sessão de operador (nunca fica aberto). Idempotente — seguro repetir.
+  const cronSweep = async (): Promise<{ ok: true; expired: number; refundRetried: number; recovered: number; opened: number }> => {
+    const expired = await deps.deals.expireDue();
+    let refundRetried = 0, recovered = 0, opened = 0;
+    for (const d of await deps.store.listDeals({ states: ['REFUNDING'] })) {
+      if (!d.refunds.some(r => r.status === 'PENDING')) continue;
+      try { await deps.deals.retryRefunds(d.id); refundRetried++; } catch { /* próxima rodada */ }
+    }
+    for (const d of await deps.store.listDeals({ states: ['EXPIRED'] })) {
+      if (d.refunds.length || !d.participants.some(p => p.fundingRequired)) continue;
+      try { await deps.deals.recoverExpiredFunding(d.id); recovered++; } catch { /* próxima rodada */ }
+    }
+    for (const d of await deps.store.listDeals({ states: ['LIQUIDITY_VERIFIED'] })) {
+      if (!d.terms?.legs.some(l => l.mode === 'HTLC')) continue;
+      try { await deps.deals.open(d.id, d.createdBy); opened++; } catch { /* lock ainda não confirmou */ }
+    }
+    return { ok: true, expired: expired.length, refundRetried, recovered, opened };
+  };
+  app.get('/ops/cron/sweep', async req => {
+    const secret = process.env.CRON_SECRET?.trim();
+    if (secret) { const tok = (req.headers.authorization ?? '').replace(/^Bearer\s+/i, ''); if (tok !== secret) throw new DomainError('FORBIDDEN', 'cron secret inválido'); }
+    else requireOperator(req); // sem CRON_SECRET: só operador autenticado (o endpoint nunca fica público)
+    return cronSweep();
+  });
 
   /* ---------- Portal Pay Master (cadastro, carteira, código de mesa) ---------- */
   const portalToken = (req: FastifyRequest): string | undefined => (req.headers.authorization ?? '').replace(/^Bearer\s+/i, '') || undefined;
