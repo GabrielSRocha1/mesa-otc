@@ -71,7 +71,11 @@ const Schema = z.object({
   BITCOIN_CLAIM_KEY: z.string().regex(/^(0x)?[0-9a-fA-F]{64}$/).optional(),
   BITCOIN_REFUND_KEY: z.string().regex(/^(0x)?[0-9a-fA-F]{64}$/).optional(),
   BITCOIN_CONFIRMATIONS: z.coerce.number().int().min(1).max(12).default(3),
-  BITCOIN_CSV_BLOCKS: z.coerce.number().int().min(6).max(1000).default(144),
+  // Timelock CSV do refund BTC. SEM valor explícito, o default é DERIVADO DA REDE (ver bitcoinConfig):
+  // mainnet 48 (~8h), signet/testnet 36 (~6h), regtest 144 (local). Definir aqui SOBRESCREVE o default.
+  // Trade-off: o CSV precisa ficar acima da janela do token (40 min) + claim + variância/reorg —
+  // encurtar demais arrisca a atomicidade do swap (contraparte honesta perde a janela de claim).
+  BITCOIN_CSV_BLOCKS: z.coerce.number().int().min(6).max(1000).optional(),
   BITCOIN_FEE_FLOOR_SAT_VB: z.coerce.number().int().min(1).max(500).default(2),
   // Lightning Network (rota LIGHTNING_SWAP — perna BTC via LND REST). Grupo all-or-nothing:
   // LND_REST_URL + LND_MACAROON (hex, escopo mínimo invoice+offchain+readonly) + LND_TLS_CERT (PEM
@@ -167,7 +171,11 @@ export interface BitcoinSettingsCfg { esploraUrl: string; network: 'mainnet' | '
 export function bitcoinConfig(c: Config): BitcoinSettingsCfg | null {
   if (c.BITCOIN_SIMULATE === '1') return null;
   if (!c.BITCOIN_ESPLORA_URL || !c.BITCOIN_NETWORK || !c.BITCOIN_CLAIM_KEY || !c.BITCOIN_REFUND_KEY) return null;
-  return { esploraUrl: c.BITCOIN_ESPLORA_URL, network: c.BITCOIN_NETWORK, claimKey: c.BITCOIN_CLAIM_KEY, refundKey: c.BITCOIN_REFUND_KEY, confirmations: c.BITCOIN_CONFIRMATIONS, csvBlocks: c.BITCOIN_CSV_BLOCKS, feeFloorSatVb: c.BITCOIN_FEE_FLOOR_SAT_VB };
+  // Default do CSV por rede (quando BITCOIN_CSV_BLOCKS não é definido): mainnet ~8h, signet/testnet ~6h.
+  // regtest fica em 144 (blocos minerados na hora nos testes locais; não é deploy real).
+  const csvDefaultByNetwork: Record<typeof c.BITCOIN_NETWORK & string, number> = { mainnet: 48, signet: 36, testnet: 36, regtest: 144 };
+  const csvBlocks = c.BITCOIN_CSV_BLOCKS ?? csvDefaultByNetwork[c.BITCOIN_NETWORK];
+  return { esploraUrl: c.BITCOIN_ESPLORA_URL, network: c.BITCOIN_NETWORK, claimKey: c.BITCOIN_CLAIM_KEY, refundKey: c.BITCOIN_REFUND_KEY, confirmations: c.BITCOIN_CONFIRMATIONS, csvBlocks, feeFloorSatVb: c.BITCOIN_FEE_FLOOR_SAT_VB };
 }
 
 /** Operar Indexado — motor de swap da Verum. null = grupo ausente (modo indexado desligado / mock em dev). */
