@@ -2733,7 +2733,19 @@ window.addEventListener('unhandledrejection',function(e){try{console.warn('[veru
     if(sell.network!==buy.network) return { mode:'CROSS_CHAIN', txt:'Redes diferentes ('+sell.network+' ↔ '+buy.network+') — escrow em cada rede + liberação atômica via Chainlink CCIP' };
     return { mode:'ESCROW_DIRECT', txt:'Liquidação direta no VerumOtcEscrow ('+sell.network+')' };
   }
-  function m3PlanHint(){ const p=m3Plan(m3TokenOf('sell'),m3TokenOf('buy')); $('#m3cPlanHint').textContent=p?('Liquidação: '+p.txt):''; }
+  // Par NÃO suportado: BTC NATIVO ↔ Tron — o swap de BTC usa HTLC e exige que a OUTRA perna revele o
+  // segredo (hashlock); o contrato da Tron não tem. (BTC funciona com Ethereum ou Solana.) Devolve o
+  // motivo (string) quando bloqueado, ou null. Usado no wizard e no formulário indexado.
+  function m3PairBlock(sell,buy){
+    if(!sell||!buy) return null;
+    const btc=a=>a.network==='bitcoin'&&a.contractOrMint==null, tron=a=>a.network==='tron';
+    if((btc(sell)&&tron(buy))||(tron(sell)&&btc(buy)))
+      return 'BTC nativo não pode ser trocado com a rede Tron: o swap de BTC exige que a outra perna revele o segredo (hashlock), e o contrato da Tron não tem isso. Use BTC com Ethereum ou Solana, ou troque a rede de uma das pernas.';
+    return null;
+  }
+  function m3PlanHint(){ const s=m3TokenOf('sell'),b=m3TokenOf('buy'); const blk=m3PairBlock(s,b); const el=$('#m3cPlanHint'); if(!el) return;
+    if(blk){ el.innerHTML='⛔ '+esc(blk); el.style.color='var(--red)'; return; }
+    const p=m3Plan(s,b); el.style.color='var(--blue)'; el.textContent=p?('Liquidação: '+p.txt):''; }
   // No passo 1 as cadeiras são só rótulos — os ativos vêm do passo 2 (Vendedor/Comprador) e do gás da rede (PMs).
   function m3cChairRow(role){
     const fixed=role==='PAYMASTER_1';
@@ -2809,6 +2821,7 @@ window.addEventListener('unhandledrejection',function(e){try{console.warn('[veru
     // Rede derivada (v4): gás/âncora dos PMs fica no lado de CONTRATO (BTC nativo não hospeda PM).
     const net=(sell.network==='bitcoin')?buy.network:sell.network;
     if(sell.network===buy.network&&(sell.contractOrMint||'')===(buy.contractOrMint||'')&&sell.symbol===buy.symbol) return { err:'Os ativos do Vendedor e do Comprador devem ser diferentes.' };
+    const pairBlk=m3PairBlock(sell,buy); if(pairBlk) return { err: pairBlk }; // BTC nativo ↔ Tron não é swappable
     const amountInBase=humanToBase($('#m3cSellAmt').value,sell.decimals);
     const buyerAmountInBase=humanToBase($('#m3cBuyAmt').value,buy.decimals);
     const discountBps=pctToBps($('#opFeeDesc').value), commissionBps=pctToBps($('#opFeeComm').value);
@@ -3388,7 +3401,9 @@ window.addEventListener('unhandledrejection',function(e){try{console.warn('[veru
   function ixRenderCreateFields(){
     const sf=$('#ixcSellField'); if(sf) sf.innerHTML=m3FieldInner(ixPick.sell);
     const bf=$('#ixcBuyField'); if(bf) bf.innerHTML=m3FieldInner(ixPick.buy);
-    const p=(typeof m3Plan==='function')?m3Plan(ixPick.sell,ixPick.buy):null; const ph=$('#ixcPlanHint'); if(ph) ph.textContent=p?('Liquidação: '+p.txt):'';
+    const blk=m3PairBlock(ixPick.sell,ixPick.buy); const ph=$('#ixcPlanHint');
+    if(ph){ if(blk){ ph.innerHTML='⛔ '+esc(blk); ph.style.color='var(--red)'; } else { const p=(typeof m3Plan==='function')?m3Plan(ixPick.sell,ixPick.buy):null; ph.style.color='var(--ink-3)'; ph.textContent=p?('Liquidação: '+p.txt):''; } }
+    const csb=$('#ixCreateSubmit'); if(csb) csb.disabled=!!blk;
     const sell=ixPick.sell; const h=$('#ixcAmountHint'); if(h) h.textContent=sell?('Em '+sell.symbol):'Valor-base da indexação';
     const amt=$('#ixcAmount'), base=$('#ixcAmountBase'); if(amt&&base){ const v=(amt.value||'').trim(); base.textContent=(v&&sell)?(humanToBase(v,sell.decimals)?('= '+v+' '+sell.symbol):'valor inválido'):''; }
   }
@@ -3408,6 +3423,7 @@ window.addEventListener('unhandledrejection',function(e){try{console.warn('[veru
     const sell=ixPick.sell, buy=ixPick.buy;
     if(!sell||!buy){ toast('Escolha a moeda do Vendedor e do Comprador','err'); return; }
     if(m3SameAsset(sell,buy)){ toast('Os ativos do Vendedor e do Comprador devem ser diferentes','err'); return; }
+    const pairBlk=m3PairBlock(sell,buy); if(pairBlk){ toast(pairBlk,'err'); return; }
     const amountInBase=humanToBase($('#ixcAmount').value,sell.decimals);
     if(!amountInBase){ toast('Quantidade do Vendedor inválida','err'); return; }
     const spreadBps=parseInt(($('#ixcSpread').value||'0'),10)||0;

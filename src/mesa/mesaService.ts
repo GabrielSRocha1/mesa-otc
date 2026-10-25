@@ -85,6 +85,20 @@ export class MesaService {
 
   /* ---------- criação e leitura (admin) ---------- */
 
+  /** Par NÃO suportado: BTC NATIVO ↔ Tron. O swap de BTC usa HTLC e exige que a OUTRA perna revele o
+   *  segredo (hashlock) na liquidação; o contrato da Tron não tem hashlock. (BTC funciona com Ethereum
+   *  ou Solana.) Bloqueia na criação e na troca de ativo — não só na aprovação. */
+  private assertSwappablePair(chairs: { role: MesaChairRole; expectedAsset: ChairAsset }[]): void {
+    const seller = chairs.find(c => c.role === 'SELLER')?.expectedAsset;
+    const buyer = chairs.find(c => c.role === 'BUYER')?.expectedAsset;
+    if (!seller || !buyer) return;
+    const isBtcNative = (a: ChairAsset) => a.network === 'bitcoin' && a.contractOrMint == null;
+    const isTron = (a: ChairAsset) => a.network === 'tron';
+    if ((isBtcNative(seller) && isTron(buyer)) || (isTron(seller) && isBtcNative(buyer))) {
+      throw new DomainError('INVALID_INPUT', 'BTC nativo não pode ser trocado com a rede Tron: o swap de BTC usa HTLC e exige que a outra perna revele o segredo (hashlock), que o contrato da Tron não tem. Use BTC com Ethereum ou Solana — ou troque a rede de uma das pernas.');
+    }
+  }
+
   createMesa(portalToken: string | undefined, input: CreateMesaInput): MesaRecord {
     const pm = this.d.portal.requirePayMaster(portalToken);
     const roles = input.chairs.map(c => c.role);
@@ -114,6 +128,7 @@ export class MesaService {
       if (c.role === 'PAYMASTER_1' && pm.wallet) { chair.wallet = pm.wallet; chair.firstName = pm.name.split(/\s+/)[0]; chair.connectedAt = t; }
       return chair;
     });
+    this.assertSwappablePair(chairs); // BTC nativo ↔ Tron não é swappable (sem hashlock na Tron)
     const mesa: MesaRecord = { mesaId: 'mesa_' + randomUUID(), payMasterId: pm.id, code: this.d.portal.newMesaCode(), operationCode: `OP-${newInviteCode()}`, label: input.label?.trim() || undefined, network, chairs, approvals: {}, dealId: null, dealIds: [], createdAt: t, expiresAt: null };
     this.d.portal.mesas()[mesa.mesaId] = mesa;
     this.d.portal.persistMesas();
@@ -499,7 +514,10 @@ export class MesaService {
     if (!chair) throw new DomainError('INVALID_INPUT', 'Cadeira não encontrada.');
     if (!asset || typeof asset.symbol !== 'string' || typeof asset.decimals !== 'number' || !asset.network) throw new DomainError('INVALID_INPUT', 'Ativo inválido.');
     const prevDecimals = chair.expectedAsset.decimals;
-    chair.expectedAsset = { network: asset.network, contractOrMint: asset.contractOrMint ?? null, decimals: asset.decimals, symbol: asset.symbol };
+    const nextAsset: ChairAsset = { network: asset.network, contractOrMint: asset.contractOrMint ?? null, decimals: asset.decimals, symbol: asset.symbol };
+    // Valida ANTES de mutar: BTC nativo ↔ Tron não é swappable (sem hashlock na Tron).
+    this.assertSwappablePair(mesa.chairs.map(c => c.chairId === chairId ? { role: c.role, expectedAsset: nextAsset } : { role: c.role, expectedAsset: c.expectedAsset }));
+    chair.expectedAsset = nextAsset;
     // Rede da mesa (rótulo/fallback) deriva do lado VENDEDOR.
     if (chair.role === 'SELLER') mesa.network = asset.network;
     // Decimais mudaram → a quantidade daquele lado não faz mais sentido (base do ativo anterior).

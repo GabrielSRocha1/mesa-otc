@@ -14,7 +14,7 @@ async function mesaComToken(app: Awaited<ReturnType<typeof makeApp>>['app']) {
   const token = r.json<{ token: string }>().token;
   const mesa = (await app.api.inject({ method: 'POST', url: '/v1/portal/mesas', headers: pmHeaders(token), payload: { network: 'tron', chairs: [
     { role: 'SELLER', expectedAsset: { network: 'bitcoin', contractOrMint: null, decimals: 8, symbol: 'BTC' } },
-    { role: 'BUYER', expectedAsset: { network: 'tron', contractOrMint: 'TR7NHqjeKQxGTCi8q8ZY4pL8otSzgjLj6t', decimals: 6, symbol: 'USDT' } },
+    { role: 'BUYER', expectedAsset: { network: 'ethereum', contractOrMint: null, decimals: 18, symbol: 'ETH' } },
   ] } })).json<{ mesaId: string }>();
   return { token, mesaId: mesa.mesaId };
 }
