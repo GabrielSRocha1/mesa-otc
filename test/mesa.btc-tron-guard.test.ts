@@ -28,6 +28,12 @@ describe('Mesa · guard BTC nativo ↔ Tron', () => {
     expect(r.statusCode).toBe(400);
     await app.close();
   });
+  it('com escrow Tron V2 (hashlock) o par BTC ↔ Tron é PERMITIDO', async () => {
+    const { app } = await makeApp({ tronHashlock: true }); const pm = await pmToken(app);
+    const r = await app.api.inject({ ...mk('bitcoin', [{ role: 'SELLER', expectedAsset: BTC }, { role: 'BUYER', expectedAsset: USDT_TRON }, { role: 'PAYMASTER_1', expectedAsset: USDT_TRON }]), headers: H(pm) });
+    expect(r.statusCode, r.body).toBe(201);
+    await app.close();
+  });
   it('controle: BTC ↔ WETH (Ethereum) é permitido', async () => {
     const { app } = await makeApp(); const pm = await pmToken(app);
     const r = await app.api.inject({ ...mk('bitcoin', [{ role: 'SELLER', expectedAsset: BTC }, { role: 'BUYER', expectedAsset: WETH }, { role: 'PAYMASTER_1', expectedAsset: WETH }]), headers: H(pm) });

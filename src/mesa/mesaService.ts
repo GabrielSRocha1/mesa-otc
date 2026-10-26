@@ -66,6 +66,8 @@ export interface MesaServiceDeps {
   nativeWrapOf?: (network: string, counterpartyNetwork: string | null) => { contractOrMint: string; decimals: number } | null;
   /** true quando a perna Bitcoin roda no SIMULADOR (preview/dev) — a UI exibe "BTC simulado". */
   btcSimulated?: () => boolean;
+  /** true quando o escrow Tron configurado tem perna HTLC (V2) — libera o par BTC nativo ↔ Tron. */
+  tronHashlock?: () => boolean;
 }
 
 export interface CreateMesaChairInput { role: MesaChairRole; expectedAsset: ChairAsset; label?: string }
@@ -94,6 +96,9 @@ export class MesaService {
     if (!seller || !buyer) return;
     const isBtcNative = (a: ChairAsset) => a.network === 'bitcoin' && a.contractOrMint == null;
     const isTron = (a: ChairAsset) => a.network === 'tron';
+    // Escrow Tron V2 (hashlock) configurado libera o par: o settleV2 revela a preimage que
+    // destrava o HTLC do BTC — mesma atomicidade do BTC↔Ethereum.
+    if (this.d.tronHashlock?.()) return;
     if ((isBtcNative(seller) && isTron(buyer)) || (isTron(seller) && isBtcNative(buyer))) {
       throw new DomainError('INVALID_INPUT', 'BTC nativo não pode ser trocado com a rede Tron: o swap de BTC usa HTLC e exige que a outra perna revele o segredo (hashlock), que o contrato da Tron não tem. Use BTC com Ethereum ou Solana — ou troque a rede de uma das pernas.');
     }

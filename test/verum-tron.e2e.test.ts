@@ -45,11 +45,14 @@ describe.skipIf(!ready)('e2e — escrow VerumOTCEscrowTron real (Shasta)', () =>
       }, addr('SELLER'));
       for (const p of participants) { if (p.role === 'SELLER') continue; deal = await app.deals.connectWallet(deal.id, p.role, p.address, p.address); }
       deal = await app.deals.get(deal.id);
-      expect(deal.state).toBe('LIQUIDITY_VERIFIED'); // registerDeal = createTrade REAL do PM1 na Shasta
+      expect(deal.state).toBe('LIQUIDITY_VERIFIED');
+
+      // Registro on-chain (createTrade REAL do PM1 na Shasta) acontece no OPEN — a janela fixa
+      // de 40 min do escrow só começa a contar quando o fluxo abre de fato.
+      await app.deals.open(deal.id, addr('SELLER'));
+      deal = await app.deals.get(deal.id);
       const meta = deal.onChain.tron?.meta as { tradeId: string; onChainExpiresAt: number } | undefined;
       expect(meta?.tradeId).toMatch(/^0x[0-9a-f]{64}$/);
-
-      await app.deals.open(deal.id, addr('SELLER'));
       await app.deals.fund(deal.id, 'SELLER', addr('SELLER'));  // approve TRC-20 (principal + fee)
       await app.deals.fund(deal.id, 'BUYER', addr('BUYER'));
       for (const role of ['SELLER', 'PAYMASTER_1', 'PAYMASTER_2', 'BUYER'] as Role[]) {
@@ -67,7 +70,8 @@ describe.skipIf(!ready)('e2e — escrow VerumOTCEscrowTron real (Shasta)', () =>
       const post = await app.verumTron!.getDealState(deal.id);
       expect(post.status).toBe('SETTLED');
 
-      expect(await app.verumTron!.getBalance(addr('BUYER'), usdtAsset) - buyerUsdtBefore).toBe(amountIn);
+      // Perna do vendedor entrega amountIn já com o deságio aplicado (price.computeEconomics).
+      expect(await app.verumTron!.getBalance(addr('BUYER'), usdtAsset) - buyerUsdtBefore).toBe(amountIn * 9850n / 10000n);
       expect(await app.verumTron!.getBalance(addr('SELLER'), tbtcAsset) - sellerTbtcBefore).toBeGreaterThan(0n);
     } finally { await app.close(); }
   }, 900_000);

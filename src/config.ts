@@ -57,6 +57,8 @@ const Schema = z.object({
   TRON_FULL_HOST: z.string().optional(),
   TRON_CHAIN_ID: z.string().optional(),
   TRON_ESCROW_ADDRESS: z.string().regex(/^T[1-9A-HJ-NP-Za-km-z]{33}$/).optional(),
+  /** Escrow V2 Tron (ADR-v4: cadeiras 2–4 + HTLC + TRX nativo) — quando definido, SUBSTITUI o V1. */
+  TRON_ESCROW_V2_ADDRESS: z.string().regex(/^T[1-9A-HJ-NP-Za-km-z]{33}$/).optional(),
   TRON_EXECUTOR_KEY: z.string().regex(/^(0x)?[0-9a-fA-F]{64}$/).optional(),
   TRON_ATTESTOR_KEY: z.string().regex(/^(0x)?[0-9a-fA-F]{64}$/).optional(),
   TRON_TUSDT: z.string().regex(/^T[1-9A-HJ-NP-Za-km-z]{33}$/).optional(),
@@ -186,10 +188,10 @@ export function verumSwapEngineConfig(c: Config): VerumSwapSettings | null {
 }
 
 /** Escrow canônico Verum — Tron (Nile). null = grupo ausente. */
-export interface TronSettings { fullHost: string; chainId: number; escrow: string; executorKey: string; attestorKey: `0x${string}`; tusdt: string; tbtc: string; confirmations: number }
+export interface TronSettings { fullHost: string; chainId: number; escrow: string; escrowV2?: string; executorKey: string; attestorKey: `0x${string}`; tusdt: string; tbtc: string; confirmations: number }
 export function tronConfig(c: Config): TronSettings | null {
   if (!c.TRON_FULL_HOST || !c.TRON_CHAIN_ID || !c.TRON_ESCROW_ADDRESS || !c.TRON_EXECUTOR_KEY || !c.TRON_ATTESTOR_KEY || !c.TRON_TUSDT || !c.TRON_TBTC) return null;
   const hex = (k: string) => (k.startsWith('0x') ? k : '0x' + k) as `0x${string}`;
-  return { fullHost: c.TRON_FULL_HOST, chainId: Number(c.TRON_CHAIN_ID), escrow: c.TRON_ESCROW_ADDRESS, executorKey: c.TRON_EXECUTOR_KEY.replace(/^0x/, ''), attestorKey: hex(c.TRON_ATTESTOR_KEY), tusdt: c.TRON_TUSDT, tbtc: c.TRON_TBTC, confirmations: c.TRON_CONFIRMATIONS };
+  return { fullHost: c.TRON_FULL_HOST, chainId: Number(c.TRON_CHAIN_ID), escrow: c.TRON_ESCROW_ADDRESS, escrowV2: c.TRON_ESCROW_V2_ADDRESS, executorKey: c.TRON_EXECUTOR_KEY.replace(/^0x/, ''), attestorKey: hex(c.TRON_ATTESTOR_KEY), tusdt: c.TRON_TUSDT, tbtc: c.TRON_TBTC, confirmations: c.TRON_CONFIRMATIONS };
 }
 

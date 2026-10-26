@@ -18,6 +18,7 @@ import { VerumEvmAdapter } from './adapters/verum/evm.js';
 import { VerumEvmV2Adapter } from './adapters/verum/evmV2.js';
 import { VerumSolanaAdapter } from './adapters/verum/solana.js';
 import { VerumTronAdapter } from './adapters/verum/tron.js';
+import { VerumTronV2Adapter } from './adapters/verum/tronV2.js';
 import { VerumEvmDevKeyring, TronDevKeyring } from './adapters/verum/keyring.js';
 import { AssetRegistry, defaultRegistry } from './engines/assetRegistry.js';
 import { PriceEngine, StaticPriceSource, type PriceSource } from './engines/price.js';
@@ -48,8 +49,8 @@ import type { Config } from './config.js';
 import type { Deal, Network, Participant, Role } from './domain/types.js';
 import type { ApprovalSignature } from './adapters/types.js';
 
-export interface AppOverrides { autoSettle?: boolean; store?: Store; adapters?: SettlementAdapter[]; priceSources?: PriceSource[]; liquiditySources?: LiquiditySource[]; screening?: WalletScreening; now?: () => number; denylist?: string[]; balanceReaders?: import('./mesa/balances.js').BalanceReaders; btcAddressOf?: (dealId: string, role: Role) => Promise<string | null>; evmAddressOf?: (dealId: string, role: Role) => Promise<string | null>; /** Runner de swap resumível (testnet): preimage HTLC fixa p/ recriar a deal com o mesmo htlcHash de um lock confirmado. */ htlcPreimageHex?: string; /** Nó Lightning injetado (rota LIGHTNING_SWAP) — mock in-process nos testes; senão vem de createLightningService. */ lightning?: import('./adapters/lightning/types.js').LightningService; /** Fonte do índice (Operar Indexado) injetada nos testes; senão vem do motor real ou do mock de dev. */ indexProvider?: IndexPriceProvider }
-export interface App { config: Config; store: Store; adapters: AdapterRegistry; local?: { evm: LocalChainAdapter; solana: LocalChainAdapter; bitcoin: LocalChainAdapter; tron?: LocalChainAdapter }; verumEvm?: VerumEvmAdapter; verumSolana?: VerumSolanaAdapter; verumTron?: VerumTronAdapter; verumEvmKeyring?: VerumEvmDevKeyring; tronKeyring?: TronDevKeyring; registry: AssetRegistry; price: PriceEngine; liquidity: LiquidityEngine; router: RouterEngine; signature: SignatureEngine; risk: RiskEngine; audit: AuditLog; deals: DealEngine; settlement: SettlementEngine; auth: WalletAuth; identity: IdentityService; rooms: RoomService; proposals: ProposalService; mesa: import('./mesa/mesaService.js').MesaService; indexedPricing: IndexedPricingService; lightning: import('./adapters/lightning/types.js').LightningService; lightningReal: boolean; api: Awaited<ReturnType<typeof buildApi>>; sources: { price: StaticPriceSource[]; liquidity: StaticLiquiditySource[] }; startScheduler(): void; stopScheduler(): void; close(): Promise<void> }
+export interface AppOverrides { autoSettle?: boolean; store?: Store; adapters?: SettlementAdapter[]; priceSources?: PriceSource[]; liquiditySources?: LiquiditySource[]; screening?: WalletScreening; now?: () => number; denylist?: string[]; balanceReaders?: import('./mesa/balances.js').BalanceReaders; btcAddressOf?: (dealId: string, role: Role) => Promise<string | null>; evmAddressOf?: (dealId: string, role: Role) => Promise<string | null>; tronAddressOf?: (dealId: string, role: Role) => Promise<string | null>; /** Força o flag de hashlock Tron (testes do guard BTC↔Tron sem escrow V2 real). */ tronHashlock?: boolean; /** Runner de swap resumível (testnet): preimage HTLC fixa p/ recriar a deal com o mesmo htlcHash de um lock confirmado. */ htlcPreimageHex?: string; /** Nó Lightning injetado (rota LIGHTNING_SWAP) — mock in-process nos testes; senão vem de createLightningService. */ lightning?: import('./adapters/lightning/types.js').LightningService; /** Fonte do índice (Operar Indexado) injetada nos testes; senão vem do motor real ou do mock de dev. */ indexProvider?: IndexPriceProvider }
+export interface App { config: Config; store: Store; adapters: AdapterRegistry; local?: { evm: LocalChainAdapter; solana: LocalChainAdapter; bitcoin: LocalChainAdapter; tron?: LocalChainAdapter }; verumEvm?: VerumEvmAdapter; verumSolana?: VerumSolanaAdapter; verumTron?: VerumTronAdapter; verumTronV2?: VerumTronV2Adapter; verumEvmKeyring?: VerumEvmDevKeyring; tronKeyring?: TronDevKeyring; registry: AssetRegistry; price: PriceEngine; liquidity: LiquidityEngine; router: RouterEngine; signature: SignatureEngine; risk: RiskEngine; audit: AuditLog; deals: DealEngine; settlement: SettlementEngine; auth: WalletAuth; identity: IdentityService; rooms: RoomService; proposals: ProposalService; mesa: import('./mesa/mesaService.js').MesaService; indexedPricing: IndexedPricingService; lightning: import('./adapters/lightning/types.js').LightningService; lightningReal: boolean; api: Awaited<ReturnType<typeof buildApi>>; sources: { price: StaticPriceSource[]; liquidity: StaticLiquiditySource[] }; startScheduler(): void; stopScheduler(): void; close(): Promise<void> }
 
 /** Mint canônico do Wrapped SOL (mesmo em todos os clusters) — SOL como token SPL. */
 export const WSOL_MINT = 'So11111111111111111111111111111111111111112';
@@ -96,7 +97,7 @@ export async function createApp(config: Config, o: AppOverrides = {}): Promise<A
   let portalRef: PortalService | null = null; // preenchido quando o portal sobe (resolvedor BTC multichain)
   let demoKeyringRef: DemoMesaKeyring | null = null; // preenchido quando a conta demo é semeada (assina txs Solana dev)
   let verumEvm: VerumEvmAdapter | undefined; let verumEvmV2: VerumEvmV2Adapter | undefined; let verumEvmKeyring: VerumEvmDevKeyring | undefined;
-  let verumSolana: VerumSolanaAdapter | undefined; let verumTron: VerumTronAdapter | undefined; let tronKeyring: TronDevKeyring | undefined;
+  let verumSolana: VerumSolanaAdapter | undefined; let verumTron: VerumTronAdapter | undefined; let verumTronV2: VerumTronV2Adapter | undefined; let tronKeyring: TronDevKeyring | undefined;
   if (o.adapters) o.adapters.forEach(a => adapters.register(a));
   else { local = createLocalAdapters(verifier, now); adapters.register(local.evm).register(local.solana).register(local.bitcoin);
     local.evm.addToken({ contract: LOCAL_TOKENS.usdtEth, symbol: 'USDT', decimals: 6, standard: 'ERC-20', codeHash: LOCAL_CODE_HASHES.usdtEth }).addToken({ contract: LOCAL_TOKENS.usdcEth, symbol: 'USDC', decimals: 6, standard: 'ERC-20', codeHash: LOCAL_CODE_HASHES.usdcEth });
@@ -145,8 +146,25 @@ export async function createApp(config: Config, o: AppOverrides = {}): Promise<A
     }
     if (tronCfg) {
       tronKeyring = config.OTC_ENV === 'prod' ? undefined : new TronDevKeyring(config.identityMasterSecret);
-      verumTron = new VerumTronAdapter(tronCfg, tronKeyring ?? null, dealDeps); adapters.register(verumTron);
-      logger.info({ chainId: tronCfg.chainId, escrow: tronCfg.escrow }, 'modo TRON ativo: escrow VerumOTCEscrowTron real');
+      if (tronCfg.escrowV2) {
+        // Escrow V2 Tron (ADR-v4): cadeiras 2–4 + perna HTLC + TRX nativo — substitui o V1 na rede.
+        // Participante da perna externa (ex.: vendedor de BTC) precisa de endereço Tron para
+        // RECEBER o TRC-20/TRX: resolve pela carteira multichain da cadeira da mesa.
+        const tronAddressOf = o.tronAddressOf ?? (async (dealId: string, role: Role) => {
+          for (const m of Object.values(portalRef?.mesas() ?? {})) {
+            if (m.dealId !== dealId && !(m.dealIds ?? []).includes(dealId)) continue;
+            const w = m.chairs.find(c => c.role === role)?.wallet;
+            if (!w) return null;
+            return (w.addresses ?? []).find(a => /^T[1-9A-HJ-NP-Za-km-z]{33}$/.test(a.address))?.address ?? (/^T[1-9A-HJ-NP-Za-km-z]{33}$/.test(w.address) ? w.address : null);
+          }
+          return null;
+        });
+        verumTronV2 = new VerumTronV2Adapter(tronCfg, tronKeyring ?? null, { ...dealDeps, tronAddressOf }); adapters.register(verumTronV2);
+        logger.info({ chainId: tronCfg.chainId, escrowV2: tronCfg.escrowV2 }, 'modo TRON_V2 ativo: escrow VerumOTCEscrowV2Tron (2–4 cadeiras + HTLC + TRX nativo)');
+      } else {
+        verumTron = new VerumTronAdapter(tronCfg, tronKeyring ?? null, dealDeps); adapters.register(verumTron);
+        logger.info({ chainId: tronCfg.chainId, escrow: tronCfg.escrow }, 'modo TRON ativo: escrow VerumOTCEscrowTron real');
+      }
     }
     // Bitcoin REAL (HTLC P2WSH via Esplora): substitui o simulador regtest quando BITCOIN_* está completo.
     const btcCfg = bitcoinConfig(config);
@@ -290,7 +308,7 @@ export async function createApp(config: Config, o: AppOverrides = {}): Promise<A
   // nativo — sem WETH no fluxo. BTC sempre teve HTLC nativo próprio. O hook permanece para uma
   // futura rede que exija token na liquidação.
   const nativeWrapOf = (_network: string, _counterpartyNetwork: string | null): { contractOrMint: string; decimals: number } | null => null;
-  const mesa = new MesaService({ portal, store, audit, auth, getDeal: id => store.getDeal(id), baseUrl: `https://${config.APP_DOMAIN}`, now, nativeWrapOf, btcSimulated: () => adapters.get('bitcoin') instanceof LocalChainAdapter });
+  const mesa = new MesaService({ portal, store, audit, auth, getDeal: id => store.getDeal(id), baseUrl: `https://${config.APP_DOMAIN}`, now, nativeWrapOf, btcSimulated: () => adapters.get('bitcoin') instanceof LocalChainAdapter, tronHashlock: () => o.tronHashlock ?? !!verumTronV2 });
   // Web Push "é sua vez": serviço (gracioso se VAPID ausente) + hook real do DealEngine. Procura a
   // mesa do deal, acha a cadeira do papel da vez e dispara a notificação para a inscrição dela.
   // Lightning (rota LIGHTNING_SWAP): nó real quando o grupo LND_* está completo; senão o simulador
@@ -357,7 +375,7 @@ export async function createApp(config: Config, o: AppOverrides = {}): Promise<A
     // FUNDING_REQUIRED e tentamos no próximo ciclo. Espaçado p/ não martelar o Esplora.
     if (ticks % 4 === 0) { for (const d of await store.listDeals({ states: ['LIQUIDITY_VERIFIED'] })) { if (!d.terms?.legs.some(l => l.mode === 'HTLC')) continue; try { await deals.open(d.id, d.createdBy); logger.info({ dealId: d.id }, 'auto-open: lock BTC confirmado'); } catch { /* lock ainda não confirmou — próximo ciclo */ } } }
     if (++ticks % 720 === 0) { const purged = await store.purge(now(), 24 * 3600_000); logger.info(purged, 'retenção'); } metrics.priceBreakerOpen.set(price.breakerState().open ? 1 : 0); for (const s of ['AWAITING_SIGNATURES', 'SETTLING', 'SETTLEMENT_VALIDATION', 'REFUNDING'] as const) metrics.activeDeals.set({ state: s }, (await store.listDeals({ states: [s] })).length); } catch (e) { logger.error({ err: (e as Error).message }, 'scheduler'); } };
-  return { config, store, adapters, local, verumEvm, verumSolana, verumTron, verumEvmKeyring, tronKeyring, registry, price, liquidity, router, signature, risk, audit, deals, settlement, auth, identity, rooms, proposals, mesa, indexedPricing, lightning, lightningReal, api, sources: { price: priceSources, liquidity: liquiditySources },
+  return { config, store, adapters, local, verumEvm, verumSolana, verumTron, verumTronV2, verumEvmKeyring, tronKeyring, registry, price, liquidity, router, signature, risk, audit, deals, settlement, auth, identity, rooms, proposals, mesa, indexedPricing, lightning, lightningReal, api, sources: { price: priceSources, liquidity: liquiditySources },
     startScheduler() { if (!timer) timer = setInterval(() => { void tick(); }, config.EXPIRY_SCAN_MS); }, stopScheduler() { if (timer) clearInterval(timer); timer = null; },
     async close() { if (timer) clearInterval(timer); timer = null; await api.close(); await store.close(); } };
 }
