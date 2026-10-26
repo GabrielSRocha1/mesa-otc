@@ -2733,16 +2733,11 @@ window.addEventListener('unhandledrejection',function(e){try{console.warn('[veru
     if(sell.network!==buy.network) return { mode:'CROSS_CHAIN', txt:'Redes diferentes ('+sell.network+' ↔ '+buy.network+') — escrow em cada rede + liberação atômica via Chainlink CCIP' };
     return { mode:'ESCROW_DIRECT', txt:'Liquidação direta no VerumOtcEscrow ('+sell.network+')' };
   }
-  // Par NÃO suportado: BTC NATIVO ↔ Tron — o swap de BTC usa HTLC e exige que a OUTRA perna revele o
-  // segredo (hashlock); o contrato da Tron não tem. (BTC funciona com Ethereum ou Solana.) Devolve o
-  // motivo (string) quando bloqueado, ou null. Usado no wizard e no formulário indexado.
-  function m3PairBlock(sell,buy){
-    if(!sell||!buy) return null;
-    const btc=a=>a.network==='bitcoin'&&a.contractOrMint==null, tron=a=>a.network==='tron';
-    if((btc(sell)&&tron(buy))||(tron(sell)&&btc(buy)))
-      return 'BTC nativo não pode ser trocado com a rede Tron: o swap de BTC exige que a outra perna revele o segredo (hashlock), e o contrato da Tron não tem isso. Use BTC com Ethereum ou Solana, ou troque a rede de uma das pernas.';
-    return null;
-  }
+  // BTC NATIVO ↔ Tron é SUPORTADO desde o escrow V2 Tron (VerumOTCEscrowV2Tron, perna HTLC):
+  // o settleV2 revela a preimage que destrava o BTC — mesma atomicidade do BTC↔Ethereum. A UI não
+  // bloqueia mais nenhum par; quem decide é o backend (MesaService.assertSwappablePair ainda barra
+  // o par quando o deploy roda o escrow V1 só-token, com mensagem clara exibida no erro da criação).
+  function m3PairBlock(_sell,_buy){ return null; }
   function m3PlanHint(){ const s=m3TokenOf('sell'),b=m3TokenOf('buy'); const blk=m3PairBlock(s,b); const el=$('#m3cPlanHint'); if(!el) return;
     if(blk){ el.innerHTML='⛔ '+esc(blk); el.style.color='var(--red)'; return; }
     const p=m3Plan(s,b); el.style.color='var(--blue)'; el.textContent=p?('Liquidação: '+p.txt):''; }
