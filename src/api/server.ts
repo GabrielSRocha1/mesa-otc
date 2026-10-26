@@ -28,6 +28,7 @@ import { MANIFEST_JSON, SW_JS, ICON_SVG, ICON_MASKABLE_SVG, OFFLINE_HTML, inject
 import type { Store } from '../db/repository.js';
 import { AuditLog } from '../audit/audit.js';
 import { hasParticipantSteps, type AdapterRegistry } from '../adapters/types.js';
+import { LocalChainAdapter } from '../adapters/local.js';
 import { registry as metricsRegistry, logger, metrics } from '../monitoring/metrics.js';
 import { createHash, randomUUID } from 'node:crypto';
 import { allChains, getChain, chainIconId } from '../chains/registry.js';
@@ -1156,7 +1157,13 @@ export async function buildApi(deps: ApiDeps): Promise<FastifyInstance> {
   app.get('/v1/tokens', async req => {
     const { network } = req.query as { network?: string };
     const chainId = network ? TOKEN_CHAIN_BY_NETWORK[network] : undefined;
-    const tokens = registryData.tokens
+    // Tokens MAINNET só entram quando a rede de liquidação É a mainnet: com um adaptador REAL numa
+    // testnet (ex.: Tron Shasta, Sepolia), oferecer o USDT real no dropdown gera um "segundo USDT"
+    // que o verifyAsset reprova (contrato inexistente na testnet) — confunde sem servir p/ nada.
+    // Simulador local (dev) mantém o catálogo completo (conveniência dos fluxos de demonstração).
+    const live = network ? deps.adapters?.get(network as never) : undefined;
+    const mainnetOk = !live || live instanceof LocalChainAdapter || String(chainId ?? '') === String(live.chain.chainId);
+    const tokens = !mainnetOk ? [] : registryData.tokens
       .filter(t => t.status === 'ACTIVE' && (chainId === undefined || t.chainId === chainId))
       .map(t => ({ symbol: t.symbol, contractOrMint: t.address, decimals: t.decimals, representationOf: ('representationOf' in t ? (t as { representationOf?: string }).representationOf : undefined) ?? null }));
     // Tokens do REGISTRO REAL da plataforma (deps.registry) para a rede pedida — são os que o motor de

@@ -200,7 +200,9 @@ export async function createApp(config: Config, o: AppOverrides = {}): Promise<A
   const tronChainId = adapters.require('tron').chain.chainId;
   const tronUsdt = tronCfg ? tronCfg.tusdt : LOCAL_TOKENS.usdtTron;
   const tronTbtc = tronCfg ? tronCfg.tbtc : LOCAL_TOKENS.btcTron;
-  registry.add({ code: 'USDT', network: 'tron', chainId: tronChainId, contractOrMint: tronUsdt, assetId: `tron:${tronChainId}/trc20:${tronUsdt}`, decimals: 6, tokenStandard: 'TRC-20', issuer: tronCfg ? 'USDT (Nile faucet)' : 'Tether (demo)', status: 'active' });
+  // Rótulo do emissor segue a REDE REAL do adaptador (antes dizia "Nile" fixo mesmo na Shasta).
+  const tronNetLabel = tronCfg ? (/shasta/i.test(tronCfg.fullHost) ? 'Shasta' : /nile/i.test(tronCfg.fullHost) ? 'Nile' : 'Tron') : null;
+  registry.add({ code: 'USDT', network: 'tron', chainId: tronChainId, contractOrMint: tronUsdt, assetId: `tron:${tronChainId}/trc20:${tronUsdt}`, decimals: 6, tokenStandard: 'TRC-20', issuer: tronNetLabel ? `USDT de teste (${tronNetLabel})` : 'Tether (demo)', status: 'active' });
   registry.add({ code: 'BTC', network: 'tron', chainId: tronChainId, contractOrMint: tronTbtc, assetId: `tron:${tronChainId}/trc20:${tronTbtc}`, decimals: 8, tokenStandard: 'TRC-20', issuer: 'Verum tBTC (mock)', status: 'active' });
   // TRX NATIVO: só quando a liquidação suporta a perna nativa — escrow V2 Tron (sentinela
   // EIP-7528, callValue no signV2) ou o simulador local. O V1 real é só-token: registrar TRX
