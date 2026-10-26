@@ -154,6 +154,7 @@ export async function buildApi(deps: ApiDeps): Promise<FastifyInstance> {
         verumEvmV2: count(['VERUM_EVM_V2_ESCROW_ADDRESS']),
         solana: `${count(['SOLANA_RPC_URL', 'SOLANA_CHAIN_ID', 'SOLANA_PROGRAM_ID', 'SOLANA_EXECUTOR_KEYPAIR', 'SOLANA_ATTESTOR_KEYPAIR', 'SOLANA_TUSDT_MINT', 'SOLANA_TBTC_MINT'])}/7`,
         tron: `${count(['TRON_FULL_HOST', 'TRON_CHAIN_ID', 'TRON_ESCROW_ADDRESS', 'TRON_EXECUTOR_KEY', 'TRON_ATTESTOR_KEY', 'TRON_TUSDT', 'TRON_TBTC'])}/7`,
+        tronV2: count(['TRON_ESCROW_V2_ADDRESS']),
         bitcoin: `${count(['BITCOIN_ESPLORA_URL', 'BITCOIN_NETWORK', 'BITCOIN_CLAIM_KEY', 'BITCOIN_REFUND_KEY'])}/4`,
         bitcoinSimulate: process.env.BITCOIN_SIMULATE ?? null,
         chainEndpoints: Object.keys(process.env).filter(k => k.startsWith('CHAIN_ENDPOINT_')).length,
