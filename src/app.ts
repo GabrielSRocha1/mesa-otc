@@ -202,6 +202,11 @@ export async function createApp(config: Config, o: AppOverrides = {}): Promise<A
   const tronTbtc = tronCfg ? tronCfg.tbtc : LOCAL_TOKENS.btcTron;
   registry.add({ code: 'USDT', network: 'tron', chainId: tronChainId, contractOrMint: tronUsdt, assetId: `tron:${tronChainId}/trc20:${tronUsdt}`, decimals: 6, tokenStandard: 'TRC-20', issuer: tronCfg ? 'USDT (Nile faucet)' : 'Tether (demo)', status: 'active' });
   registry.add({ code: 'BTC', network: 'tron', chainId: tronChainId, contractOrMint: tronTbtc, assetId: `tron:${tronChainId}/trc20:${tronTbtc}`, decimals: 8, tokenStandard: 'TRC-20', issuer: 'Verum tBTC (mock)', status: 'active' });
+  // TRX NATIVO: só quando a liquidação suporta a perna nativa — escrow V2 Tron (sentinela
+  // EIP-7528, callValue no signV2) ou o simulador local. O V1 real é só-token: registrar TRX
+  // com ele ativo criaria deals impossíveis de liquidar.
+  const tronNativeOk = !tronCfg || !!tronCfg.escrowV2;
+  if (tronNativeOk) registry.add({ code: 'TRX', network: 'tron', chainId: tronChainId, contractOrMint: null, assetId: `tron:${tronChainId}/slip44:195`, decimals: 6, tokenStandard: 'native', issuer: 'native', status: 'active' });
   // Mints Solana reais (devnet) quando o modo SOLANA está ativo.
   if (solCfg) {
     const solChainId = adapters.require('solana').chain.chainId;
@@ -215,7 +220,7 @@ export async function createApp(config: Config, o: AppOverrides = {}): Promise<A
   // Preços/profundidade dev: assetIds reais das testnets entram na fonte estática.
   const prices: Record<string, number> = { ...LOCAL_PRICES };
   if (verumEvmCfg) { prices[`eip155:${verumEvmCfg.chainId}/erc20:${verumEvmCfg.tbtc.toLowerCase()}`] = 64_230.5; prices[`eip155:${verumEvmCfg.chainId}/erc20:${verumEvmCfg.tusdt.toLowerCase()}`] = 1.0002; prices[`eip155:${verumEvmCfg.chainId}/slip44:60`] = 2_418.75; prices[`eip155:${verumEvmCfg.chainId}/erc20:${WETH_SEPOLIA.toLowerCase()}`] = 2_418.75; }
-  prices[`tron:${tronChainId}/trc20:${tronUsdt}`] = 1.0001; prices[`tron:${tronChainId}/trc20:${tronTbtc}`] = 64_230.5;
+  prices[`tron:${tronChainId}/trc20:${tronUsdt}`] = 1.0001; prices[`tron:${tronChainId}/trc20:${tronTbtc}`] = 64_230.5; prices[`tron:${tronChainId}/slip44:195`] = 0.33;
   // BTC nativo na chainId REAL do adapter (testnet/mainnet via BITCOIN_*; o regtest já está em LOCAL_PRICES).
   prices[`bip122:${adapters.require('bitcoin').chain.chainId}/slip44:0`] = 64_230.5;
   prices['lightning:ln/btc'] = 64_230.5; // BTC via Lightning — mesmo preço do BTC nativo
