@@ -1699,8 +1699,13 @@ window.addEventListener('unhandledrejection',function(e){try{console.warn('[veru
     const prov=await tronApproveOnly(step,st);
     st('Assine a aprovação na carteira…');
     const sig=await withSigTimeout(prov.tronSignTypedData(step.typedData),'tron');
+    // Resposta canônica = { signature:'0x…', address:'T…' }. Carteira antiga/ponte sem o case
+    // devolve objeto sem a string — mandar isso ao backend virava "Entrada inválida (signature:
+    // expected string, received object)". Falha aqui, com instrução, nunca lá.
+    const sigHex=(sig&&typeof sig.signature==='string')?sig.signature:(typeof sig==='string'?sig:null);
+    if(!sigHex||!/^0x[0-9a-fA-F]{130}$/.test(sigHex)) throw new Error('A carteira não devolveu a assinatura Tron no formato esperado — atualize a Verum Wallet (extensão/app) e tente de novo.');
     st('Registrando no contrato…');
-    const res=await submit({signature:(sig&&sig.signature)||sig,deadline:step.deadline});
+    const res=await submit({signature:sigHex,deadline:step.deadline});
     if(res&&res.kind==='tronTx'){
       st('Confirme a transação na carteira…');
       await withSigTimeout(prov.tronSendContractCall({
