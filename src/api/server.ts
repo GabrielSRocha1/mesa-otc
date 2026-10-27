@@ -1326,20 +1326,37 @@ export async function buildApi(deps: ApiDeps): Promise<FastifyInstance> {
       try { const bal = await deps.lightning.getBalance(); if (bal.outboundSat < amountSat) throw new DomainError('LIQUIDITY_INSUFFICIENT', `O nó Lightning não tem liquidez suficiente (disponível ${bal.outboundSat} sats, necessário ${amountSat}). Use a rota HTLC on-chain ou reduza o valor.`); }
       catch (e) { if (e instanceof DomainError) throw e; logger.warn({ err: (e as Error).message }, 'precheck de liquidez Lightning falhou (nó indisponível)'); }
     }
+    let createdDealId: string | null = null;
+    const attach = (id: string) => { createdDealId = id; deps.mesa.attachDeal(mesa, id); };
     const view = plan?.mode === 'LIGHTNING_SWAP'
-      ? await createMesaLightningDeal(mesa, body, id => deps.mesa.attachDeal(mesa, id))
+      ? await createMesaLightningDeal(mesa, body, attach)
       : plan?.mode === 'HTLC_BTC'
-      ? await createMesaHtlcDeal(mesa, body, id => deps.mesa.attachDeal(mesa, id))
+      ? await createMesaHtlcDeal(mesa, body, attach)
       : plan?.mode === 'CROSS_CHAIN' && plan.htlc
-      ? await createMesaXchainHtlcDeal(mesa, body, id => deps.mesa.attachDeal(mesa, id))
+      ? await createMesaXchainHtlcDeal(mesa, body, attach)
       : escrowDirectTokens
-      ? await createMesaEscrowDirectDeal(mesa, body, id => deps.mesa.attachDeal(mesa, id))
+      ? await createMesaEscrowDirectDeal(mesa, body, attach)
       : await createMesaDealForParts(mesa.chairs.filter(c => c.wallet).map(c => {
         const w = c.wallet!;
         const sol = (w.addresses ?? []).find(a => a.network === 'solana')?.address ?? (w.network === 'solana' ? w.address : null);
         return { role: c.role as Role, address: sol ?? w.address };
-      }), body, id => deps.mesa.attachDeal(mesa, id));
+      }), body, attach);
     deps.mesa.markApproved(mesa, pm.id);
+    // PERSISTÊNCIA VERIFICADA (incidente BTC↔Tron 2026-10-27): o portal é UM documento com guarda
+    // de versão (last-writer-wins) e o approve é a escrita mais LONGA do sistema — sessões/
+    // reentradas dos participantes escrevem o mesmo doc em paralelo e o save do approve pode ser
+    // descartado ("save ignorado — banco tem versão mais nova"): a UI mostrava "aprovada" e o banco
+    // seguia READY_FOR_APPROVAL, com a deal órfã. Aqui: flush → re-hidrata → confere → re-aplica
+    // (o rev re-bumpado passa a vencer) até confirmar que approvedAt/dealId SOBREVIVERAM no banco.
+    for (let i = 0; i < 3 && createdDealId; i++) {
+      await deps.portal.flush();
+      await deps.portal.hydrate();
+      const cur = deps.mesa.mesaById(mesaId);
+      if (!cur) break;
+      if (cur.approvedAt && (cur.dealId === createdDealId || (cur.dealIds ?? []).includes(createdDealId))) break;
+      deps.mesa.attachDeal(cur, createdDealId);
+      deps.mesa.markApproved(cur, pm.id);
+    }
     void reply.code(201);
     return { approved: true, termsHash: mesa.termsHash, deal: view };
   });
