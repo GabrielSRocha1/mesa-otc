@@ -294,7 +294,11 @@ export class VerumTronV2Adapter implements SettlementAdapter, ParticipantStepPro
       const creatorHex = (pm1 ?? terms.participants[0] as { wallet: Hex }).wallet;
       const creatorB58 = b58ByHex.get(creatorHex) ?? this.b58Of(creatorHex);
       if (!creatorB58) throw new DomainError('SETTLEMENT_FAILED', `criador ${creatorHex} sem endereço Tron conhecido`);
-      const tx = await this.writeAs(this.devKey(creatorB58), 'createTradeV2', [this.termsTuple(terms), atts.map(a => [a.validUntil, a.signature])]);
+      // Carteira REAL (criador sem chave no keyring dev): o ATTESTOR registra — o contrato permite
+      // explicitamente (msg.sender == attestor) porque o registro não movimenta fundos; os depósitos
+      // continuam condicionados à assinatura EIP-712 de cada participante no signV2.
+      const creatorPk = this.keyring?.privateKeyByAddress(creatorB58) ?? this.cfg.attestorKey;
+      const tx = await this.writeAs(creatorPk, 'createTradeV2', [this.termsTuple(terms), atts.map(a => [a.validUntil, a.signature])]);
       const meta = { tradeId, termsHash, onChainCreatedAt: Number(terms.createdAt), onChainExpiresAt: Number(terms.expiresAt), buyerLegIndex: map.buyerLegIndex ?? -1, sellerLegIndex: map.sellerLegIndex ?? -1 } as unknown as VerumMeta;
       return { ...this.ref(tx), meta };
     } catch (e) { if (e instanceof DomainError) throw e; this.fail('register', e); }

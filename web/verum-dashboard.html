@@ -1669,6 +1669,59 @@ window.addEventListener('unhandledrejection',function(e){try{console.warn('[veru
     // Perna NATIVA (ETH puro): o signV2 vai com value — o pagamento entra na própria assinatura.
     if(res&&res.kind==='txRequest'&&res.txRequest){ const tx={from,to:res.txRequest.to,data:res.txRequest.data}; if(res.txRequest.value&&res.txRequest.value!=='0') tx.value='0x'+BigInt(res.txRequest.value).toString(16); const h=await p.request({method:'eth_sendTransaction',params:[tx]}); await evmWaitReceipt(p,h); }
   }
+  // ── Perna TRON (escrow V2 Tron) — espelho do evmOnchainStep ──────────────────
+  // approve TRC-20 pendente → assinatura do Approval (typed data TIP-712 pela
+  // carteira) → POST: PMs voltam {kind:'relayed'} (executor envia); Vendedor/
+  // Comprador recebem {kind:'tronTx'} e a PRÓPRIA carteira envia o signV2 (o
+  // depósito TRC-20/TRX entra embutido — por isso o contrato exige msg.sender).
+  function tronProviderOrThrow(){
+    const prov=solProvider();
+    if(!prov||typeof prov.tronSignTypedData!=='function'||typeof prov.tronSendContractCall!=='function')
+      throw new Error('Esta Verum Wallet não executa contratos Tron (approve/assinatura on-chain). Atualize a carteira.');
+    return prov;
+  }
+  async function tronApproveOnly(step,st){
+    const prov=tronProviderOrThrow();
+    try{ await prov.connect(); }catch(e){}
+    if(step.approve){
+      (st||function(){})('Autorizando o valor na carteira…');
+      await withSigTimeout(prov.tronSendContractCall({
+        contract: step.approve.token,
+        functionSelector: 'approve(address,uint256)',
+        parameters: [{type:'address',value:step.approve.spender},{type:'uint256',value:step.approve.amount}],
+        callValueSun: '0',
+      }),'tron');
+    }
+    return prov;
+  }
+  async function tronOnchainStep(step, submit, st, refetch){
+    st=st||function(){};
+    const prov=await tronApproveOnly(step,st);
+    st('Assine a aprovação na carteira…');
+    const sig=await withSigTimeout(prov.tronSignTypedData(step.typedData),'tron');
+    st('Registrando no contrato…');
+    const res=await submit({signature:(sig&&sig.signature)||sig,deadline:step.deadline});
+    if(res&&res.kind==='tronTx'){
+      st('Confirme a transação na carteira…');
+      await withSigTimeout(prov.tronSendContractCall({
+        contract: res.contract,
+        functionSelector: res.functionSelector,
+        parameters: res.parameters,
+        callValueSun: String(res.callValue||0),
+        feeLimitSun: res.feeLimit!=null?String(res.feeLimit):null,
+      }),'tron');
+      // signV2 enviado pela carteira: espera a CONFIRMAÇÃO on-chain (o passo
+      // seguinte — assinatura da mesa — valida contra o nextIdx do contrato).
+      if(typeof refetch==='function'){
+        st('Aguardando a confirmação da rede Tron…');
+        for(let i=0;i<24;i++){
+          await new Promise(function(r){ setTimeout(r,5000); });
+          try{ const cur=await refetch(); if(cur&&cur.kind==='done') return; }catch(e){}
+        }
+        throw new Error('A rede Tron ainda não confirmou o passo on-chain — tente de novo em instantes (nada se perde).');
+      }
+    }
+  }
   async function connectWallet(network){
     const w=window;
     if(network==='ethereum'){ const p=await findVerumEthProvider(); if(!p){ const temVerum=typeof w.verum!=='undefined'; throw walletErr(temVerum?'A Verum Wallet está ativa, mas o provider EVM não foi injetado nesta aba. Recarregue a extensão (pasta extension-dist) em chrome://extensions e dê Ctrl+Shift+R aqui.':'Verum Wallet não detectada nesta aba. Instale/desbloqueie a extensão (extension-dist) e recarregue a página.','NO_WALLET'); } const accs=await p.request({method:'eth_requestAccounts'}); const address=accs&&accs[0]; if(!address) throw walletErr('Nenhuma conta EVM retornada.','NO_WALLET'); return {address,network}; }
@@ -3576,6 +3629,9 @@ window.addEventListener('unhandledrejection',function(e){try{console.warn('[veru
         step=await pmApi('/v1/portal/mesas/'+m3Sel+'/deal/step');
       }
       if(step&&step.kind==='evm') await evmOnchainStep(step, body=>pmApi('/v1/portal/mesas/'+m3Sel+'/deal/step',{method:'POST',body}));
+      // Perna TRON: o signV2 do PM1 é RELAYÁVEL (executor envia com a assinatura
+      // do Approval) — basta assinar o typed data pela carteira e postar.
+      else if(step&&step.kind==='tron') await tronOnchainStep(step, body=>pmApi('/v1/portal/mesas/'+m3Sel+'/deal/step',{method:'POST',body}));
     }catch(e){ if(!/simulado|autom|done/i.test(e.message||'')) throw e; }
     const env=await pmApi('/v1/portal/mesas/'+m3Sel+'/deal/envelope');
     if(!env.typedData) throw new Error('Envelope do PM1 sem typedData.');
@@ -4138,6 +4194,7 @@ window.addEventListener('unhandledrejection',function(e){try{console.warn('[veru
       // checagem de saldo); Solana HTLC (purpose htlc_lock) = a própria tx de lock, que É o depósito.
       if(mode==='deposit'){
         if(step&&step.kind==='evm'){ st('Autorizando o valor na carteira…'); await evmApproveOnly(step); return; }
+        if(step&&step.kind==='tron'){ await tronApproveOnly(step,st); return; }
         if(!(step&&step.kind==='solana'&&step.purpose==='htlc_lock'&&step.transactionBase64)) return;
       }
       if(step&&step.kind==='solana'&&step.transactionBase64){
@@ -4158,6 +4215,11 @@ window.addEventListener('unhandledrejection',function(e){try{console.warn('[veru
         // idem POR TENTATIVA: o endpoint exige o cabeçalho; chave fixa + corpo novo (assinatura/
         // deadline mudam a cada tentativa) daria 409 — a idempotência de verdade é on-chain.
         await evmOnchainStep(step, body=>pApi('/v1/deals/'+encodeURIComponent(d.id)+'/onchain-tx',{method:'POST',idem:d.id+':'+(pDto.viewer&&pDto.viewer.role)+':onchain:'+Date.now(),body}));
+      } else if(step&&step.kind==='tron'){
+        await tronOnchainStep(step,
+          body=>pApi('/v1/deals/'+encodeURIComponent(d.id)+'/onchain-tx',{method:'POST',idem:d.id+':'+(pDto.viewer&&pDto.viewer.role)+':onchain:'+Date.now(),body}),
+          st,
+          ()=>pApi('/v1/deals/'+encodeURIComponent(d.id)+'/onchain-tx'));
       }
     }catch(e){ if(!/simulado|autom/i.test(e.message||'')) throw e; }
   }

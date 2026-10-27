@@ -29,6 +29,7 @@ import type { Store } from '../db/repository.js';
 import { AuditLog } from '../audit/audit.js';
 import { hasParticipantSteps, type AdapterRegistry } from '../adapters/types.js';
 import { LocalChainAdapter } from '../adapters/local.js';
+import { VerumTronV2Adapter } from '../adapters/verum/tronV2.js';
 import { registry as metricsRegistry, logger, metrics } from '../monitoring/metrics.js';
 import { createHash, randomUUID } from 'node:crypto';
 import { allChains, getChain, chainIconId } from '../chains/registry.js';
@@ -606,36 +607,42 @@ export async function buildApi(deps: ApiDeps): Promise<FastifyInstance> {
     // Perna de contrato na SOLANA (escrow N-de-N com hashlock = settle_xchain): fluxo dedicado — o
     // escrow Solana revela a preimage no settle, ancorando as 4 assinaturas on-chain (ADR-v5).
     if (tokenNet === 'solana') return createMesaBtcSolanaDeal(mesa, b, onCreated);
-    if (tokenNet !== 'ethereum') throw new DomainError('SETTLEMENT_NOT_ALLOWED', `Perna de contrato em ${tokenNet} ainda não é suportada no fluxo BTC da mesa: o lado NÃO-BTC precisa de um escrow que revele a preimage; hoje escrow V2 (Ethereum) e escrow N-de-N com hashlock (Solana) fazem isso (Tron não tem hashlock no contrato)`);
-    const btcAdapter = adapters.get('bitcoin'); const evmAdapter = adapters.get('ethereum');
-    if (!btcAdapter || !evmAdapter) throw new DomainError('SETTLEMENT_NOT_ALLOWED', 'Adaptadores bitcoin/ethereum ausentes');
+    if (tokenNet !== 'ethereum' && tokenNet !== 'tron') throw new DomainError('SETTLEMENT_NOT_ALLOWED', `Perna de contrato em ${tokenNet} ainda não é suportada no fluxo BTC da mesa: o lado NÃO-BTC precisa de um escrow que revele a preimage; hoje escrow V2 (Ethereum), escrow V2 Tron e escrow N-de-N com hashlock (Solana) fazem isso`);
+    const tokenNetLabel = tokenNet === 'tron' ? 'Tron' : 'Ethereum';
+    const btcAdapter = adapters.get('bitcoin'); const tokenAdapter = adapters.get(tokenNet);
+    if (!btcAdapter || !tokenAdapter) throw new DomainError('SETTLEMENT_NOT_ALLOWED', `Adaptadores bitcoin/${tokenNet} ausentes`);
+    // Perna Tron só com o escrow V2 (hashlock): o V1 não revela a preimage — sem ela o claim do
+    // BTC não destrava e a atomicidade do swap não existe.
+    if (tokenNet === 'tron' && !(tokenAdapter instanceof VerumTronV2Adapter) && !(tokenAdapter instanceof LocalChainAdapter)) {
+      throw new DomainError('SETTLEMENT_NOT_ALLOWED', 'Perna Tron no fluxo BTC exige o escrow V2 Tron (hashlock) — defina TRON_ESCROW_V2_ADDRESS');
+    }
     const btcLabel = btcBuyer ? 'Comprador' : 'Vendedor'; const tokenLabel = btcBuyer ? 'Vendedor' : 'Comprador';
     const motivos: string[] = [];
     const btcAddr = addressOn(btcChair, 'bitcoin'); if (!btcAddr || !btcAdapter.validateAddress(btcAddr)) motivos.push(`${btcLabel}: carteira sem endereço Bitcoin válido`);
-    const tokenEvm = addressOn(tokenChair, 'ethereum'); if (!tokenEvm || !evmAdapter.validateAddress(tokenEvm)) motivos.push(`${tokenLabel}: carteira sem endereço Ethereum válido`);
+    const tokenAddr = addressOn(tokenChair, tokenNet); if (!tokenAddr || !tokenAdapter.validateAddress(tokenAddr)) motivos.push(`${tokenLabel}: carteira sem endereço ${tokenNetLabel} válido`);
     // A contraparte do BTC (quem faz o claim do BTC com a preimage) precisa de endereço Bitcoin.
     const counterBtc = addressOn(tokenChair, 'bitcoin'); if (!counterBtc || !btcAdapter.validateAddress(counterBtc)) motivos.push(`${tokenLabel}: carteira sem endereço Bitcoin (recebe/reclama o BTC do HTLC)`);
-    const pm1Evm = addressOn(pm1Chair, 'ethereum'); if (!pm1Evm || !evmAdapter.validateAddress(pm1Evm)) motivos.push('Pay Master 1: carteira sem endereço Ethereum válido');
+    const pm1Addr = addressOn(pm1Chair, tokenNet); if (!pm1Addr || !tokenAdapter.validateAddress(pm1Addr)) motivos.push(`Pay Master 1: carteira sem endereço ${tokenNetLabel} válido`);
     if (!mesa.config?.amountInBase) motivos.push('Configuração: quantidade não definida');
     if (motivos.length) throw new DomainError('VERSION_CONFLICT', 'Não foi possível criar a operação HTLC', { motivos });
     const btcAsset = { network: 'bitcoin', chainId: btcAdapter.chain.chainId, contractOrMint: null };
-    const tokenAsset = { network: 'ethereum', chainId: evmAdapter.chain.chainId, contractOrMint: tokenChair.expectedAsset.contractOrMint };
+    const tokenAsset = { network: tokenNet, chainId: tokenAdapter.chain.chainId, contractOrMint: tokenChair.expectedAsset.contractOrMint };
     const input = {
       assetIn: btcBuyer ? tokenAsset : btcAsset,
       assetOut: btcBuyer ? btcAsset : tokenAsset,
       amountInBase: mesa.config!.amountInBase as string, discountBps: b.discountBps, commissionBps: b.commissionBps, commissionSplitBps: b.commissionSplitBps,
       maxSlippageBps: b.maxSlippageBps, maxPriceDriftBps: 500, expiresInSec: b.expiresInSec,
       participants: [
-        { role: 'SELLER', network: btcBuyer ? 'ethereum' : 'bitcoin', chainId: btcBuyer ? evmAdapter.chain.chainId : btcAdapter.chain.chainId, address: btcBuyer ? tokenEvm : btcAddr },
-        { role: 'PAYMASTER_1', network: 'ethereum', chainId: evmAdapter.chain.chainId, address: pm1Evm },
-        { role: 'BUYER', network: btcBuyer ? 'bitcoin' : 'ethereum', chainId: btcBuyer ? btcAdapter.chain.chainId : evmAdapter.chain.chainId, address: btcBuyer ? btcAddr : tokenEvm },
+        { role: 'SELLER', network: btcBuyer ? tokenNet : 'bitcoin', chainId: btcBuyer ? tokenAdapter.chain.chainId : btcAdapter.chain.chainId, address: btcBuyer ? tokenAddr : btcAddr },
+        { role: 'PAYMASTER_1', network: tokenNet, chainId: tokenAdapter.chain.chainId, address: pm1Addr },
+        { role: 'BUYER', network: btcBuyer ? 'bitcoin' : tokenNet, chainId: btcBuyer ? btcAdapter.chain.chainId : tokenAdapter.chain.chainId, address: btcBuyer ? btcAddr : tokenAddr },
       ],
     };
     // Pernas SIMULADAS (preview/dev com carteiras reais): o simulador nasce zerado — semeia o saldo
     // dos depositantes ANTES do create (o verify checa o saldo do Vendedor) . No-op nas redes reais.
     deps.dev?.seed?.('bitcoin', btcAddr as string, null, BigInt(mesa.config!.amountInBase as string) * 2n);
-    deps.dev?.seed?.('ethereum', tokenEvm as string, tokenAsset.contractOrMint, 10n ** 15n);
-    const creator = (btcBuyer ? tokenEvm : btcAddr) as string;
+    deps.dev?.seed?.(tokenNet, tokenAddr as string, tokenAsset.contractOrMint, 10n ** 15n);
+    const creator = (btcBuyer ? tokenAddr : btcAddr) as string;
     const created = await deps.deals.create(withFixing(input, b), creator);
     // Linka a deal à mesa ANTES do open: o registro on-chain (dentro do open) resolve o endereço
     // EVM do vendedor-BTC pela carteira multichain da cadeira — a busca é por mesa.dealId(s).
@@ -659,13 +666,15 @@ export async function buildApi(deps: ApiDeps): Promise<FastifyInstance> {
     catch (e) { const err = e as DomainError; if (err.code !== 'FUNDING_REQUIRED') throw e; if (!htlcFunding && err.details?.address) htlcFunding = { address: String(err.details.address), requiredSat: String(err.details.requiredSat ?? mesa.config!.amountInBase) }; }
     // Perna de TOKEN só deposita com a operação ABERTA (approve ERC-20 — melhor esforço; a
     // carteira real completa via /onchain-tx).
-    if (opened) { try { await deps.deals.fund(created.id, tokenRole, tokenEvm as string); } catch (e) { logger.warn({ dealId: created.id, err: (e as Error).message }, 'funding da perna de token pendente (carteira real completa via /onchain-tx)'); } }
+    if (opened) { try { await deps.deals.fund(created.id, tokenRole, tokenAddr as string); } catch (e) { logger.warn({ dealId: created.id, err: (e as Error).message }, 'funding da perna de token pendente (carteira real completa via /onchain-tx)'); } }
     await deps.audit.append({ actorType: 'user', actorId: mesa.payMasterId, category: 'portal.mesa.deal.created', dealId: created.id, payload: { mode: btcBuyer ? 'htlc-btc-comprador' : 'htlc-btc', vault: htlcFunding?.address ?? null } });
     // Carteira real: o registro on-chain (createTradeV2) é enviado pela carteira do PM1 — o
     // txRequest vem no meta do adapter e vai na resposta para o dashboard disparar a assinatura.
     const dealNow = await deps.deals.get(created.id);
-    const evmMeta = dealNow?.onChain?.ethereum?.meta as Record<string, unknown> | undefined;
-    const registerTx = evmMeta?.registerPending && typeof evmMeta.registerTx === 'string' ? JSON.parse(evmMeta.registerTx) as Record<string, unknown> : null;
+    // Perna Tron: o registro (createTradeV2) sai pela chave do ATTESTOR dentro do open — nunca há
+    // registerTx para a carteira do PM1 (registerPending não existe no meta do adapter Tron).
+    const tokenMeta = dealNow?.onChain?.[tokenNet]?.meta as Record<string, unknown> | undefined;
+    const registerTx = tokenMeta?.registerPending && typeof tokenMeta.registerTx === 'string' ? JSON.parse(tokenMeta.registerTx) as Record<string, unknown> : null;
     // O cofre P2WSH é DETERMINÍSTICO (meta do registro BTC) — não depende do fund, que no fluxo
     // ordenado responde "leg de contrato primeiro" sem o endereço.
     if (!htlcFunding) {
