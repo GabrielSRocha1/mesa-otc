@@ -275,6 +275,9 @@ export async function buildApi(deps: ApiDeps): Promise<FastifyInstance> {
   // + cadeiras + status; funciona logo após criar (antes de aprovar). Sem sessão; recorte do participante.
   app.get('/v1/mesas/:mesaId/public-view', async req => {
     const { mesaId } = req.params as { mesaId: string };
+    // CURA também no poll PÚBLICO (/ver): sem tela logada, expiração/reembolso dependiam só do
+    // cron — o acompanhamento público agora mantém a operação viva (expira/reembolsa/retoma turnos).
+    await healMesaDeal(deps.mesa.mesaById(mesaId)?.dealId).catch(() => undefined);
     const view = await deps.mesa.mesaPublicView(mesaId) as { chairs?: { asset: string; network: string; icon?: string | null }[] };
     // Logo REAL de cada ativo da cadeira (stablecoins por símbolo; nativos pelo id do logo da rede).
     const icons = await getIconMap().catch(() => ({} as Record<string, string>));
@@ -503,6 +506,7 @@ export async function buildApi(deps: ApiDeps): Promise<FastifyInstance> {
   // No modo EVM inclui o contrato de liquidação e as transferências (txids reais) p/ o painel do frontend.
   const refundRetryAt = new Map<string, number>(); // throttle do heal de refund no poll (por instância)
   const openHealAt = new Map<string, number>();    // throttle do heal do open adiado (rota HTLC)
+  const expireHealAtRef = { at: 0 };               // throttle do expireDue disparado pelo poll
   let lastExpireSweepAt = 0; // throttle da varredura de expiração no poll (serverless sem scheduler)
   const mesaDealView = async (d: Deal) => {
     const ev = deps.dev?.evm ?? null;
@@ -1507,6 +1511,18 @@ export async function buildApi(deps: ApiDeps): Promise<FastifyInstance> {
     if (!dealId) return;
     const d = await deps.deals.get(dealId).catch(() => null);
     if (!d) return;
+    // EXPIRAÇÃO NO POLL (incidente BTC↔Tron 2026-10-27): deal vencida (prazo da operação OU turno
+    // de assinatura esgotado) só expirava no cron — que no plano Hobby quase não roda. Sem o
+    // expireNow, o reembolso automático nunca engatava (a reconciliação funding→refund nasce nele).
+    // expireDue é o MESMO passo do cron: o MOTOR decide com o relógio dele (nunca comparar
+    // Date.now() com tempos da deal — o clock é injetado nos testes). Throttle por instância.
+    if (['CREATED', 'WALLETS_CONNECTED', 'ASSETS_VERIFIED', 'LIQUIDITY_VERIFIED', 'AWAITING_SIGNATURES'].includes(d.state)
+      && Date.now() - (expireHealAtRef.at ?? 0) > 60_000) {
+      expireHealAtRef.at = Date.now();
+      try { await deps.deals.expireDue(); } catch { /* próxima rodada */ }
+      const cur = await deps.deals.get(dealId).catch(() => null);
+      if (!cur || cur.state !== d.state) return; // expirou agora — o próximo poll cura os refunds
+    }
     if (d.state === 'SETTLEMENT_VALIDATION' || d.state === 'SETTLING') {
       try { await deps.dev?.ensureOnChain?.(dealId); } catch { /* melhor esforço */ }
       try { if (d.state === 'SETTLEMENT_VALIDATION') await deps.settlement.settle(dealId, 'keeper'); else await deps.settlement.recover(); } catch { /* idempotente; falha vira BLOCKED */ }

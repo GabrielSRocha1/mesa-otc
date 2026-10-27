@@ -184,8 +184,14 @@ describe('API mesa v3 — fluxo completo', () => {
     } else {
       expect(envB.statusCode).toBeGreaterThanOrEqual(400);
     }
+    // O POLL agora também expira a deal de turno estourado (cura healMesaDeal → expireDue, mesmo
+    // passo do cron — incidente BTC↔Tron 2026-10-27): o primeiro GET pode ainda ver o estado
+    // intermediário SIGNATURE_TIMEOUT, mas em seguida a operação está EXPIRADA e o reembolso
+    // engata sozinho — sem depender do cron (quase inerte no plano Hobby).
     const status = (await app.api.inject({ method: 'GET', url: `/v1/mesas/${mesa.mesaId}`, headers: pmHeaders(sj.participantToken) })).json<{ status: string }>();
-    expect(status.status).toBe('SIGNATURE_TIMEOUT');
+    expect(['SIGNATURE_TIMEOUT', 'FAILED']).toContain(status.status);
+    const deal = await app.deals.get(dealId);
+    expect(['EXPIRED', 'REFUNDING', 'REFUNDED']).toContain(deal.state);
     await app.close();
   }, 120_000);
 
