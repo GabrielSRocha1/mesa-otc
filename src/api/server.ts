@@ -1924,7 +1924,10 @@ export async function buildApi(deps: ApiDeps): Promise<FastifyInstance> {
       if (it && it.supported) {
         const tok = (it.tokens ?? []).find(t => t.symbol === exp.symbol || (!!exp.contractOrMint && t.contract === exp.contractOrMint));
         if (!isNative && tok) { icon = tok.icon; amount = tok.amount; valueUsd = tok.valueUsd; symbol = tok.symbol; }
-        else { icon = it.icon ?? null; amount = it.amount ?? null; valueUsd = it.valueUsd ?? null; symbol = it.symbol ?? exp.symbol; }
+        else if (isNative) { icon = it.icon ?? null; amount = it.amount ?? null; valueUsd = it.valueUsd ?? null; symbol = it.symbol ?? exp.symbol; }
+        // Cadeira de TOKEN sem o token na leitura: saldo é 0 DO TOKEN — nunca cair no saldo
+        // NATIVO (mostrava o TRX da carteira como se fosse USDT, um número sem sentido).
+        else { amount = 0; valueUsd = 0; }
       }
       return { role: w.role, roleLabel: w.roleLabel, symbol, icon, amount, valueUsd };
     });
