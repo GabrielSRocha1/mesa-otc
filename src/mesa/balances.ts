@@ -9,6 +9,7 @@ import { readTokenBalances } from '../chains/tokenBalances.js';
 import { getPricesById } from '../chains/prices.js';
 import { getChain } from '../chains/registry.js';
 import { CHAIR_ROLE_LABEL } from './mesaService.js';
+import { deriveSettlementPlan } from './settlementPlan.js';
 import type { MesaRecord, MesaChair } from './types.js';
 
 export interface ChairBalance {
@@ -132,6 +133,32 @@ export async function validateChairBalances(mesa: MesaRecord, readers: BalanceRe
       else { assetOk = assetAmount >= required; if (!assetOk) failures.push(`${who}: saldo de ${chair.expectedAsset.symbol} insuficiente (faltam ${fmt(required - assetAmount)})`); }
     }
     chairs.push({ chairId: chair.chairId, role: chair.role, roleLabel: label, firstName: chair.firstName ?? null, assetSymbol: chair.expectedAsset.symbol, assetAmount, assetRequired: required, assetOk, gasSymbol: chain?.nativeSymbol ?? null, gasAmount: native?.amount ?? null, gasUsd, gasOk });
+  }
+  // ---- gás da PERNA DE CONTRATO de quem entrega BTC (rota HTLC) ----
+  // O signV2 de quem está do lado BTC sai da carteira DELE na rede do TOKEN (EVM/Tron) — o gate
+  // acima só olha a rede da cadeira (bitcoin). Sem o nativo de lá, a falha só aparecia na VEZ DE
+  // ASSINAR, com "[FAILED]" seco (incidente BTC↔Tron 2026-10-27: conta Tron do Vendedor nunca
+  // ativada). Mesma régua de gás das cadeiras (US$ 5 / fallback por rede).
+  const plan = deriveSettlementPlan(mesa.chairs);
+  if (plan?.mode === 'HTLC_BTC' && plan.htlc) {
+    const btcChair = mesa.chairs.find(c => c.role === plan.htlc!.btcSide);
+    const tokenNet = plan.htlc.btcSide === 'SELLER' ? plan.buyerNetwork : plan.sellerNetwork;
+    if (btcChair?.wallet && tokenNet && tokenNet !== 'bitcoin' && tokenNet !== 'lightning') {
+      const label = CHAIR_ROLE_LABEL[btcChair.role];
+      const who = btcChair.firstName ? `${label} (${btcChair.firstName})` : label;
+      const chain = getChain(tokenNet);
+      const netLabel = chain?.displayName ?? tokenNet;
+      const addr = addressOn(btcChair, tokenNet);
+      if (!addr) failures.push(`${who}: carteira sem endereço ${netLabel} — a assinatura do contrato sai de lá`);
+      else {
+        const native = await readers.native(tokenNet, addr);
+        const price = await readers.priceUsdOf(tokenNet);
+        const min = MIN_GAS_NATIVE_FALLBACK[tokenNet];
+        const usd = native != null && price != null ? native.amount * price : null;
+        const ok = native == null ? false : usd != null ? usd >= MIN_GAS_USD : min != null ? native.amount >= min : false;
+        if (!ok) failures.push(`${who}: sem ${chain?.nativeSymbol ?? 'gás'} na rede ${netLabel} para assinar o contrato (mínimo ≈ US$ ${MIN_GAS_USD}${native != null ? `; tem ${fmt(native.amount)} ${chain?.nativeSymbol ?? ''}`.trimEnd() : ''})`);
+      }
+    }
   }
   return { ok: failures.length === 0, checkedAt: now, chairs, failures };
 }
