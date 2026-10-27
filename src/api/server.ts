@@ -502,6 +502,7 @@ export async function buildApi(deps: ApiDeps): Promise<FastifyInstance> {
   // ---- Operação (Deal real) a partir da mesa: cria no DealEngine e expõe o estado vivo p/ a esteira ----
   // No modo EVM inclui o contrato de liquidação e as transferências (txids reais) p/ o painel do frontend.
   const refundRetryAt = new Map<string, number>(); // throttle do heal de refund no poll (por instância)
+  const openHealAt = new Map<string, number>();    // throttle do heal do open adiado (rota HTLC)
   let lastExpireSweepAt = 0; // throttle da varredura de expiração no poll (serverless sem scheduler)
   const mesaDealView = async (d: Deal) => {
     const ev = deps.dev?.evm ?? null;
@@ -1512,6 +1513,17 @@ export async function buildApi(deps: ApiDeps): Promise<FastifyInstance> {
       return;
     }
     if (d.state === 'AWAITING_SIGNATURES' && d.turnRole === null) { await healDeferredTurns(dealId); return; }
+    // CURA DO OPEN ADIADO (rota HTLC, lock externo pendente — incidente BTC↔Tron 2026-10-27): o
+    // approve deixa a deal em LIQUIDITY_VERIFIED e o open — que DERIVA o cofre P2WSH e persiste o
+    // meta em onChain.bitcoin — rodava UMA vez; uma falha transitória ali (esplora/timeout) deixava
+    // o Vendedor sem o endereço do cofre na tela (htlcVault null) e a operação parecia morta.
+    // Re-tentar o open em todo poll é idempotente: FUNDING_REQUIRED é o estado normal até o lock
+    // confirmar; quando confirmar, o mesmo open registra a perna de contrato e abre as assinaturas.
+    if (d.state === 'LIQUIDITY_VERIFIED' && d.terms?.legs.some(l => l.mode === 'HTLC') && Date.now() - (openHealAt.get(dealId) ?? 0) > 30_000) {
+      openHealAt.set(dealId, Date.now());
+      try { await deps.deals.open(dealId, d.createdBy); } catch { /* FUNDING_REQUIRED até o lock confirmar — o registro do cofre já persistiu */ }
+      return;
+    }
     if (d.state === 'REFUNDING' && d.refunds.some(r => r.status === 'PENDING') && Date.now() - (refundRetryAt.get(dealId) ?? 0) > 90_000) {
       refundRetryAt.set(dealId, Date.now());
       try { await deps.deals.retryRefunds(dealId); } catch { /* fica PENDING até a próxima */ }

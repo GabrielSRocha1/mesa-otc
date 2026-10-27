@@ -73,6 +73,53 @@ describe('mesa v4 — approve cria a deal HTLC com perna Tron (escrow V2 hashloc
     await app.close();
   }, 60_000);
 
+  it('open ADIADO (lock externo pendente): o poll da mesa cura — registra o cofre e abre quando possível', async () => {
+    // Incidente 2026-10-27 (BTC↔Tron em produção): o open falhou/ficou adiado no approve e NENHUM
+    // poll re-tentava — o Vendedor nunca via o endereço do cofre (htlcVault null). Aqui criamos a
+    // deal parada em LIQUIDITY_VERIFIED (sem open) e provamos que o GET da mesa destrava sozinho.
+    const { app } = await makeApp({ balanceReaders: fundedReaders, tronHashlock: true });
+    const r = await app.api.inject({ method: 'POST', url: '/v1/portal/register', payload: { name: 'PM', email: uniqueEmail(), password: 'senha-forte-1' } });
+    const token = r.json<{ token: string }>().token;
+    const mesaRes = await app.api.inject({ method: 'POST', url: '/v1/portal/mesas', headers: pmHeaders(token), payload: { chairs: [
+      { role: 'SELLER', expectedAsset: { network: 'bitcoin', contractOrMint: null, decimals: 8, symbol: 'BTC' } },
+      { role: 'BUYER', expectedAsset: { network: 'tron', contractOrMint: LOCAL_TOKENS.usdtTron, decimals: 6, symbol: 'USDT' } },
+      { role: 'PAYMASTER_1', expectedAsset: { network: 'tron', contractOrMint: null, decimals: 6, symbol: 'TRX' } },
+    ] } });
+    const { mesaId } = mesaRes.json<{ mesaId: string }>();
+    const mesa = app.mesa.mesaById(mesaId)!;
+    const seller = btcWallet(); const buyer = tronWallet(); const pm1 = tronWallet();
+    app.local!.bitcoin.mint(seller.address, null, 50_000_000n);
+    app.local!.tron!.mint(buyer.address, LOCAL_TOKENS.usdtTron, 10n ** 12n);
+    const chainId = app.adapters.require('tron').chain.chainId;
+    let deal = await app.deals.create({
+      assetIn: { network: 'bitcoin', chainId: app.adapters.require('bitcoin').chain.chainId, contractOrMint: null },
+      assetOut: { network: 'tron', chainId, contractOrMint: LOCAL_TOKENS.usdtTron },
+      amountInBase: '20000000', discountBps: 0, maxSlippageBps: 50, maxPriceDriftBps: 500, expiresInSec: 2400,
+      participants: [
+        { role: 'SELLER', network: 'bitcoin', chainId: app.adapters.require('bitcoin').chain.chainId, address: seller.address },
+        { role: 'PAYMASTER_1', network: 'tron', chainId, address: pm1.address },
+        { role: 'BUYER', network: 'tron', chainId, address: buyer.address },
+      ],
+    }, seller.address);
+    for (const p of [{ role: 'PAYMASTER_1', address: pm1.address }, { role: 'BUYER', address: buyer.address }] as const) {
+      deal = await app.deals.connectWallet(deal.id, p.role, p.address, p.address);
+    }
+    deal = await app.deals.get(deal.id);
+    expect(deal.state).toBe('LIQUIDITY_VERIFIED'); // termos congelados, open NUNCA rodou (cenário do incidente)
+    expect(deal.onChain.bitcoin).toBeUndefined();
+    app.mesa.attachDeal(mesa, deal.id);
+
+    // Poll do admin (GET /v1/mesas/:id) → healMesaDeal re-tenta o open.
+    const poll = await app.api.inject({ method: 'GET', url: `/v1/mesas/${mesaId}`, headers: pmHeaders(token) });
+    expect(poll.statusCode, poll.body).toBe(200);
+    deal = await app.deals.get(deal.id);
+    // No simulador o lock auto-confirma → o heal abre de vez; no mundo real a mesma chamada
+    // teria persistido o meta do cofre (onChain.bitcoin) e devolvido FUNDING_REQUIRED.
+    expect(deal.state).toBe('AWAITING_SIGNATURES');
+    expect(deal.onChain.bitcoin?.registered).toBe(true);
+    await app.close();
+  }, 60_000);
+
   it('sem hashlock Tron (escrow V1), a criação da mesa segue bloqueada (guard preservado)', async () => {
     const { app } = await makeApp({ balanceReaders: fundedReaders });
     const r = await app.api.inject({ method: 'POST', url: '/v1/portal/register', payload: { name: 'PM', email: uniqueEmail(), password: 'senha-forte-1' } });
