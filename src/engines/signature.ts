@@ -69,7 +69,7 @@ export function evmDealTerms(t: Terms, dealHash: string, routeHash: string, chai
   return { ...base, termsHash: evmTermsHash(base, chainId, contract) };
 }
 
-export function envelopeFor(deal: Deal, role: Role, nonce: string, env: Environment, escrowContractByChain: (network: string) => string): Envelope {
+export function envelopeFor(deal: Deal, role: Role, nonce: string, env: Environment, escrowContractByChain: (network: string, netEnv?: 'mainnet' | 'testnet') => string): Envelope {
   const t = deal.terms; const h = deal.hash; if (!t || !h) throw new DomainError('SETTLEMENT_NOT_ALLOWED', 'termos não congelados');
   const p = t.participants.find(x => x.role === role); if (!p) throw new DomainError('NOT_PARTICIPANT', 'papel não existe na Deal');
   const legIn = t.legs[0]; const legOut = t.legs[1]; if (!legIn || !legOut) throw new DomainError('INVALID_INPUT', 'legs incompletas');
@@ -78,7 +78,9 @@ export function envelopeFor(deal: Deal, role: Role, nonce: string, env: Environm
   const message = `${payload.domain}\n${canonicalize(payload)}`;
   const envelope: Envelope = { scheme: p.keyScheme, network: p.network, payload, message };
   if (p.network === 'ethereum') {
-    const contract = escrowContractByChain('ethereum') as Hex; const evm = evmDealTerms(t, h.dealHash, h.routeHash, BigInt(p.chainId), contract);
+    // Deal MAINNET assina contra o escrow MAINNET — o typed data com o contrato errado validaria
+    // off-chain e morreria on-chain (ou pior: autorizaria no ambiente errado).
+    const contract = escrowContractByChain('ethereum', t.netEnv ?? 'testnet') as Hex; const evm = evmDealTerms(t, h.dealHash, h.routeHash, BigInt(p.chainId), contract);
     envelope.typedData = { domain: { name: 'VerumOTC', version: '1', chainId: Number(p.chainId), verifyingContract: contract }, types: EIP712_TYPES, primaryType: 'DealApproval',
       message: { dealHash: ('0x' + h.dealHash) as `0x${string}`, termsHash: evm.termsHash, dealId: payload.dealId, revision: payload.revision, role: ROLE_CODE[role], signer: p.address as `0x${string}`, nonce, expiresAt: BigInt(payload.expiresAt), assetIn: payload.assetIn, amountIn: BigInt(payload.amountIn), assetOut: payload.assetOut, amountOut: BigInt(payload.amountOut), counterparty } };
   }
@@ -148,7 +150,7 @@ export function verifyTron(message: string, signatureHex: string, addressT: stri
 }
 
 export class SignatureEngine {
-  constructor(private readonly store: Store, private readonly env: Environment, private readonly escrowByChain: (network: string) => string, private readonly now: () => number = () => Date.now()) {}
+  constructor(private readonly store: Store, private readonly env: Environment, private readonly escrowByChain: (network: string, netEnv?: 'mainnet' | 'testnet') => string, private readonly now: () => number = () => Date.now()) {}
 
   async issueNonce(kind: 'challenge' | 'approval', ttlMs: number, ctx?: { dealId: string; revision: number; role: Role; subject?: string }): Promise<string> {
     if (ctx) { const open = await this.store.findOpenNonce(ctx.dealId, ctx.revision, ctx.role, this.now()); if (open) return open.value; } // reutiliza o nonce aberto: sem crescimento por GET repetido

@@ -49,6 +49,9 @@ export interface MesaRecord {
   operationCode?: string;
   label?: string;
   network: string;                    // uma mesa = uma rede
+  /** Ambiente de REDE da mesa (congelado na criação): 'mainnet' = fundos reais (ETH↔BTC);
+   *  ausente/'testnet' = Sepolia/signet/… (comportamento atual; mesas antigas intactas). */
+  environment?: 'mainnet' | 'testnet';
   chairs: MesaChair[];                // 3–4
   approvals: Record<string, { at: number }>;
   config?: MesaOperationConfig;

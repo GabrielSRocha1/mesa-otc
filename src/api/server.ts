@@ -160,6 +160,7 @@ export async function buildApi(deps: ApiDeps): Promise<FastifyInstance> {
         bitcoin: `${count(['BITCOIN_ESPLORA_URL', 'BITCOIN_NETWORK', 'BITCOIN_CLAIM_KEY', 'BITCOIN_REFUND_KEY'])}/4`,
         bitcoinSimulate: process.env.BITCOIN_SIMULATE ?? null,
         chainEndpoints: Object.keys(process.env).filter(k => k.startsWith('CHAIN_ENDPOINT_')).length,
+        mainnet: deps.adapters?.mainnetNetworks() ?? [],
         database: process.env.DATABASE_MODE ?? null,
         sessionSecret: !!process.env.SESSION_SECRET,
       } };
@@ -368,14 +369,15 @@ export async function buildApi(deps: ApiDeps): Promise<FastifyInstance> {
   /** Adapter do passo on-chain: a primeira leg cuja rede expõe participant-steps (na rota HTLC a
    *  legs[0] é a BTC externa — o passo do participante vive na leg de CONTRATO). */
   const stepAdapterOf = (d: Deal, role?: Role) => {
+    const env = d.terms?.netEnv ?? 'testnet'; // deal MAINNET só resolve adapters mainnet
     // O papel que FINANCIA uma perna HTLC age NAQUELA rede (lock) — ex.: comprador da direção
     // inversa tranca na Solana enquanto o contrato vive na EVM. Para os demais, vale a primeira
     // perna com participant-steps (a de contrato).
     if (role) {
       const htlcLeg = d.terms?.legs.find(l => l.mode === 'HTLC' && l.from === role);
-      if (htlcLeg) { const a = deps.adapters?.get(htlcLeg.escrowChain); if (a && hasParticipantSteps(a)) return a; }
+      if (htlcLeg) { const a = deps.adapters?.get(htlcLeg.escrowChain, env); if (a && hasParticipantSteps(a)) return a; }
     }
-    for (const leg of d.terms?.legs ?? []) { const a = deps.adapters?.get(leg.escrowChain); if (a && hasParticipantSteps(a)) return a; }
+    for (const leg of d.terms?.legs ?? []) { const a = deps.adapters?.get(leg.escrowChain, env); if (a && hasParticipantSteps(a)) return a; }
     throw new DomainError('SETTLEMENT_NOT_ALLOWED', 'rede em modo simulado — o passo on-chain é automático');
   };
   app.get('/v1/deals/:id/onchain-tx', async req => {
@@ -611,11 +613,15 @@ export async function buildApi(deps: ApiDeps): Promise<FastifyInstance> {
     const tokenNet = tokenChair.expectedAsset.network;
     // Perna de contrato na SOLANA (escrow N-de-N com hashlock = settle_xchain): fluxo dedicado — o
     // escrow Solana revela a preimage no settle, ancorando as 4 assinaturas on-chain (ADR-v5).
+    const netEnv = mesa.environment === 'mainnet' ? 'mainnet' as const : 'testnet' as const;
+    // MAINNET: recorte inicial — a perna de contrato é SEMPRE Ethereum (regra já aplicada na
+    // criação da mesa; cinto-e-suspensório aqui porque o adapter mainnet de outra rede não existe).
+    if (netEnv === 'mainnet' && tokenNet !== 'ethereum') throw new DomainError('SETTLEMENT_NOT_ALLOWED', 'Em MAINNET o único par suportado é BTC ↔ Ethereum');
     if (tokenNet === 'solana') return createMesaBtcSolanaDeal(mesa, b, onCreated);
     if (tokenNet !== 'ethereum' && tokenNet !== 'tron') throw new DomainError('SETTLEMENT_NOT_ALLOWED', `Perna de contrato em ${tokenNet} ainda não é suportada no fluxo BTC da mesa: o lado NÃO-BTC precisa de um escrow que revele a preimage; hoje escrow V2 (Ethereum), escrow V2 Tron e escrow N-de-N com hashlock (Solana) fazem isso`);
     const tokenNetLabel = tokenNet === 'tron' ? 'Tron' : 'Ethereum';
-    const btcAdapter = adapters.get('bitcoin'); const tokenAdapter = adapters.get(tokenNet);
-    if (!btcAdapter || !tokenAdapter) throw new DomainError('SETTLEMENT_NOT_ALLOWED', `Adaptadores bitcoin/${tokenNet} ausentes`);
+    const btcAdapter = adapters.get('bitcoin', netEnv); const tokenAdapter = adapters.get(tokenNet, netEnv);
+    if (!btcAdapter || !tokenAdapter) throw new DomainError('SETTLEMENT_NOT_ALLOWED', netEnv === 'mainnet' ? `Adaptadores MAINNET bitcoin/${tokenNet} não configurados (grupos *_MAINNET_* ausentes)` : `Adaptadores bitcoin/${tokenNet} ausentes`);
     // Perna Tron só com o escrow V2 (hashlock): o V1 não revela a preimage — sem ela o claim do
     // BTC não destrava e a atomicidade do swap não existe.
     if (tokenNet === 'tron' && !(tokenAdapter instanceof VerumTronV2Adapter) && !(tokenAdapter instanceof LocalChainAdapter)) {
@@ -637,6 +643,7 @@ export async function buildApi(deps: ApiDeps): Promise<FastifyInstance> {
       assetOut: btcBuyer ? btcAsset : tokenAsset,
       amountInBase: mesa.config!.amountInBase as string, discountBps: b.discountBps, commissionBps: b.commissionBps, commissionSplitBps: b.commissionSplitBps,
       maxSlippageBps: b.maxSlippageBps, maxPriceDriftBps: 500, expiresInSec: b.expiresInSec,
+      ...(netEnv === 'mainnet' ? { netEnv } : {}),
       participants: [
         { role: 'SELLER', network: btcBuyer ? tokenNet : 'bitcoin', chainId: btcBuyer ? tokenAdapter.chain.chainId : btcAdapter.chain.chainId, address: btcBuyer ? tokenAddr : btcAddr },
         { role: 'PAYMASTER_1', network: tokenNet, chainId: tokenAdapter.chain.chainId, address: pm1Addr },
@@ -1092,6 +1099,10 @@ export async function buildApi(deps: ApiDeps): Promise<FastifyInstance> {
   const AuthNetZ = z.enum(['ethereum', 'solana', 'tron', 'bitcoin']);
   const ChairAssetZ = z.object({ network: z.string().min(2).max(40), contractOrMint: z.string().max(120).nullable().default(null), decimals: z.number().int().min(0).max(30), symbol: z.string().min(1).max(20) });
   const readers = deps.balanceReaders ?? defaultBalanceReaders();
+  // Leitores MAINNET (mesa.environment='mainnet'): endpoints públicos mainnet, ignorando os
+  // CHAIN_ENDPOINT_* de testnet do deploy. Testes com balanceReaders injetado usam o mesmo mock.
+  const readersMainnet = deps.balanceReaders ?? defaultBalanceReaders('mainnet');
+  const readersFor = (mesa: { environment?: string }) => (mesa.environment === 'mainnet' ? readersMainnet : readers);
   // Verificação de segurança de tokens: registro oficial + (opcional) API da Verum Wallet.
   // Em dev, os tokens de teste (tUSDT/tBTC Sepolia e mints locais da Solana) são canônicos.
   // Allowlist anti-golpe = TODOS os tokens do registro canônico da plataforma (deps.registry), que é
@@ -1148,7 +1159,7 @@ export async function buildApi(deps: ApiDeps): Promise<FastifyInstance> {
       }
     }
     const req = requiredOfChair(mesa);
-    return validateChairBalances(mesa as Parameters<typeof validateChairBalances>[0], readers, deps.mesa.nowMs(), chair => waived.has(chair.role) ? null : (dealRequired.get(chair.role) ?? req(chair)));
+    return validateChairBalances(mesa as Parameters<typeof validateChairBalances>[0], readersFor(mesa as { environment?: string }), deps.mesa.nowMs(), chair => waived.has(chair.role) ? null : (dealRequired.get(chair.role) ?? req(chair)));
   };
   /**
    * balancePreCheck — gate ÚNICO antes de sacramentar a operação: todos na mesa veem os saldos das
@@ -1169,8 +1180,16 @@ export async function buildApi(deps: ApiDeps): Promise<FastifyInstance> {
   // Alimenta o dropdown do wizard: o usuário escolhe o token; contrato/mint e decimais vêm daqui.
   const TOKEN_CHAIN_BY_NETWORK: Record<string, number> = { ethereum: 1, bsc: 56, polygon: 137, arbitrum: 42161, solana: 101, tron: 728126428 };
   app.get('/v1/tokens', async req => {
-    const { network } = req.query as { network?: string };
+    const { network, env } = req.query as { network?: string; env?: string };
     const chainId = network ? TOKEN_CHAIN_BY_NETWORK[network] : undefined;
+    // AMBIENTE MAINNET (mesa mainnet): catálogo = ativos com chainId mainnet do registro real
+    // (ETH/USDT/USDC/WBTC/WETH registrados no boot quando o grupo VERUM_EVM_MAINNET_* existe).
+    if (env === 'mainnet') {
+      const main = deps.registry.list()
+        .filter(a => a.status === 'active' && (!network || a.network === network) && (a.network !== 'ethereum' || a.chainId === '1') && a.contractOrMint)
+        .map(a => ({ symbol: a.code, contractOrMint: a.contractOrMint as string, decimals: a.decimals, representationOf: a.issuer ?? null }));
+      return { network: network ?? null, tokens: main };
+    }
     // Tokens MAINNET só entram quando a rede de liquidação É a mainnet: com um adaptador REAL numa
     // testnet (ex.: Tron Shasta, Sepolia), oferecer o USDT real no dropdown gera um "segundo USDT"
     // que o verifyAsset reprova (contrato inexistente na testnet) — confunde sem servir p/ nada.
@@ -1186,7 +1205,8 @@ export async function buildApi(deps: ApiDeps): Promise<FastifyInstance> {
     // em mainnet, os reais). Sem isto, o wizard mostrava só mainnet e a escolha era reprovada.
     const seen = new Set<string>();
     const real = deps.registry.list()
-      .filter(a => a.status === 'active' && a.contractOrMint && (!network || a.network === network))
+      // ethereum chainId '1' é do AMBIENTE mainnet (mesa mainnet) — nunca entra no dropdown testnet.
+      .filter(a => a.status === 'active' && a.contractOrMint && (!network || a.network === network) && !(a.network === 'ethereum' && a.chainId === '1'))
       .map(a => ({ symbol: a.code, contractOrMint: a.contractOrMint as string, decimals: a.decimals, representationOf: a.issuer ?? null }))
       .filter(t => { const k = t.contractOrMint.toLowerCase(); if (seen.has(k)) return false; seen.add(k); return true; });
     // dedup: remove do catálogo mainnet os contratos já cobertos pelo registro real
@@ -1197,7 +1217,7 @@ export async function buildApi(deps: ApiDeps): Promise<FastifyInstance> {
   // --- admin (sessão do portal) ---
   app.post('/v1/portal/mesas', async (req, reply) => {
     // v4: `network` é opcional — derivada da cadeira do vendedor quando ausente (redes são por perna).
-    const b = parse(z.object({ label: z.string().max(120).optional(), network: z.string().min(2).max(40).optional(), chairs: z.array(z.object({ role: ChairRoleZ, expectedAsset: ChairAssetZ, label: z.string().max(120).optional() })).min(2).max(4) }), req.body);
+    const b = parse(z.object({ label: z.string().max(120).optional(), network: z.string().min(2).max(40).optional(), environment: z.enum(['mainnet', 'testnet']).optional(), chairs: z.array(z.object({ role: ChairRoleZ, expectedAsset: ChairAssetZ, label: z.string().max(120).optional() })).min(2).max(4) }), req.body);
     const mesa = deps.mesa.createMesa(portalToken(req), b);
     void reply.code(201);
     return deps.mesa.mesaViewFor(mesa, { kind: 'admin' });
@@ -1326,6 +1346,9 @@ export async function buildApi(deps: ApiDeps): Promise<FastifyInstance> {
       try { const bal = await deps.lightning.getBalance(); if (bal.outboundSat < amountSat) throw new DomainError('LIQUIDITY_INSUFFICIENT', `O nó Lightning não tem liquidez suficiente (disponível ${bal.outboundSat} sats, necessário ${amountSat}). Use a rota HTLC on-chain ou reduza o valor.`); }
       catch (e) { if (e instanceof DomainError) throw e; logger.warn({ err: (e as Error).message }, 'precheck de liquidez Lightning falhou (nó indisponível)'); }
     }
+    // MAINNET: recorte inicial — só a rota HTLC_BTC (BTC↔Ethereum) existe; qualquer outro plano é
+    // inalcançável pela regra de par da criação, mas o guard fecha a porta de dados antigos/editados.
+    if (mesa.environment === 'mainnet' && plan?.mode !== 'HTLC_BTC') throw new DomainError('SETTLEMENT_NOT_ALLOWED', 'Em MAINNET o único fluxo suportado é BTC nativo ↔ Ethereum (rota HTLC)');
     let createdDealId: string | null = null;
     const attach = (id: string) => { createdDealId = id; deps.mesa.attachDeal(mesa, id); };
     const view = plan?.mode === 'LIGHTNING_SWAP'
@@ -1722,10 +1745,11 @@ export async function buildApi(deps: ApiDeps): Promise<FastifyInstance> {
       let current: number | null = null;
       if (address) {
         try {
-          if (asset.contractOrMint == null) { const n = await readers.native(net, address); current = n ? n.amount : null; }
+          const rdr = readersFor(mesa as { environment?: string });
+          if (asset.contractOrMint == null) { const n = await rdr.native(net, address); current = n ? n.amount : null; }
           else {
-            current = (await readers.tokenDirect?.(net, asset.contractOrMint, address, asset.decimals)) ?? null;
-            if (current == null) { const toks = await readers.tokens(net, address); const hit = toks.find(t => (t.contract || '').toLowerCase() === (asset.contractOrMint || '').toLowerCase() || t.symbol === asset.code); current = hit ? hit.amount : null; }
+            current = (await rdr.tokenDirect?.(net, asset.contractOrMint, address, asset.decimals)) ?? null;
+            if (current == null) { const toks = await rdr.tokens(net, address); const hit = toks.find(t => (t.contract || '').toLowerCase() === (asset.contractOrMint || '').toLowerCase() || t.symbol === asset.code); current = hit ? hit.amount : null; }
           }
         } catch { current = null; }
       }
@@ -1888,7 +1912,7 @@ export async function buildApi(deps: ApiDeps): Promise<FastifyInstance> {
   // Saldo nativo + tokens por endereço (valor USD/BRL + ícones). Atalho para carteiras DEMO (saldos
   // canned, sem tocar RPC/CoinGecko); a leitura real usa os RPCs PÚBLICOS (ex.: Solana). Reusado
   // pela rota pública /v1/chains/balances e pela visão pública da mesa (/v1/mesas/:id/balances).
-  const chainBalances = async (addresses: { network: string; address: string }[]) => {
+  const chainBalances = async (addresses: { network: string; address: string }[], env?: 'mainnet' | 'testnet') => {
     const demo = deps.dev?.demo;
     if (demo && addresses.some(a => demo.addresses.has(a.address))) {
       const { demoBalancesResponse } = await import('../portal/demo.js');
@@ -1906,8 +1930,8 @@ export async function buildApi(deps: ApiDeps): Promise<FastifyInstance> {
       if (!chain) return { network, address, supported: false as const };
       // Nativo + tokens em paralelo — a falha de um nunca derruba o outro.
       const [bal, toks] = await Promise.all([
-        readNativeBalance(network, address).catch(() => null),
-        readTokenBalances(network, address).catch(() => []),
+        readNativeBalance(network, address, env).catch(() => null),
+        readTokenBalances(network, address, env).catch(() => []),
       ]);
       const price = q(chain.coingeckoId);
       const amount = bal?.amount ?? null;
@@ -1956,8 +1980,10 @@ export async function buildApi(deps: ApiDeps): Promise<FastifyInstance> {
         network: z.string().min(2).max(40),
         address: z.string().min(8).max(120),
       })).min(1).max(30),
+      // Mesa MAINNET: a UI pede a leitura nos endpoints públicos mainnet (ignora CHAIN_ENDPOINT_*).
+      environment: z.enum(['mainnet', 'testnet']).optional(),
     }), req.body);
-    return chainBalances(body.addresses);
+    return chainBalances(body.addresses, body.environment);
   });
   // SALDOS (somente leitura, PÚBLICO — sem login) das cadeiras conectadas de uma mesa — base dos
   // saldos/ícones reais no link /ver/:mesaId. Resolve endereços internamente; NÃO expõe endereços.
@@ -1966,7 +1992,7 @@ export async function buildApi(deps: ApiDeps): Promise<FastifyInstance> {
     const { mesaId } = req.params as { mesaId: string };
     const wallets = deps.mesa.mesaConnectedWallets(mesaId);
     if (!wallets.length) return { chairs: [] };
-    const resp = await chainBalances(wallets.map(w => ({ network: w.network, address: w.address })));
+    const resp = await chainBalances(wallets.map(w => ({ network: w.network, address: w.address })), deps.mesa.mesaById(mesaId)?.environment);
     type BalItem = { address?: string; supported?: boolean; symbol?: string; icon?: string | null; amount?: number | null; valueUsd?: number | null; tokens?: { symbol: string; contract: string | null; icon: string | null; amount: number; valueUsd: number | null }[] };
     const byAddr = new Map<string, BalItem>();
     for (const it of resp.items as BalItem[]) if (it.address) byAddr.set(it.address, it);

@@ -17,6 +17,9 @@ import type { AssetRegistry } from './assetRegistry.js';
 import type { AuditLog } from '../audit/audit.js';
 import { metrics, logger } from '../monitoring/metrics.js';
 
+/** Ambiente de REDE da deal (mainnet por mesa): terms congelados mandam. Ausente = testnet. */
+const envOfDeal = (d: Deal): 'mainnet' | 'testnet' => d.terms?.netEnv ?? d.draft?.netEnv ?? 'testnet';
+
 export interface SettlementDeps { store: Store; adapters: AdapterRegistry; price: PriceEngine; router: RouterEngine; risk: RiskEngine; signature: SignatureEngine; registry: AssetRegistry; audit: AuditLog; now?: () => number; execMarginMs?: number }
 /** Gancho fornecido pelo Deal Engine para transições e persistência sob o lock por Deal. */
 export interface DealMutator { withDeal<T>(dealId: string, fn: (deal: Deal) => Promise<T>): Promise<T>; transition(deal: Deal, to: DealState, actor: string, payload?: Record<string, unknown>): Promise<void>; persist(deal: Deal, type: string, actor: string, payload?: Record<string, unknown>): Promise<void>; refundAll(deal: Deal, actor: string): Promise<void> }
@@ -51,7 +54,7 @@ export class SettlementEngine {
     else { let allOk = true; for (const s of valid) { const r = await this.d.signature.verifyAgainstDeal(deal, { role: s.role, signer: s.signer, scheme: s.scheme, signature: s.signature, nonce: s.nonce }); if (!r.ok || s.signedHash !== h.dealHash) { allOk = false; fail(`assinatura:${s.role}`, 'SIGNATURE_INVALID', r.reason ?? 'hash assinado difere'); } } if (allOk) pass('assinaturas', `${roles.size}/${deal.requiredSignatures}`); }
     // 5. ativos e depósitos
     for (const leg of t.legs) {
-      try { await this.d.registry.verifyOnChain(leg.asset, this.d.adapters); pass(`ativo:${leg.index}`); } catch (e) { if (isTransient(e)) throw e; fail(`ativo:${leg.index}`, 'ASSET_VERIFICATION_FAILED', (e as Error).message); }
+      try { await this.d.registry.verifyOnChain(leg.asset, this.d.adapters, envOfDeal(deal)); pass(`ativo:${leg.index}`); } catch (e) { if (isTransient(e)) throw e; fail(`ativo:${leg.index}`, 'ASSET_VERIFICATION_FAILED', (e as Error).message); }
       const p = deal.participants.find(x => x.role === leg.from);
       // Perna lightning: o BTC é ENTREGUE no settle (o nó paga a invoice), não depositado antes —
       // não exige funding prévio. A liquidez outbound é checada no approve (precheck).
@@ -74,8 +77,8 @@ export class SettlementEngine {
     for (const chain of new Set(t.legs.map(l => l.escrowChain))) {
       // A cadeia 'lightning' não tem commitment on-chain (revision/dealHash) — só exige que o nó
       // esteja PRONTO (FUNDED) ou já tenha pago (SETTLED). A segurança é a preimage no settleV2.
-      if (chain === 'lightning') { try { const st = await this.d.adapters.require(chain).getDealState(deal.id); if (st.status === 'FUNDED' || st.status === 'SETTLED') pass(`on-chain:${chain}`, `lightning ${st.status}`); else fail(`on-chain:${chain}`, 'SETTLEMENT_NOT_ALLOWED', `lightning ${st.status}`); } catch (e) { if (isTransient(e)) throw e; fail(`on-chain:${chain}`, 'SETTLEMENT_NOT_ALLOWED', (e as Error).message); } continue; }
-      try { const st = await this.d.adapters.require(chain).getDealState(deal.id); if (st.status === 'SETTLED' && st.revision === deal.revision && st.dealHash === h.dealHash) pass(`on-chain:${chain}`, `já liquidada nesta cadeia (${st.settledTx}); será reconciliada`); else if (st.status === 'SETTLED') fail(`on-chain:${chain}`, 'SETTLEMENT_ALREADY_EXECUTED', 'liquidada on-chain com outra revisão/hash'); else if (st.status !== 'FUNDED') fail(`on-chain:${chain}`, 'FUNDING_REQUIRED', `status on-chain ${st.status}`); else if (st.revision !== deal.revision || st.dealHash !== h.dealHash) fail(`on-chain:${chain}`, 'SIGNATURE_INVALID', 'commitment on-chain difere da revisão corrente'); else pass(`on-chain:${chain}`); }
+      if (chain === 'lightning') { try { const st = await this.d.adapters.require(chain, envOfDeal(deal)).getDealState(deal.id); if (st.status === 'FUNDED' || st.status === 'SETTLED') pass(`on-chain:${chain}`, `lightning ${st.status}`); else fail(`on-chain:${chain}`, 'SETTLEMENT_NOT_ALLOWED', `lightning ${st.status}`); } catch (e) { if (isTransient(e)) throw e; fail(`on-chain:${chain}`, 'SETTLEMENT_NOT_ALLOWED', (e as Error).message); } continue; }
+      try { const st = await this.d.adapters.require(chain, envOfDeal(deal)).getDealState(deal.id); if (st.status === 'SETTLED' && st.revision === deal.revision && st.dealHash === h.dealHash) pass(`on-chain:${chain}`, `já liquidada nesta cadeia (${st.settledTx}); será reconciliada`); else if (st.status === 'SETTLED') fail(`on-chain:${chain}`, 'SETTLEMENT_ALREADY_EXECUTED', 'liquidada on-chain com outra revisão/hash'); else if (st.status !== 'FUNDED') fail(`on-chain:${chain}`, 'FUNDING_REQUIRED', `status on-chain ${st.status}`); else if (st.revision !== deal.revision || st.dealHash !== h.dealHash) fail(`on-chain:${chain}`, 'SIGNATURE_INVALID', 'commitment on-chain difere da revisão corrente'); else pass(`on-chain:${chain}`); }
       catch (e) { if (isTransient(e)) throw e; fail(`on-chain:${chain}`, 'SETTLEMENT_NOT_ALLOWED', (e as Error).message); }
     }
     // 9. risco / bloqueio operacional
@@ -121,7 +124,7 @@ export class SettlementEngine {
         ? (a.escrowChain === 'lightning' ? 0 : 1) - (b.escrowChain === 'lightning' ? 0 : 1)
         : (a.mode === 'HTLC' ? 1 : 0) - (b.mode === 'HTLC' ? 1 : 0));
       for (const leg of order) {
-        const ex = rec.legs.find(l => l.index === leg.index)!; const adapter = this.d.adapters.require(leg.escrowChain);
+        const ex = rec.legs.find(l => l.index === leg.index)!; const adapter = this.d.adapters.require(leg.escrowChain, envOfDeal(deal));
         try {
           const onChain = await adapter.getDealState(deal.id);
           const doneTx = onChain.settledLegs[leg.index]; if (doneTx) { ex.step = 'FINAL'; ex.txRef = doneTx; ex.confirmations = adapter.capabilities().finalityConfirmations; await this.d.store.updateSettlement(rec); continue; } // recuperação: já enviada antes de uma queda
@@ -149,9 +152,9 @@ export class SettlementEngine {
 
   private async reconcileAlreadySettled(deal: Deal, actor: string): Promise<SettlementRecord | null> {
     const t = deal.terms; const h = deal.hash; if (!t || !h) return null; const chains = [...new Set(t.legs.map(l => l.escrowChain))]; const states = new Map<string, Awaited<ReturnType<import('../adapters/types.js').SettlementAdapter['getDealState']>>>();
-    for (const c of chains) states.set(c, await this.d.adapters.require(c).getDealState(deal.id));
+    for (const c of chains) states.set(c, await this.d.adapters.require(c, envOfDeal(deal)).getDealState(deal.id));
     if (![...states.values()].every(st => st.status === 'SETTLED' && st.revision === deal.revision && st.dealHash === h.dealHash)) return null;
-    const rec: SettlementRecord = { id: newId('ST'), dealId: deal.id, revision: deal.revision, status: 'DONE', lockToken: randomHex(16), startedAt: this.now(), finishedAt: this.now(), idempotencyKey: `${deal.id}:${deal.revision}:${h.dealHash}`, legs: t.legs.map(l => ({ index: l.index, step: 'FINAL' as const, txRef: states.get(l.escrowChain)?.settledLegs[l.index] ?? states.get(l.escrowChain)?.settledTx ?? null, confirmations: this.d.adapters.require(l.escrowChain).capabilities().finalityConfirmations })) };
+    const rec: SettlementRecord = { id: newId('ST'), dealId: deal.id, revision: deal.revision, status: 'DONE', lockToken: randomHex(16), startedAt: this.now(), finishedAt: this.now(), idempotencyKey: `${deal.id}:${deal.revision}:${h.dealHash}`, legs: t.legs.map(l => ({ index: l.index, step: 'FINAL' as const, txRef: states.get(l.escrowChain)?.settledLegs[l.index] ?? states.get(l.escrowChain)?.settledTx ?? null, confirmations: this.d.adapters.require(l.escrowChain, envOfDeal(deal)).capabilities().finalityConfirmations })) };
     const inserted = await this.d.store.insertSettlement(rec); if (!inserted) { const cur = await this.d.store.getSettlement(deal.id); if (cur) { rec.id = cur.id; await this.d.store.updateSettlement(rec); } }
     deal.settlement = rec; await this.deals.transition(deal, 'SETTLING', actor, { reconciled: true }); await this.deals.transition(deal, 'SETTLED', 'system', { settlementId: rec.id, reconciled: true, txs: rec.legs.map(l => l.txRef) });
     metrics.settlements.inc({ result: 'reconciled' }); logger.warn({ dealId: deal.id }, 'liquidação reconciliada a partir do estado on-chain'); return rec;
@@ -161,18 +164,18 @@ export class SettlementEngine {
   private async reconcileAndRefund(deal: Deal): Promise<void> {
     const t = deal.terms; if (!t) return;
     for (const leg of t.legs) {
-      const adapter = this.d.adapters.get(leg.escrowChain); if (!adapter) continue;
+      const adapter = this.d.adapters.get(leg.escrowChain, envOfDeal(deal)); if (!adapter) continue;
       try { const st = await adapter.getDealState(deal.id); if (st.status === 'SETTLED') continue; if (st.deposits[leg.index]) { await adapter.supersede(deal.id, deal.revision); const tx = await adapter.refund(deal.id, leg.index); const p = deal.participants.find(x => x.role === leg.from); if (p) p.funding = 'PENDING'; deal.refunds.push({ role: leg.from, legIndex: leg.index, status: 'REFUNDED', txRef: tx.ref }); await this.deals.persist(deal, 'refunded', 'keeper', { legIndex: leg.index, tx: tx.ref }); } }
       catch (e) { deal.refunds.push({ role: leg.from, legIndex: leg.index, status: 'PENDING', txRef: null }); await this.deals.persist(deal, 'refund.pending', 'keeper', { legIndex: leg.index, error: (e as Error).message }); }
     }
   }
   private async revealedPreimage(deal: Deal, t: Terms): Promise<string | null> {
     const contractLeg = t.legs.find(l => l.mode !== 'HTLC'); if (!contractLeg) return null;
-    try { return await this.d.adapters.require(contractLeg.escrowChain).revealedPreimage(deal.id); } catch { return null; }
+    try { return await this.d.adapters.require(contractLeg.escrowChain, envOfDeal(deal)).revealedPreimage(deal.id); } catch { return null; }
   }
   /** Preimage revelada por uma cadeia específica — no LIGHTNING_SWAP a R nasce no pagamento da perna lightning. */
   private async revealedPreimageFrom(deal: Deal, chain: Network): Promise<string | null> {
-    try { return await this.d.adapters.require(chain).revealedPreimage(deal.id); } catch { return null; }
+    try { return await this.d.adapters.require(chain, envOfDeal(deal)).revealedPreimage(deal.id); } catch { return null; }
   }
 
   /** Confirmação assíncrona (indexer/keeper): promove legs INCLUDED → FINAL e a Deal → SETTLED. Idempotente. */
@@ -180,7 +183,7 @@ export class SettlementEngine {
     return this.deals.withDeal(dealId, async deal => {
       const rec = await this.d.store.getSettlement(deal.id); if (!rec || rec.status !== 'CONFIRMING') return rec;
       const t = deal.terms as Terms;
-      for (const ex of rec.legs) { if (ex.step === 'FINAL' || !ex.txRef) continue; const leg = t.legs.find(l => l.index === ex.index) as Leg; const st = await this.d.adapters.require(leg.escrowChain).waitFinal(ex.txRef); if (st.status === 'reverted') { ex.step = 'FAILED'; ex.error = st.error; rec.status = 'FAILED'; await this.d.store.updateSettlement(rec); deal.settlement = rec; deal.risk = { reason: `Reorg/reversão na leg ${ex.index}`, rule: 'RS-042 · reorg', at: this.now() }; await this.deals.transition(deal, 'BLOCKED', 'system', { legIndex: ex.index }); await this.reconcileAndRefund(deal); return rec; } if (st.status === 'final') { ex.step = 'FINAL'; ex.confirmations = st.confirmations; } }
+      for (const ex of rec.legs) { if (ex.step === 'FINAL' || !ex.txRef) continue; const leg = t.legs.find(l => l.index === ex.index) as Leg; const st = await this.d.adapters.require(leg.escrowChain, envOfDeal(deal)).waitFinal(ex.txRef); if (st.status === 'reverted') { ex.step = 'FAILED'; ex.error = st.error; rec.status = 'FAILED'; await this.d.store.updateSettlement(rec); deal.settlement = rec; deal.risk = { reason: `Reorg/reversão na leg ${ex.index}`, rule: 'RS-042 · reorg', at: this.now() }; await this.deals.transition(deal, 'BLOCKED', 'system', { legIndex: ex.index }); await this.reconcileAndRefund(deal); return rec; } if (st.status === 'final') { ex.step = 'FINAL'; ex.confirmations = st.confirmations; } }
       if (rec.legs.every(l => l.step === 'FINAL')) { rec.status = 'DONE'; rec.finishedAt = this.now(); await this.d.store.updateSettlement(rec); deal.settlement = rec; await this.deals.transition(deal, 'SETTLED', 'system', { settlementId: rec.id }); metrics.settlements.inc({ result: 'settled' }); }
       else await this.d.store.updateSettlement(rec);
       return rec;

@@ -12,7 +12,8 @@ export const DEFAULT_ROUTER_CONFIG: RouterConfig = { marketRoutesEnabled: false,
 export class RouterEngine {
   constructor(private readonly adapters: AdapterRegistry, private readonly cfg: RouterConfig = DEFAULT_ROUTER_CONFIG) {}
 
-  async plan(p: { assetIn: CanonicalAsset; assetOut: CanonicalAsset; participants: Participant[]; expiresInSec: number }): Promise<Route[]> {
+  async plan(p: { assetIn: CanonicalAsset; assetOut: CanonicalAsset; participants: Participant[]; expiresInSec: number; netEnv?: 'mainnet' | 'testnet' }): Promise<Route[]> {
+    const netEnv = p.netEnv ?? 'testnet';
     const chains: Network[] = [p.assetIn.network, p.assetOut.network]; const schemes = new Set(p.participants.map(x => x.keyScheme));
     const routes: Route[] = []; const notes: string[] = [];
     const legPlans: RouteLegPlan[] = []; let viable = true; let est = 0; let cost = 0; let kind: Route['kind'] = 'ESCROW_NN';
@@ -20,7 +21,7 @@ export class RouterEngine {
     // vira a perna HTLC e o outro fica no escrow de contrato; a preimage do settle cruza as
     // redes, sem ponte/coordenador. Vale nas DUAS direções: vendedor-HTLC (ex.: SOL→WETH) ou
     // comprador-HTLC (ex.: WETH→SOL — perna externa do comprador no escrow V2).
-    const capOf = (n: Network) => this.adapters.get(n)?.capabilities();
+    const capOf = (n: Network) => this.adapters.get(n, netEnv)?.capabilities();
     const cross = chains.length === 2 && chains[0] !== chains[1];
     const c0 = cross ? capOf(chains[0] as Network) : undefined;
     const c1 = cross ? capOf(chains[1] as Network) : undefined;
@@ -28,7 +29,7 @@ export class RouterEngine {
       : cross && c1?.htlc && c1.escrowNN && c0?.escrowNN ? 1
       : -1;
     for (const [i, net] of chains.entries()) {
-      const a = this.adapters.get(net); if (!a) { viable = false; notes.push(`sem adaptador para ${net}`); continue; }
+      const a = this.adapters.get(net, netEnv); if (!a) { viable = false; notes.push(netEnv === 'mainnet' ? `sem adaptador MAINNET para ${net}` : `sem adaptador para ${net}`); continue; }
       const caps = a.capabilities();
       if (caps.htlc && (!caps.escrowNN || htlcSide === i)) { kind = 'HTLC'; legPlans.push({ escrowChain: net, escrowContract: a.escrowAddress(), mode: 'HTLC', fundingOrder: 2, timelockSec: Math.max(60, p.expiresInSec - this.cfg.htlcTimelockMarginSec) }); est += caps.finalityConfirmations * 600; }
       else { legPlans.push({ escrowChain: net, escrowContract: a.escrowAddress(), mode: 'ESCROW_NN', fundingOrder: 1, timelockSec: p.expiresInSec }); est += caps.finalityConfirmations * (net === 'ethereum' ? 400 : 20);

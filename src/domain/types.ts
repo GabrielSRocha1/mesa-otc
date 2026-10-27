@@ -18,6 +18,9 @@ export type SettlementMode = 'ESCROW_NN' | 'HTLC';
 // htlcHash), só muda o MOTOR da entrega BTC (nó LN em vez de cofre P2WSH on-chain).
 export type RouteKind = 'ESCROW_NN' | 'HTLC' | 'MARKET' | 'LIGHTNING_SWAP';
 export type Environment = 'dev' | 'testnet' | 'staging' | 'prod';
+/** Ambiente de REDE por operação (mesa): mainnet real ou as testnets (Sepolia/signet/…). Distinto de
+ *  `Environment` (estágio do deploy). Ausente = testnet — deals/mesas antigas seguem intactas. */
+export type NetEnv = 'mainnet' | 'testnet';
 
 export const ROLES: readonly Role[] = ['SELLER', 'BUYER', 'PAYMASTER_1', 'PAYMASTER_2'];
 export const DEPOSITOR_ROLES: readonly Role[] = ['SELLER', 'BUYER'];
@@ -113,6 +116,9 @@ export interface Terms {
   pricing: Pricing;
   route: { routeId: string; kind: RouteKind; legs: RouteLegPlan[]; htlcHash?: string };
   dealNonce: string;
+  /** Ambiente de REDE da operação. Só presente quando 'mainnet' (ausente = testnet) — assim os
+   *  terms antigos hasheiam byte-idêntico e o mainnet ENTRA no dealHash (adulterar invalida tudo). */
+  netEnv?: NetEnv;
 }
 
 export interface DealHashParts { dealHash: string; participantsRoot: string; legsRoot: string; legHashes: string[]; pricingHash: string; routeHash: string; domainHash: string }
@@ -174,6 +180,8 @@ export interface DealDraft {
   /** Operar Indexado: quantidade do COMPRADOR já FIXADA (quoteAmount). Quando presente, substitui o
    *  amountOut derivado do oráculo na perna do Comprador — o preço indexado é congelado em valor concreto. */
   fixedAmountOutBase?: string;
+  /** Ambiente de REDE da operação (mesa mainnet): roteia adapters/leituras. Ausente = testnet. */
+  netEnv?: NetEnv;
 }
 
 export interface RiskEvent { id: string; dealId: string | null; wallet: string | null; rule: string; severity: 'LOW' | 'MEDIUM' | 'HIGH' | 'CRITICAL'; decision: 'ALLOW' | 'REVIEW' | 'BLOCK'; evidence: Record<string, unknown>; at: number }
@@ -201,7 +209,8 @@ export function legHashOf(l: Leg): string {
 
 /** dealHash = SHA256(domainHash ‖ dealId ‖ revision ‖ participantsRoot ‖ legsRoot ‖ pricingHash ‖ routeHash ‖ expiresAt ‖ dealNonce) */
 export function computeDealHash(t: Terms): DealHashParts {
-  const domainHash = sha256Hex(`VERUM_OTC|${t.schemaVersion}|${t.environment}`);
+  // netEnv só entra no domínio quando 'mainnet' — terms antigos (sem o campo) hasheiam idêntico.
+  const domainHash = sha256Hex(`VERUM_OTC|${t.schemaVersion}|${t.environment}${t.netEnv === 'mainnet' ? '|mainnet' : ''}`);
   const parts = [...t.participants].sort((a, b) => ROLE_ORDER[a.role] - ROLE_ORDER[b.role]);
   const participantsRoot = sha256Hex(parts.map(p => sha256Hex(canonicalize({ role: p.role, network: p.network, chainId: p.chainId, keyScheme: p.keyScheme, address: p.address }))).join(''));
   const legHashes = [...t.legs].sort((a, b) => a.index - b.index).map(legHashOf);

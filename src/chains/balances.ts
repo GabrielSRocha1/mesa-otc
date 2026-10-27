@@ -223,9 +223,10 @@ async function readStellar(c: ChainDef, address: string): Promise<NativeBalance 
   return pack(asInt, c);
 }
 
-/** Lê o saldo nativo de uma rede pelo chainKey (ou alias) + endereço. */
-export async function readNativeBalance(network: string, address: string): Promise<NativeBalance | null> {
-  const c = getChain(network);
+/** Lê o saldo nativo de uma rede pelo chainKey (ou alias) + endereço.
+ *  `env='mainnet'` força o endpoint público MAINNET (ignora CHAIN_ENDPOINT_* — mesa mainnet). */
+export async function readNativeBalance(network: string, address: string, env?: 'mainnet' | 'testnet'): Promise<NativeBalance | null> {
+  const c = getChain(network, env);
   if (!c || !address) return null;
   switch (c.family) {
     case 'evm':      return readEvm(c, address);

@@ -43,13 +43,15 @@ async function sticky<T>(key: string, fn: () => Promise<T | null>, tries = 3): P
   return c && Date.now() - c.at < 10 * 60_000 ? c.v as T : null;
 }
 
-export function defaultBalanceReaders(): BalanceReaders {
+/** `env='mainnet'` (mesa mainnet) lê os endpoints públicos MAINNET — ignora CHAIN_ENDPOINT_*. */
+export function defaultBalanceReaders(env?: 'mainnet' | 'testnet'): BalanceReaders {
+  const ek = env === 'mainnet' ? 'M' : 'T'; // chave do cache sticky por ambiente
   return {
-    native: (network, address) => sticky(`n|${network}|${address}`, async () => { const r = await readNativeBalance(network, address); return r && r.amount != null ? { amount: r.amount } : null; }),
-    tokens: async (network, address) => (await sticky(`t|${network}|${address}`, async () => { const l = await readTokenBalances(network, address); return l.length ? l : null; }) ?? []).map(t => ({ symbol: t.symbol, contract: t.contract, amount: t.amount })),
+    native: (network, address) => sticky(`n|${ek}|${network}|${address}`, async () => { const r = await readNativeBalance(network, address, env); return r && r.amount != null ? { amount: r.amount } : null; }),
+    tokens: async (network, address) => (await sticky(`t|${ek}|${network}|${address}`, async () => { const l = await readTokenBalances(network, address, env); return l.length ? l : null; }) ?? []).map(t => ({ symbol: t.symbol, contract: t.contract, amount: t.amount })),
     priceUsdOf: network => sticky(`p|${network}`, async () => { const chain = getChain(network); if (!chain) return null; const byId = await getPricesById(); return byId[chain.coingeckoId]?.usd ?? null; }, 2),
-    tokenDirect: (network, contract, address, decimals) => sticky(`d|${network}|${contract}|${address}`, async () => {
-      const c = getChain(network); if (!c) return null;
+    tokenDirect: (network, contract, address, decimals) => sticky(`d|${ek}|${network}|${contract}|${address}`, async () => {
+      const c = getChain(network, env); if (!c) return null;
       if (c.family === 'evm') {
         const data = '0x70a08231' + address.toLowerCase().replace(/^0x/, '').padStart(64, '0');
         const r = await fetch(c.endpoint, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'eth_call', params: [{ to: contract, data }, 'latest'] }) });

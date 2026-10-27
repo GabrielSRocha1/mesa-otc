@@ -946,6 +946,15 @@ window.addEventListener('unhandledrejection',function(e){try{console.warn('[veru
       <section class="card" id="m3s2" style="display:none;margin-bottom:16px">
         <div class="card-h"><div class="t">Nova mesa · Passo 2 de 3 — Ativos e valores</div><span class="badge info" id="m3s2Net">—</span></div>
         <p class="fh" style="margin:0 0 10px">Escolha a moeda de CADA lado — uma lista só com TODAS as moedas de TODAS as redes (com ícone); contrato/mint e decimais entram sozinhos. Redes diferentes liquidam via bridge (CCIP); BTC nativo liquida via HTLC (swap atômico).</p>
+        <!-- Ambiente (só quando o par é BTC ↔ Ethereum): mainnet = fundos REAIS. -->
+        <div class="form-row" id="m3EnvRow" style="display:none">
+          <div><div class="fl">Ambiente</div><div class="fh">Mainnet = fundos REAIS (ETH + BTC). Testnet = Sepolia + signet.</div></div>
+          <div style="display:flex;gap:6px">
+            <button type="button" class="btn" id="m3EnvTest" style="height:34px">Sepolia/Testnet</button>
+            <button type="button" class="btn" id="m3EnvMain" style="height:34px">Mainnet</button>
+          </div>
+        </div>
+        <div id="m3EnvWarn" style="display:none;margin:0 0 8px;padding:8px 10px;border:1px solid var(--red);border-radius:10px;background:rgba(239,68,68,.12);color:var(--red);font-size:12.5px;font-weight:700">⚠ MAINNET — FUNDOS REAIS. O único par suportado é BTC ↔ Ethereum (ETH ou stablecoin real).</div>
         <div class="form-row"><div><div class="fl">Vendedor — moeda</div><div class="fh">O que o Vendedor entrega</div></div>
           <div class="netfield" id="m3cSellField" style="max-width:300px" title="Escolher moeda — todas as redes numa lista só">Escolher moeda</div>
         </div>
@@ -2008,7 +2017,7 @@ window.addEventListener('unhandledrejection',function(e){try{console.warn('[veru
     if(!network||!address) return null;
     const key=network+':'+address;
     if(opBalCache[key]!==undefined) return opBalCache[key];
-    try{ const res=await pmApi('/v1/chains/balances',{method:'POST',body:{addresses:[{network,address}]}}); const it=(res&&res.items&&res.items[0])||null; const amt=(it&&it.ok)?it.amount:null; opBalCache[key]=amt; return amt; }
+    try{ const env=(typeof m3Cache!=='undefined'&&m3Cache&&m3Cache.environment==='mainnet')?'mainnet':undefined; const res=await pmApi('/v1/chains/balances',{method:'POST',body:{addresses:[{network,address}],...(env?{environment:env}:{})}}); const it=(res&&res.items&&res.items[0])||null; const amt=(it&&it.ok)?it.amount:null; opBalCache[key]=amt; return amt; }
     catch(e){ opBalCache[key]=null; return null; }
   }
   function opSlot(role){ return opMesa&&(opMesa.slots||[]).find(s=>s.role===role); }
@@ -2750,7 +2759,8 @@ window.addEventListener('unhandledrejection',function(e){try{console.warn('[veru
   }
   function openAssetModal(side){
     const cur=m3PickAsset[side];
-    const list=m3Catalog||[];
+    // Ambiente MAINNET: lista só BTC nativo + ETH/stablecoins REAIS (catálogo mainnet).
+    const list=(m3Env==='mainnet'?(m3CatalogMain||[]):(m3Catalog||[]));
     const title=side==='sell'?'Moeda do Vendedor':'Moeda do Comprador';
     const row=(a,i)=>'<div class="netrow'+(m3SameAsset(a,cur)?' sel':'')+'" data-ai="'+i+'">'+netBadge({icon:a.icon,glyph:(a.symbol||'?').slice(0,3),color:a.color},32)+'<div><div class="nm">'+esc(a.symbol)+(a.representationOf?(' <span style="color:var(--ink-3);font-weight:400">· '+esc(a.representationOf)+'</span>'):'')+'</div><div class="sub">'+esc(a.networkLabel||a.network)+'</div></div></div>';
     $('#modalRoot').innerHTML='<div class="modal-back" id="amBack"><div class="modal"><h3>'+esc(title)+'</h3>'
@@ -2795,8 +2805,35 @@ window.addEventListener('unhandledrejection',function(e){try{console.warn('[veru
   // o settleV2 revela a preimage que destrava o BTC — mesma atomicidade do BTC↔Ethereum. A UI não
   // bloqueia mais nenhum par; quem decide é o backend (MesaService.assertSwappablePair ainda barra
   // o par quando o deploy roda o escrow V1 só-token, com mensagem clara exibida no erro da criação).
-  function m3PairBlock(_sell,_buy){ return null; }
-  function m3PlanHint(){ const s=m3TokenOf('sell'),b=m3TokenOf('buy'); const blk=m3PairBlock(s,b); const el=$('#m3cPlanHint'); if(!el) return;
+  // ── Ambiente da MESA (mainnet = fundos reais; default testnet) ─────────────
+  // Visível SÓ quando o par é BTC ↔ Ethereum (recorte inicial da mainnet). Sair do par reseta.
+  let m3Env='testnet';
+  let m3CatalogMain=null; // catálogo mainnet (ETH nativo + stablecoins reais + BTC nativo)
+  function m3EnvApplicable(){ const s=m3TokenOf('sell'),b=m3TokenOf('buy'); if(!s||!b) return false; return [s.network,b.network].sort().join('+')==='bitcoin+ethereum'; }
+  function m3EnvSync(){
+    const ok=m3EnvApplicable();
+    if(!ok&&m3Env==='mainnet'){ m3Env='testnet'; }
+    const row=$('#m3EnvRow'); if(row) row.style.display=ok?'':'none';
+    const warn=$('#m3EnvWarn'); if(warn) warn.style.display=(ok&&m3Env==='mainnet')?'':'none';
+    const t=$('#m3EnvTest'), m=$('#m3EnvMain');
+    if(t&&m){ t.classList.toggle('btn-primary',m3Env!=='mainnet'); m.classList.toggle('btn-primary',m3Env==='mainnet'); m.style.borderColor=m3Env==='mainnet'?'var(--red)':''; m.style.color=m3Env==='mainnet'?'var(--red)':''; }
+  }
+  async function m3LoadCatalogMain(){
+    if(m3CatalogMain) return m3CatalogMain;
+    let toks=[]; try{ const j=await (await fetch(API+'/v1/tokens?network=ethereum&env=mainnet')).json(); toks=(j&&j.tokens)||[]; }catch(e){}
+    const out=[m3MkAsset('bitcoin','Bitcoin',{symbol:'BTC',contractOrMint:null,decimals:8}), m3MkAsset('ethereum','Ethereum',{symbol:'ETH',contractOrMint:null,decimals:18})];
+    toks.forEach(t=>out.push(m3MkAsset('ethereum','Ethereum',t)));
+    m3CatalogMain=out; return out;
+  }
+  function m3PairBlock(sell,buy){
+    if(m3Env!=='mainnet') return null;
+    if(!sell||!buy) return null;
+    const nets=[sell.network,buy.network].sort().join('+');
+    const btcSide=sell.network==='bitcoin'?sell:(buy.network==='bitcoin'?buy:null);
+    if(nets!=='bitcoin+ethereum'||!btcSide||btcSide.contractOrMint) return 'Em MAINNET o único par suportado por enquanto é BTC nativo ↔ Ethereum (ETH ou stablecoin real).';
+    return null;
+  }
+  function m3PlanHint(){ const s=m3TokenOf('sell'),b=m3TokenOf('buy'); m3EnvSync(); const blk=m3PairBlock(s,b); const el=$('#m3cPlanHint'); if(!el) return;
     if(blk){ el.innerHTML='⛔ '+esc(blk); el.style.color='var(--red)'; return; }
     const p=m3Plan(s,b); el.style.color='var(--blue)'; el.textContent=p?('Liquidação: '+p.txt):''; }
   // No passo 1 as cadeiras são só rótulos — os ativos vêm do passo 2 (Vendedor/Comprador) e do gás da rede (PMs).
@@ -2893,7 +2930,8 @@ window.addEventListener('unhandledrejection',function(e){try{console.warn('[veru
     if(roles.includes('PAYMASTER_1')) chairs.push({ role:'PAYMASTER_1', expectedAsset:{ network:net, contractOrMint:null, decimals:gas.decimals, symbol:gas.symbol } });
     if(roles.includes('PAYMASTER_2')) chairs.push({ role:'PAYMASTER_2', expectedAsset:{ network:net, contractOrMint:null, decimals:gas.decimals, symbol:gas.symbol }, label:lbl('PAYMASTER_2') });
     const plan=m3Plan(sell,buy);
-    return { net, sell, buy, amountInBase, buyerAmountInBase, discountBps, commissionBps, commissionPayer, roles, chairs, plan };
+    const environment=(m3Env==='mainnet'&&m3EnvApplicable())?'mainnet':undefined;
+    return { net, sell, buy, amountInBase, buyerAmountInBase, discountBps, commissionBps, commissionPayer, roles, chairs, plan, environment };
   }
   function m3RenderReview(){
     const d=m3WizardData();
@@ -2921,7 +2959,7 @@ window.addEventListener('unhandledrejection',function(e){try{console.warn('[veru
     if(!d.amountInBase||!d.buyerAmountInBase){ toast('Informe as quantidades do Vendedor e do Comprador.','err'); return; }
     const btn=$('#m3cSubmit'); btn.disabled=true;
     try{
-      const mesa=await pmApi('/v1/portal/mesas',{method:'POST',body:{ label:$('#m3cLabel').value.trim()||undefined, network:d.net, chairs:d.chairs }});
+      const mesa=await pmApi('/v1/portal/mesas',{method:'POST',body:{ label:$('#m3cLabel').value.trim()||undefined, network:d.net, chairs:d.chairs, ...(d.environment?{environment:d.environment}:{}) }});
       // Config salva na sequência — a mesa já nasce pronta para convidar e aprovar.
       await pmApi('/v1/portal/mesas/'+mesa.mesaId+'/config',{method:'PATCH',body:{ amountInBase:d.amountInBase, buyerAmountInBase:d.buyerAmountInBase, discountBps:d.discountBps, commissionBps:d.commissionBps, commissionPayer:d.commissionPayer }});
       toast('Mesa '+mesa.code+' criada · operação '+(mesa.operationCode||''),'ok');
@@ -3238,7 +3276,7 @@ window.addEventListener('unhandledrejection',function(e){try{console.warn('[veru
       m3Cache=m;
       $('#m3dTitle').textContent='Mesa '+(m.label||m.code);
       $('#m3dCode').textContent=m.code;
-      $('#m3dStatus').outerHTML='<span id="m3dStatus">'+m3Badge(m.status)+'</span>';
+      $('#m3dStatus').outerHTML='<span id="m3dStatus">'+(m.environment==='mainnet'?'<span class="badge" style="background:rgba(239,68,68,.15);color:var(--red);border:1px solid var(--red);font-weight:700;margin-right:6px">MAINNET — FUNDOS REAIS</span>':'')+m3Badge(m.status)+'</span>';
       // PRÓXIMO PASSO (admin): frase fixa dizendo a ação pendente e de quem — try/catch próprio
       // para nunca derrubar o resto do refresh.
       try{
@@ -3681,6 +3719,16 @@ window.addEventListener('unhandledrejection',function(e){try{console.warn('[veru
     // Escolha de moeda: campo clicável → modal com TODAS as moedas de TODAS as redes (ícones).
     const sf=$('#m3cSellField'); if(sf) sf.addEventListener('click',()=>openAssetModal('sell'));
     const bf=$('#m3cBuyField'); if(bf) bf.addEventListener('click',()=>openAssetModal('buy'));
+    // Ambiente da mesa (mainnet/testnet) — só aparece quando o par é BTC↔Ethereum.
+    const envT=$('#m3EnvTest'); if(envT) envT.addEventListener('click',()=>{ m3Env='testnet'; m3PlanHint(); });
+    const envM=$('#m3EnvMain'); if(envM) envM.addEventListener('click',async()=>{
+      m3Env='mainnet';
+      await m3LoadCatalogMain();
+      // Em mainnet os ATIVOS precisam ser os reais: re-seleciona o lado Ethereum para ETH nativo
+      // (o modal passa a listar só o catálogo mainnet enquanto o ambiente estiver em Mainnet).
+      ['sell','buy'].forEach(side=>{ const a=m3PickAsset[side]; if(a&&a.network==='ethereum'){ m3PickAsset[side]=(m3CatalogMain||[]).find(x=>x.network==='ethereum'&&x.contractOrMint==null)||a; } });
+      m3RenderFields(); m3PlanHint();
+    });
     // Modo avançado: popular as redes dos selects manuais e recalcular o plano ao mudar.
     const advNets=M3_NETS.map(n=>'<option value="'+n[0]+'">'+esc(n[1])+'</option>').join('');
     ['sellNet','buyNet'].forEach(k=>{ const el=document.querySelector('[data-m3adv="'+k+'"]'); if(el) el.innerHTML=advNets; });
@@ -3759,7 +3807,7 @@ window.addEventListener('unhandledrejection',function(e){try{console.warn('[veru
     // Todo render com dados válidos re-exibe as seções (idempotente).
     ['pChairs','pSummary','pSigns'].forEach(function(id){ var el=$('#'+id); if(el){ var c=el.closest('.card'); if(c) c.style.display=''; } });
     $('#pCode').textContent='Mesa '+m.code;
-    $('#pStatus').outerHTML='<span id="pStatus">'+m3Badge(m.status)+'</span>';
+    $('#pStatus').outerHTML='<span id="pStatus">'+(m.environment==='mainnet'?'<span class="badge" style="background:rgba(239,68,68,.15);color:var(--red);border:1px solid var(--red);font-weight:700;margin-right:6px">MAINNET — FUNDOS REAIS</span>':'')+m3Badge(m.status)+'</span>';
     const me=m.viewer||{};
     $('#pMeCard').innerHTML='<div class="card-h"><div class="t">Você — '+esc(me.roleLabel||'')+'</div><span class="badge ok">✓ Verum Wallet conectada · ✓ Posse confirmada</span></div>'
       +'<div style="font-size:13.5px;color:var(--ink-2)">'+esc(me.firstName||'')+' · <span class="mono">'+esc(me.wallet||'')+'</span> · Ativo: '+esc(me.asset||'')+'</div>';

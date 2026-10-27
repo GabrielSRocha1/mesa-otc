@@ -67,6 +67,9 @@ const withEndpointOverride = (c: ChainDef): ChainDef => {
   return o ? { ...c, endpoint: o.replace(/\/$/, '') } : c;
 };
 const BY_KEY = new Map<string, ChainDef>(CHAINS.map(c => [c.chainKey, withEndpointOverride(c)]));
+// Mapa MAINNET puro (mesa.environment='mainnet'): endpoints públicos mainnet SEM o override
+// CHAIN_ENDPOINT_* — num deploy com os overrides apontando testnets, a leitura mainnet fica limpa.
+const BY_KEY_MAINNET = new Map<string, ChainDef>(CHAINS.map(c => [c.chainKey, c]));
 
 /** Aliases tolerantes: nomes alternativos que já circulam na OTC/carteira. */
 const ALIASES: Record<string, string> = {
@@ -82,9 +85,10 @@ export function normalizeChainKey(network: string | undefined | null): string | 
   return ALIASES[k] ?? null;
 }
 
-export function getChain(network: string | undefined | null): ChainDef | undefined {
+export function getChain(network: string | undefined | null, env?: 'mainnet' | 'testnet'): ChainDef | undefined {
   const k = normalizeChainKey(network);
-  return k ? BY_KEY.get(k) : undefined;
+  if (!k) return undefined;
+  return env === 'mainnet' ? BY_KEY_MAINNET.get(k) : BY_KEY.get(k);
 }
 
 export function allChains(): ChainDef[] {

@@ -72,7 +72,7 @@ export interface MesaServiceDeps {
 
 export interface CreateMesaChairInput { role: MesaChairRole; expectedAsset: ChairAsset; label?: string }
 /** `network` é opcional (v4): quando ausente, deriva da cadeira do VENDEDOR — quem manda nas pernas são as redes de cada lado. */
-export interface CreateMesaInput { label?: string; network?: string; chairs: CreateMesaChairInput[] }
+export interface CreateMesaInput { label?: string; network?: string; environment?: 'mainnet' | 'testnet'; chairs: CreateMesaChairInput[] }
 
 export class MesaService {
   private readonly now: () => number;
@@ -90,12 +90,21 @@ export class MesaService {
   /** Par NÃO suportado: BTC NATIVO ↔ Tron. O swap de BTC usa HTLC e exige que a OUTRA perna revele o
    *  segredo (hashlock) na liquidação; o contrato da Tron não tem hashlock. (BTC funciona com Ethereum
    *  ou Solana.) Bloqueia na criação e na troca de ativo — não só na aprovação. */
-  private assertSwappablePair(chairs: { role: MesaChairRole; expectedAsset: ChairAsset }[]): void {
+  private assertSwappablePair(chairs: { role: MesaChairRole; expectedAsset: ChairAsset }[], environment?: 'mainnet' | 'testnet'): void {
     const seller = chairs.find(c => c.role === 'SELLER')?.expectedAsset;
     const buyer = chairs.find(c => c.role === 'BUYER')?.expectedAsset;
     if (!seller || !buyer) return;
     const isBtcNative = (a: ChairAsset) => a.network === 'bitcoin' && a.contractOrMint == null;
     const isTron = (a: ChairAsset) => a.network === 'tron';
+    // MAINNET (fundos reais): recorte inicial — o ÚNICO par suportado é BTC nativo ↔ Ethereum
+    // (ETH nativo/WETH ou stablecoin real). Qualquer outra rede/combinação é bloqueada na criação
+    // e na troca de ativo, com motivo nominal.
+    if (environment === 'mainnet') {
+      const isEthSide = (a: ChairAsset) => a.network === 'ethereum';
+      const ok = (isBtcNative(seller) && isEthSide(buyer)) || (isEthSide(seller) && isBtcNative(buyer));
+      if (!ok) throw new DomainError('INVALID_INPUT', 'Em MAINNET o único par suportado por enquanto é BTC nativo ↔ Ethereum (ETH ou stablecoin real). Ajuste as cadeiras ou use o ambiente Testnet.');
+      return; // par válido em mainnet — a regra Tron abaixo não se aplica
+    }
     // Escrow Tron V2 (hashlock) configurado libera o par: o settleV2 revela a preimage que
     // destrava o HTLC do BTC — mesma atomicidade do BTC↔Ethereum.
     if (this.d.tronHashlock?.()) return;
@@ -133,8 +142,11 @@ export class MesaService {
       if (c.role === 'PAYMASTER_1' && pm.wallet) { chair.wallet = pm.wallet; chair.firstName = pm.name.split(/\s+/)[0]; chair.connectedAt = t; }
       return chair;
     });
-    this.assertSwappablePair(chairs); // BTC nativo ↔ Tron não é swappable (sem hashlock na Tron)
-    const mesa: MesaRecord = { mesaId: 'mesa_' + randomUUID(), payMasterId: pm.id, code: this.d.portal.newMesaCode(), operationCode: `OP-${newInviteCode()}`, label: input.label?.trim() || undefined, network, chairs, approvals: {}, dealId: null, dealIds: [], createdAt: t, expiresAt: null };
+    const environment = input.environment === 'mainnet' ? 'mainnet' as const : undefined; // ausente = testnet
+    // Mesa MAINNET nunca nasce de conta demo (carteiras do keyring não existem em redes reais).
+    if (environment && pm.demo) throw new DomainError('FORBIDDEN', 'A conta demo não pode criar mesas em MAINNET');
+    this.assertSwappablePair(chairs, environment); // pares por ambiente (mainnet ⇒ só BTC↔Ethereum)
+    const mesa: MesaRecord = { mesaId: 'mesa_' + randomUUID(), payMasterId: pm.id, code: this.d.portal.newMesaCode(), operationCode: `OP-${newInviteCode()}`, label: input.label?.trim() || undefined, network, ...(environment ? { environment } : {}), chairs, approvals: {}, dealId: null, dealIds: [], createdAt: t, expiresAt: null };
     this.d.portal.mesas()[mesa.mesaId] = mesa;
     this.d.portal.persistMesas();
     void this.audit('mesa.criada', pm.id, { mesaId: mesa.mesaId, code: mesa.code, network: mesa.network, chairs: chairs.map(c => ({ chairId: c.chairId, role: c.role })) });
@@ -521,7 +533,7 @@ export class MesaService {
     const prevDecimals = chair.expectedAsset.decimals;
     const nextAsset: ChairAsset = { network: asset.network, contractOrMint: asset.contractOrMint ?? null, decimals: asset.decimals, symbol: asset.symbol };
     // Valida ANTES de mutar: BTC nativo ↔ Tron não é swappable (sem hashlock na Tron).
-    this.assertSwappablePair(mesa.chairs.map(c => c.chairId === chairId ? { role: c.role, expectedAsset: nextAsset } : { role: c.role, expectedAsset: c.expectedAsset }));
+    this.assertSwappablePair(mesa.chairs.map(c => c.chairId === chairId ? { role: c.role, expectedAsset: nextAsset } : { role: c.role, expectedAsset: c.expectedAsset }), mesa.environment);
     chair.expectedAsset = nextAsset;
     // Rede da mesa (rótulo/fallback) deriva do lado VENDEDOR.
     if (chair.role === 'SELLER') mesa.network = asset.network;
@@ -667,7 +679,7 @@ export class MesaService {
     const status = deriveMesaStatus(mesa, invites, deal, now);
     return {
       mesaId: mesa.mesaId, code: mesa.code, operationCode: mesa.operationCode ?? null,
-      network: mesa.network, networkLabel: this.networksLabel(mesa), status,
+      network: mesa.network, networkLabel: this.networksLabel(mesa), environment: mesa.environment ?? 'testnet', status,
       createdAt: mesa.createdAt, expiresAt: mesa.expiresAt, serverTime: now,
       config: mesa.config ? { amountInBase: mesa.config.amountInBase ?? null, buyerAmountInBase: mesa.config.buyerAmountInBase ?? null, discountBps: mesa.config.discountBps, commissionBps: mesa.config.commissionBps, commissionPayer: mesa.config.commissionPayer ?? null } : null,
       chairs: mesa.chairs.map(c => ({
@@ -761,6 +773,7 @@ export class MesaService {
     const base = {
       mesaId: mesa.mesaId, code: mesa.code, operationCode: mesa.operationCode ?? null, network: mesa.network, networkLabel: this.networksLabel(mesa),
       settlement: deriveSettlementPlan(mesa.chairs),
+      environment: mesa.environment ?? 'testnet',
       status, createdAt: mesa.createdAt, expiresAt: mesa.expiresAt, serverTime: now,
       approvedAt: mesa.approvedAt ?? null, termsHash: mesa.termsHash ?? null,
       // Trava de irrevogabilidade exposta ao frontend: canCancel=false → UI remove "Cancelar mesa".

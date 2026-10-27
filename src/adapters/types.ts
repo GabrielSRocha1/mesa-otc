@@ -1,7 +1,7 @@
 /**
  * Porta SettlementAdapter (arquitetura §4.3/§10). O OTC Engine nunca vê RPC, ABI, scripts ou formatos de endereço.
  */
-import type { CanonicalAsset, ChainRef, KeyScheme, Leg, Network, Participant, Role, Terms } from '../domain/types.js';
+import type { CanonicalAsset, ChainRef, KeyScheme, Leg, NetEnv, Network, Participant, Role, Terms } from '../domain/types.js';
 
 export interface AdapterCapabilities { escrowNN: boolean; htlc: boolean; verifiableSigSchemes: KeyScheme[]; finalityConfirmations: number; nativeCode: string }
 export interface AssetVerification { ok: boolean; reasons: string[]; observed: { exists: boolean; decimals?: number; symbol?: string; codeHash?: string; mintAuthority?: string | null; standard?: string }; checkedAt: number }
@@ -59,10 +59,22 @@ export function hasParticipantSteps(a: SettlementAdapter): a is SettlementAdapte
   return typeof (a as Partial<ParticipantStepProvider>).buildParticipantStep === 'function';
 }
 
+/**
+ * Registry AMBIENTE-CONSCIENTE: um adapter por (ambiente, rede). O default 'testnet' preserva todos
+ * os call-sites existentes; o caminho da deal passa `deal.terms.netEnv` para rotear a MAINNET.
+ * Fail-closed: pedir mainnet sem adapter mainnet registrado é ERRO — nunca cai no testnet.
+ */
 export class AdapterRegistry {
-  private map = new Map<Network, SettlementAdapter>();
-  register(a: SettlementAdapter): this { this.map.set(a.chain.network, a); return this; }
-  get(network: Network): SettlementAdapter | undefined { return this.map.get(network); }
-  require(network: Network): SettlementAdapter { const a = this.map.get(network); if (!a) throw new Error(`Sem adaptador para ${network}`); return a; }
+  private map = new Map<string, SettlementAdapter>();
+  private static key(env: NetEnv, network: Network): string { return `${env}:${network}`; }
+  register(a: SettlementAdapter, env: NetEnv = 'testnet'): this { this.map.set(AdapterRegistry.key(env, a.chain.network), a); return this; }
+  get(network: Network, env: NetEnv = 'testnet'): SettlementAdapter | undefined { return this.map.get(AdapterRegistry.key(env, network)); }
+  require(network: Network, env: NetEnv = 'testnet'): SettlementAdapter {
+    const a = this.map.get(AdapterRegistry.key(env, network));
+    if (!a) throw new Error(env === 'mainnet' ? `Sem adaptador MAINNET para ${network} — configure o grupo de env mainnet da rede` : `Sem adaptador para ${network}`);
+    return a;
+  }
   all(): SettlementAdapter[] { return [...this.map.values()]; }
+  /** Redes com adapter MAINNET registrado (health/diagnóstico). */
+  mainnetNetworks(): Network[] { return [...this.map.keys()].filter(k => k.startsWith('mainnet:')).map(k => k.slice('mainnet:'.length) as Network); }
 }

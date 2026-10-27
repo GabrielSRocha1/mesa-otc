@@ -299,7 +299,7 @@ window.addEventListener('unhandledrejection',function(e){try{console.warn('[veru
     var pct=reqS?Math.round(valS/reqS*100):0;
 
     var head='<div class="op-head"><div class="titw"><h1>Negociação OTC</h1><p>Mesa '+esc(mesa.code||'')+' · acompanhe os detalhes da operação (somente leitura).</p></div>'
-      +'<div class="op-status">'+statusPill(mesa.status)
+      +'<div class="op-status">'+(mesa.environment==='mainnet'?'<span class="op-badge" style="background:rgba(239,68,68,.15);color:#ef4444;border:1px solid #ef4444;font-weight:700">MAINNET — FUNDOS REAIS</span>':'')+statusPill(mesa.status)
       +(mesa.expiresAt?'<span class="op-exp">Expira em <b style="color:var(--ink-2)">'+esc(fmtDate(mesa.expiresAt))+'</b></span>':'')+'</div></div>';
 
     var partsHtml=chairs.length?chairs.map(function(c){return partCard(c,bal[c.role]);}).join(''):'';
