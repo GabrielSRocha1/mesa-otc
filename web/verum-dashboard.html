@@ -3694,8 +3694,10 @@ window.addEventListener('unhandledrejection',function(e){try{console.warn('[veru
     catch(e){
       const det=(e&&e.details&&e.details.motivos)||null;
       if(det){ m3ShowMotivos(det); }
-      else if(/sem chave dev|dispon[ií]vel apenas/i.test(e.message||'')){
-        // Backend não assina por este admin → fluxo de carteira real.
+      else if(/sem chave dev|dispon[ií]vel apenas|keyring|n[ãa]o é gerida|carteira do papel/i.test(e.message||'')){
+        // Backend não assina por este admin (carteira real, fora do keyring dev/demo) → assina pela
+        // própria Verum Wallet. Inclui a mesa Tron/BTC, cujo erro é "carteira do papel não é gerida
+        // pelo keyring" (antes não casava o gatilho e o PM dono ficava sem assinar de verdade).
         try{ await m3SignWallet(); toast('Assinatura registrada pela sua carteira ✓','ok'); m3Refresh(); }
         catch(e2){ pErrBox('Falha ao assinar',((e2&&e2.code)?('['+e2.code+'] '):'')+((e2&&e2.message)||String(e2))); }
       }
