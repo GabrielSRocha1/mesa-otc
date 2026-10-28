@@ -414,26 +414,41 @@ export class BitcoinChainAdapter implements SettlementAdapter {
     if (immature.length) throw new DomainError('SETTLEMENT_NOT_ALLOWED', `timelock ainda não venceu: faltam ${e.csvBlocks - Math.min(...immature.map(u => u.confirmations))} blocos`, { csvBlocks: e.csvBlocks });
     const payout = await this.payoutOf(dealId, e, e.leg.from);
     const payoutScript = outputScriptOf(payout, this.cfg.network);
-    // RECUPERAÇÃO de cofres LEGADOS (CSV ≤ 16 gravado como push de dado): o ramo de refund (ELSE)
-    // executa o push não-minimal e NENHUM nó aceita ("Data push larger than necessary") — mas a
-    // checagem MINIMALDATA só vale para o RAMO EXECUTADO: o caminho de CLAIM (IF) nem toca o ELSE
-    // e é 100% padrão. A mesa conhece a preimage (deal.htlcPreimage) e a chave de claim é do
-    // keeper — gastamos pelo IF PAGANDO O VENDEDOR (semântica de refund preservada; a deal está
+    const satPerVb = await this.satPerVb();
+    // RECUPERAÇÃO de cofres LEGADOS (ramo de refund não-padrão — ex.: CSV ≤ 16 gravado como push de
+    // dado): o ELSE executa o push não-minimal e NENHUM nó aceita ("Data push larger than
+    // necessary"). Mas a checagem MINIMALDATA só vale para o RAMO EXECUTADO: o caminho de CLAIM (IF)
+    // nem toca o ELSE e é padrão. A mesa conhece a preimage (deal.htlcPreimage) e a chave de claim é
+    // do keeper → gastamos pelo IF PAGANDO O VENDEDOR (semântica de refund preservada; a deal está
     // morta/expirada, revelar a preimage não destrava mais nada na perna de contrato).
-    if (hasNonMinimalCsvPush(e.witnessScript)) {
+    const recoverViaClaim = async (): Promise<TxRef | null> => {
       const deal = await this.deps?.getDeal(dealId);
       const preimage = (deal as (Deal & { htlcPreimage?: string }) | null | undefined)?.htlcPreimage?.toLowerCase();
-      if (preimage && /^[0-9a-f]{64}$/.test(preimage) && bytesToHex(sha256(hexToBytes(preimage))) === e.htlcHash.toLowerCase()) {
-        const rec = buildHtlcSpend({ utxos, witnessScript: e.witnessScript, payoutScript, satPerVb: await this.satPerVb(), path: 'claim', preimage, keyPriv: this.claimPriv, csvBlocks: e.csvBlocks });
-        const txid = await this.esplora.broadcast(rec.hex);
-        return { chain: 'bitcoin', ref: txid, submittedAt: this.now() };
-      }
-      // Sem a preimage (ex.: rota Lightning, em que a mesa não a conhece) o legado fica mesmo preso.
-      throw new DomainError('SETTLEMENT_FAILED', 'cofre legado (CSV não-minimal) sem preimage conhecida — refund padrão impossível');
+      if (!preimage || !/^[0-9a-f]{64}$/.test(preimage) || bytesToHex(sha256(hexToBytes(preimage))) !== e.htlcHash.toLowerCase()) return null;
+      const rec = buildHtlcSpend({ utxos, witnessScript: e.witnessScript, payoutScript, satPerVb, path: 'claim', preimage, keyPriv: this.claimPriv, csvBlocks: e.csvBlocks });
+      const txid = await this.esplora.broadcast(rec.hex);
+      return { chain: 'bitcoin', ref: txid, submittedAt: this.now() };
+    };
+    // Detector conhecido (CSV ≤ 16): vai direto pela recuperação, sem gastar um broadcast fadado.
+    if (hasNonMinimalCsvPush(e.witnessScript)) {
+      const r = await recoverViaClaim();
+      if (r) return r;
+      throw new DomainError('SETTLEMENT_FAILED', 'cofre legado (ramo de refund não-padrão) sem preimage conhecida — refund impossível');
     }
-    const built = buildHtlcSpend({ utxos, witnessScript: e.witnessScript, payoutScript, satPerVb: await this.satPerVb(), path: 'refund', keyPriv: this.refundPriv, csvBlocks: e.csvBlocks });
-    const txid = await this.esplora.broadcast(built.hex);
-    return { chain: 'bitcoin', ref: txid, submittedAt: this.now() };
+    const built = buildHtlcSpend({ utxos, witnessScript: e.witnessScript, payoutScript, satPerVb, path: 'refund', keyPriv: this.refundPriv, csvBlocks: e.csvBlocks });
+    try {
+      const txid = await this.esplora.broadcast(built.hex);
+      return { chain: 'bitcoin', ref: txid, submittedAt: this.now() };
+    } catch (err) {
+      // FALLBACK ROBUSTO: a rede rejeitou o refund por script não-padrão (MINIMALDATA/clean-stack/
+      // verify-flag) que o detector estático não previu. Tenta a recuperação pelo claim (paga o
+      // Vendedor) — se houver preimage. Qualquer outro erro (fee/dust/rede) propaga intacto.
+      if (/verify-flag|Data push|non-mandatory|mandatory-script|cleanstack|minimal/i.test(String((err as Error).message))) {
+        const r = await recoverViaClaim();
+        if (r) return r;
+      }
+      throw err;
+    }
   }
 
   async supersede(_dealId: string, _revision: number): Promise<TxRef | null> { return null; } // nada on-chain a supersedir (o HTLC é por htlcHash)
