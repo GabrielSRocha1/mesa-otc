@@ -80,6 +80,15 @@ export function minimalScriptNumPush(n: number): Uint8Array {
   return pushData(scriptNum(n));
 }
 
+/** Detecta o script LEGADO com CSV ≤ 16 gravado como push de dado (`0x01 0x01..0x10` após o
+ *  OP_ELSE) — o encoding que viola MINIMALDATA e torna o ramo de refund intransmissível. */
+export function hasNonMinimalCsvPush(witnessScript: Uint8Array): boolean {
+  const i = witnessScript.indexOf(OP.ELSE);
+  if (i < 0 || i + 2 >= witnessScript.length) return false;
+  const len = witnessScript[i + 1] as number; const v = witnessScript[i + 2] as number;
+  return len === 0x01 && v >= 0x01 && v <= 0x10;
+}
+
 /** Witness script do HTLC — exatamente o layout do ADR-v4 §2. */
 export function htlcWitnessScript(htlcHashHex: string, claimPub: Uint8Array, refundPub: Uint8Array, csvBlocks: number): Uint8Array {
   if (!/^[0-9a-f]{64}$/.test(htlcHashHex)) throw new DomainError('INVALID_INPUT', 'htlcHash inválido (sha256 hex de 32 bytes)');
@@ -404,7 +413,25 @@ export class BitcoinChainAdapter implements SettlementAdapter {
     const immature = utxos.filter(u => u.confirmations < e.csvBlocks);
     if (immature.length) throw new DomainError('SETTLEMENT_NOT_ALLOWED', `timelock ainda não venceu: faltam ${e.csvBlocks - Math.min(...immature.map(u => u.confirmations))} blocos`, { csvBlocks: e.csvBlocks });
     const payout = await this.payoutOf(dealId, e, e.leg.from);
-    const built = buildHtlcSpend({ utxos, witnessScript: e.witnessScript, payoutScript: outputScriptOf(payout, this.cfg.network), satPerVb: await this.satPerVb(), path: 'refund', keyPriv: this.refundPriv, csvBlocks: e.csvBlocks });
+    const payoutScript = outputScriptOf(payout, this.cfg.network);
+    // RECUPERAÇÃO de cofres LEGADOS (CSV ≤ 16 gravado como push de dado): o ramo de refund (ELSE)
+    // executa o push não-minimal e NENHUM nó aceita ("Data push larger than necessary") — mas a
+    // checagem MINIMALDATA só vale para o RAMO EXECUTADO: o caminho de CLAIM (IF) nem toca o ELSE
+    // e é 100% padrão. A mesa conhece a preimage (deal.htlcPreimage) e a chave de claim é do
+    // keeper — gastamos pelo IF PAGANDO O VENDEDOR (semântica de refund preservada; a deal está
+    // morta/expirada, revelar a preimage não destrava mais nada na perna de contrato).
+    if (hasNonMinimalCsvPush(e.witnessScript)) {
+      const deal = await this.deps?.getDeal(dealId);
+      const preimage = (deal as (Deal & { htlcPreimage?: string }) | null | undefined)?.htlcPreimage?.toLowerCase();
+      if (preimage && /^[0-9a-f]{64}$/.test(preimage) && bytesToHex(sha256(hexToBytes(preimage))) === e.htlcHash.toLowerCase()) {
+        const rec = buildHtlcSpend({ utxos, witnessScript: e.witnessScript, payoutScript, satPerVb: await this.satPerVb(), path: 'claim', preimage, keyPriv: this.claimPriv, csvBlocks: e.csvBlocks });
+        const txid = await this.esplora.broadcast(rec.hex);
+        return { chain: 'bitcoin', ref: txid, submittedAt: this.now() };
+      }
+      // Sem a preimage (ex.: rota Lightning, em que a mesa não a conhece) o legado fica mesmo preso.
+      throw new DomainError('SETTLEMENT_FAILED', 'cofre legado (CSV não-minimal) sem preimage conhecida — refund padrão impossível');
+    }
+    const built = buildHtlcSpend({ utxos, witnessScript: e.witnessScript, payoutScript, satPerVb: await this.satPerVb(), path: 'refund', keyPriv: this.refundPriv, csvBlocks: e.csvBlocks });
     const txid = await this.esplora.broadcast(built.hex);
     return { chain: 'bitcoin', ref: txid, submittedAt: this.now() };
   }

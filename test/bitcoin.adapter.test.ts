@@ -224,3 +224,24 @@ describe('htlcWitnessScript — minimal push do CSV', () => {
     expect([s144[j + 1], s144[j + 2], s144[j + 3]]).toEqual([0x02, 0x90, 0x00]);
   });
 });
+
+// Recuperação de cofres legados (CSV ≤16 como push de dado): detector do encoding defeituoso.
+import { hasNonMinimalCsvPush } from '../src/adapters/bitcoin.js';
+describe('hasNonMinimalCsvPush — detecção do cofre legado', () => {
+  const hash = 'cd'.repeat(32); const pub = new Uint8Array(33).fill(3);
+  it('detecta o script antigo (0x01 0x08 após OP_ELSE) e NÃO acusa o novo (OP_8) nem CSV>16', () => {
+    // Reconstrói o encoding ANTIGO: push de dado para o CSV, como era antes do fix.
+    const legacy = (csv: number) => {
+      const base = hws(hash, pub, pub, 30); // layout correto com CSV 30 (push de dado 0x01 0x1e)
+      const out = Uint8Array.from(base);
+      const i = out.indexOf(0x67); // OP_ELSE
+      out[i + 2] = csv; // troca o valor do push (mantém o encoding de dado)
+      return out;
+    };
+    expect(hasNonMinimalCsvPush(legacy(8))).toBe(true);
+    expect(hasNonMinimalCsvPush(legacy(16))).toBe(true);
+    expect(hasNonMinimalCsvPush(hws(hash, pub, pub, 8))).toBe(false);   // novo: OP_8
+    expect(hasNonMinimalCsvPush(hws(hash, pub, pub, 30))).toBe(false);  // CSV>16: push de dado é minimal
+    expect(hasNonMinimalCsvPush(hws(hash, pub, pub, 144))).toBe(false);
+  });
+});
