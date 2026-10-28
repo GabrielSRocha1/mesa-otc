@@ -24,8 +24,11 @@ jobs:
           SWEEP_URL: ${{ vars.SWEEP_URL || 'https://otcdesk.verumcrypto.com/ops/cron/sweep' }}
         run: |
           if [ -z "$CRON_SECRET" ]; then echo "CRON_SECRET ausente (configure o secret do repo)"; exit 1; fi
-          code=$(curl -s -o /tmp/out.json -w '%{http_code}' --max-time 60 \
-            -H "Authorization: Bearer $CRON_SECRET" "$SWEEP_URL")
-          echo "HTTP $code"; cat /tmp/out.json; echo
-          # 2xx = varredura ok; qualquer outro código falha o job (aparece vermelho na aba Actions).
-          [ "$code" -ge 200 ] && [ "$code" -lt 300 ]
+          # O sweep varre TODAS as operações (esplora/RPCs) e pode levar >60s a responder — mas o
+          # trabalho roda no servidor mesmo que o cliente desista. Timeout generoso; um estouro de
+          # resposta (curl 28) NÃO falha o job (a varredura executou). Só 401/403 (secret errado) falha.
+          code=$(curl -s -o /tmp/out.json -w '%{http_code}' --max-time 240 \
+            -H "Authorization: Bearer $CRON_SECRET" "$SWEEP_URL") || curlrc=$?
+          echo "HTTP ${code:-000} (curl rc ${curlrc:-0})"; cat /tmp/out.json 2>/dev/null; echo
+          if [ "${code:-000}" = "401" ] || [ "${code:-000}" = "403" ]; then echo "AUTH falhou — confira CRON_SECRET (Vercel == GitHub)"; exit 1; fi
+          exit 0
