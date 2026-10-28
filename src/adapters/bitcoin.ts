@@ -71,13 +71,22 @@ export function scriptNum(n: number): Uint8Array {
 
 const OP = { IF: 0x63, ELSE: 0x67, ENDIF: 0x68, DROP: 0x75, DUP: 0x76, EQUAL: 0x87, EQUALVERIFY: 0x88, SHA256: 0xa8, HASH160: 0xa9, CHECKSIG: 0xac, CSV: 0xb2, ZERO: 0x00 } as const;
 
+/** Push MINIMAL de um número de script: 1..16 DEVEM ser OP_1..OP_16 (0x51..0x60) — um push de dado
+ *  (ex.: `0x01 0x08`) viola a política MINIMALDATA e NENHUM nó aceita o GASTO do script
+ *  ("mempool-script-verify-flag-failed: Data push larger than necessary") — incidente 2026-10-28:
+ *  cofres com CSV ≤ 16 ficavam com refund/claim impossíveis de transmitir. */
+export function minimalScriptNumPush(n: number): Uint8Array {
+  if (n >= 1 && n <= 16) return Uint8Array.of(0x50 + n); // OP_1..OP_16
+  return pushData(scriptNum(n));
+}
+
 /** Witness script do HTLC — exatamente o layout do ADR-v4 §2. */
 export function htlcWitnessScript(htlcHashHex: string, claimPub: Uint8Array, refundPub: Uint8Array, csvBlocks: number): Uint8Array {
   if (!/^[0-9a-f]{64}$/.test(htlcHashHex)) throw new DomainError('INVALID_INPUT', 'htlcHash inválido (sha256 hex de 32 bytes)');
   if (claimPub.length !== 33 || refundPub.length !== 33) throw new DomainError('INVALID_INPUT', 'pubkeys do HTLC devem ser comprimidas (33 bytes)');
   return concatBytes(
     Uint8Array.of(OP.IF, OP.SHA256), pushData(hexToBytes(htlcHashHex)), Uint8Array.of(OP.EQUALVERIFY), pushData(claimPub), Uint8Array.of(OP.CHECKSIG),
-    Uint8Array.of(OP.ELSE), pushData(scriptNum(csvBlocks)), Uint8Array.of(OP.CSV, OP.DROP), pushData(refundPub), Uint8Array.of(OP.CHECKSIG),
+    Uint8Array.of(OP.ELSE), minimalScriptNumPush(csvBlocks), Uint8Array.of(OP.CSV, OP.DROP), pushData(refundPub), Uint8Array.of(OP.CHECKSIG),
     Uint8Array.of(OP.ENDIF),
   );
 }

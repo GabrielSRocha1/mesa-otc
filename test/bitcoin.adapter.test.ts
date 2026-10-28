@@ -203,3 +203,24 @@ describe('adapter com Esplora mockado — monitoramento do gasto e extração da
     expect(r.meta?.witnessScript).toBe(bytesToHex(witnessScript));
   });
 });
+
+// Regressão 2026-10-28: CSV ≤ 16 no script precisa ser OP_N (minimal) — push de dado tornava o
+// GASTO do cofre não-padrão ("Data push larger than necessary") e refund/claim nunca transmitiam.
+import { htlcWitnessScript as hws, minimalScriptNumPush } from '../src/adapters/bitcoin.js';
+describe('htlcWitnessScript — minimal push do CSV', () => {
+  const hash = 'ab'.repeat(32); const pub = new Uint8Array(33).fill(2);
+  it('CSV 1..16 vira OP_N; >16 segue como push de dado minimal', () => {
+    expect([...minimalScriptNumPush(8)]).toEqual([0x58]);           // OP_8
+    expect([...minimalScriptNumPush(16)]).toEqual([0x60]);          // OP_16
+    expect([...minimalScriptNumPush(17)]).toEqual([0x01, 0x11]);    // push 1 byte
+    expect([...minimalScriptNumPush(144)]).toEqual([0x02, 0x90, 0x00]); // push 2 bytes (high bit)
+    const s8 = hws(hash, pub, pub, 8);
+    expect([...s8]).toContain(0x58);
+    // nunca a sequência 0x01 0x08 logo após o OP_ELSE (0x67)
+    const i = [...s8].indexOf(0x67);
+    expect(s8[i + 1]).toBe(0x58);
+    const s144 = hws(hash, pub, pub, 144);
+    const j = [...s144].indexOf(0x67);
+    expect([s144[j + 1], s144[j + 2], s144[j + 3]]).toEqual([0x02, 0x90, 0x00]);
+  });
+});
