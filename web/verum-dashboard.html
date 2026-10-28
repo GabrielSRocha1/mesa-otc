@@ -1299,7 +1299,9 @@ window.addEventListener('unhandledrejection',function(e){try{console.warn('[veru
       +actBtn
       +'<button class="btn" style="margin-top:'+(action?'8px':'18px')+';height:42px" onclick="this.closest(\'#turnPop\').remove()">'+(action?'Agora não':'Entendi')+'</button></div>';
     document.body.appendChild(el);
-    if(action){ var ab=document.getElementById('turnPopAct'); if(ab) ab.addEventListener('click',function(){ el.remove(); try{ action.fn(); }catch(e){} }); }
+    // O botão de ação REALMENTE assina: chama action.fn e propaga erro (toast) em vez de engolir —
+    // antes um throw síncrono (ex.: botão ausente) fazia o clique não fazer nada ("só visual").
+    if(action){ var ab=document.getElementById('turnPopAct'); if(ab) ab.addEventListener('click',function(){ el.remove(); Promise.resolve().then(action.fn).catch(function(e){ toast((e&&e.message)||'Falha ao assinar','err'); }); }); }
     el.addEventListener('click',function(e){ if(e.target===el) el.remove(); });
     setTimeout(function(){ el.remove(); },12000);
   }
@@ -3677,26 +3679,29 @@ window.addEventListener('unhandledrejection',function(e){try{console.warn('[veru
       else if(step&&step.kind==='tron') await tronOnchainStep(step, body=>pmApi('/v1/portal/mesas/'+m3Sel+'/deal/step',{method:'POST',body}));
     }catch(e){ if(!/simulado|autom|done/i.test(e.message||'')) throw e; }
     const env=await pmApi('/v1/portal/mesas/'+m3Sel+'/deal/envelope');
-    if(!env.typedData) throw new Error('Envelope do PM1 sem typedData.');
-    const p=await findVerumEthProvider(); if(!p) throw new Error('Provider EVM da Verum Wallet não foi injetado nesta aba.');
-    const accs=await p.request({method:'eth_requestAccounts'});
-    const sig=await p.request({method:'eth_signTypedData_v4',params:[accs[0],evmTypedPayload(env.typedData)]});
+    // Assina a aprovação da mesa na REDE do PM1 — pSignEnvelope cobre EVM/Tron/BTC/Solana. Antes
+    // isto forçava eth_signTypedData_v4 e um Pay Master numa mesa Tron/BTC travava em "sem typedData"
+    // (não assinava de verdade — bug "botão só visual" quando o PM não era EVM).
+    const sig=await pSignEnvelope(env);
     await pmApi('/v1/portal/mesas/'+m3Sel+'/deal/approval',{method:'POST',body:{signature:sig,nonce:env.payload.nonce}});
   }
   async function m3Sign(){
-    const btn=$('#m3dSign'); btn.disabled=true;
-    try{ await pmApi('/v1/portal/mesas/'+m3Sel+'/deal/sign',{method:'POST',body:{}}); toast('Assinatura registrada','ok'); m3Refresh(); }
+    // mesaId pode faltar quando o clique vem do POP-UP global (o usuário saiu do detalhe da mesa):
+    // resolve pela mesa ativa do poll (m3Sel/m3Cache) e falha com motivo claro — nunca silencioso.
+    const mesaId=m3Sel||(m3Cache&&m3Cache.mesaId); if(!mesaId){ toast('Abra a mesa para assinar.','err'); return; }
+    const btn=$('#m3dSign'); if(btn) btn.disabled=true; // botão pode não estar na tela (pop-up) — nunca derruba o fluxo
+    try{ await pmApi('/v1/portal/mesas/'+mesaId+'/deal/sign',{method:'POST',body:{}}); toast('Assinatura registrada','ok'); m3Refresh(); }
     catch(e){
       const det=(e&&e.details&&e.details.motivos)||null;
       if(det){ m3ShowMotivos(det); }
       else if(/sem chave dev|dispon[ií]vel apenas/i.test(e.message||'')){
         // Backend não assina por este admin → fluxo de carteira real.
         try{ await m3SignWallet(); toast('Assinatura registrada pela sua carteira ✓','ok'); m3Refresh(); }
-        catch(e2){ toast(e2.message||'Falha ao assinar pela carteira','err'); }
+        catch(e2){ pErrBox('Falha ao assinar',((e2&&e2.code)?('['+e2.code+'] '):'')+((e2&&e2.message)||String(e2))); }
       }
-      else toast(e.message,'err');
+      else pErrBox('Falha ao assinar',((e&&e.code)?('['+e.code+'] '):'')+((e&&e.message)||String(e)));
     }
-    finally{ btn.disabled=false; }
+    finally{ if(btn) btn.disabled=false; }
   }
   function m3Init(){
     const nb=$('#m3New'); if(nb) nb.addEventListener('click',m3EnterCreate);
