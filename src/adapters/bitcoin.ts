@@ -228,7 +228,7 @@ export class EsploraClient {
 
 /* ---------------- o adapter ---------------- */
 
-interface HtlcEssentials { htlcHash: string; address: string; witnessScript: Uint8Array; leg: Leg; participants: Participant[]; expiresAt: number; revision: number; dealHash?: string }
+interface HtlcEssentials { htlcHash: string; address: string; witnessScript: Uint8Array; csvBlocks: number; leg: Leg; participants: Participant[]; expiresAt: number; revision: number; dealHash?: string }
 export interface BitcoinAdapterDeps {
   getDeal: (id: string) => Promise<Deal | null>;
   /**
@@ -291,12 +291,13 @@ export class BitcoinChainAdapter implements SettlementAdapter {
 
   /* ---- ciclo de vida do HTLC ---- */
 
-  private essentialsFrom(htlcHash: string, legs: Leg[], participants: Participant[], expiresAt: number, revision: number, dealHash?: string): HtlcEssentials {
+  private essentialsFrom(htlcHash: string, legs: Leg[], participants: Participant[], expiresAt: number, revision: number, dealHash?: string, csvOverride?: number): HtlcEssentials {
     const leg = legs.find(l => l.escrowChain === 'bitcoin');
     if (!leg) throw new DomainError('SETTLEMENT_FAILED', 'deal sem leg Bitcoin');
     if (!/^[0-9a-f]{64}$/.test(htlcHash)) throw new DomainError('SETTLEMENT_FAILED', 'deal Bitcoin sem htlcHash — rota HTLC é obrigatória');
-    const witnessScript = htlcWitnessScript(htlcHash, this.claimPub, this.refundPub, this.cfg.csvBlocks);
-    return { htlcHash, address: p2wshAddress(witnessScript, this.cfg.network), witnessScript, leg, participants, expiresAt, revision, dealHash };
+    const csvBlocks = csvOverride ?? this.cfg.csvBlocks;
+    const witnessScript = htlcWitnessScript(htlcHash, this.claimPub, this.refundPub, csvBlocks);
+    return { htlcHash, address: p2wshAddress(witnessScript, this.cfg.network), witnessScript, csvBlocks, leg, participants, expiresAt, revision, dealHash };
   }
   private async hydrate(dealId: string): Promise<HtlcEssentials> {
     const hit = this.cache.get(dealId);
@@ -304,7 +305,19 @@ export class BitcoinChainAdapter implements SettlementAdapter {
     const deal = await this.deps?.getDeal(dealId);
     const t = deal?.terms as Terms | undefined;
     if (!deal || !t?.route.htlcHash) throw new DomainError('SETTLEMENT_FAILED', 'deal não registrada no adaptador Bitcoin');
-    const e = this.essentialsFrom(t.route.htlcHash, t.legs, t.participants, t.expiresAt, deal.revision, deal.hash?.dealHash);
+    // O CSV do cofre é o que foi GRAVADO NO SCRIPT no registro (meta persistida) — nunca o env
+    // atual: mudar BITCOIN_CSV_BLOCKS no deploy fazia o adapter re-derivar OUTRO endereço para
+    // deals antigas ("nada depositado no HTLC") e o refund nunca saía (incidente 2026-10-27).
+    const meta = (deal.onChain as Record<string, { meta?: Record<string, unknown> } | undefined> | undefined)?.bitcoin?.meta;
+    const metaCsv = typeof meta?.csvBlocks === 'number' ? meta.csvBlocks : undefined;
+    const e = this.essentialsFrom(t.route.htlcHash, t.legs, t.participants, t.expiresAt, deal.revision, deal.hash?.dealHash, metaCsv);
+    // Cinto: se o meta tem o witnessScript persistido e ele diverge do derivado, o PERSISTIDO manda
+    // (é o script do cofre REAL on-chain — ex.: chave claim/refund trocada no env depois do lock).
+    if (typeof meta?.witnessScript === 'string' && /^[0-9a-f]+$/i.test(meta.witnessScript) && meta.witnessScript.toLowerCase() !== bytesToHex(e.witnessScript)) {
+      const ws = hexToBytes(meta.witnessScript as string);
+      this.cache.set(dealId, { ...e, witnessScript: ws, address: typeof meta.htlcAddress === 'string' ? meta.htlcAddress : p2wshAddress(ws, this.cfg.network) });
+      return this.cache.get(dealId) as HtlcEssentials;
+    }
     this.cache.set(dealId, e);
     return e;
   }
@@ -327,7 +340,7 @@ export class BitcoinChainAdapter implements SettlementAdapter {
     this.cache.set(c.dealId, e);
     // Nenhuma transação é emitida aqui: o "registro" BTC é a derivação determinística do cofre
     // P2WSH; o funding (lock) é do lado vendedor via Verum Wallet. Meta persiste em deal.onChain.
-    return { chain: 'bitcoin', ref: `htlc:${e.address}`, submittedAt: this.now(), meta: { htlcAddress: e.address, htlcHash: e.htlcHash, csvBlocks: this.cfg.csvBlocks, witnessScript: bytesToHex(e.witnessScript), network: this.cfg.network } };
+    return { chain: 'bitcoin', ref: `htlc:${e.address}`, submittedAt: this.now(), meta: { htlcAddress: e.address, htlcHash: e.htlcHash, csvBlocks: e.csvBlocks, witnessScript: bytesToHex(e.witnessScript), network: this.cfg.network } };
   }
 
   /** O lock é feito pela carteira do vendedor; aqui DETECTAMOS o funding on-chain (idempotente). */
@@ -363,7 +376,7 @@ export class BitcoinChainAdapter implements SettlementAdapter {
     const utxos = await this.htlcUtxos(e);
     if (!utxos.length) throw new DomainError('SETTLEMENT_NOT_ALLOWED', 'HTLC sem fundos para claim');
     const payout = await this.payoutOf(dealId, e, e.leg.to);
-    const built = buildHtlcSpend({ utxos, witnessScript: e.witnessScript, payoutScript: outputScriptOf(payout, this.cfg.network), satPerVb: await this.satPerVb(), path: 'claim', preimage, keyPriv: this.claimPriv, csvBlocks: this.cfg.csvBlocks });
+    const built = buildHtlcSpend({ utxos, witnessScript: e.witnessScript, payoutScript: outputScriptOf(payout, this.cfg.network), satPerVb: await this.satPerVb(), path: 'claim', preimage, keyPriv: this.claimPriv, csvBlocks: e.csvBlocks });
     const txid = await this.esplora.broadcast(built.hex);
     return { chain: 'bitcoin', ref: txid, submittedAt: this.now() };
   }
@@ -379,10 +392,10 @@ export class BitcoinChainAdapter implements SettlementAdapter {
     }
     const utxos = (await this.htlcUtxos(e)).filter(u => u.valueSat > 0n);
     if (!utxos.length) throw new DomainError('SETTLEMENT_NOT_ALLOWED', 'nada depositado no HTLC');
-    const immature = utxos.filter(u => u.confirmations < this.cfg.csvBlocks);
-    if (immature.length) throw new DomainError('SETTLEMENT_NOT_ALLOWED', `timelock ainda não venceu: faltam ${this.cfg.csvBlocks - Math.min(...immature.map(u => u.confirmations))} blocos`, { csvBlocks: this.cfg.csvBlocks });
+    const immature = utxos.filter(u => u.confirmations < e.csvBlocks);
+    if (immature.length) throw new DomainError('SETTLEMENT_NOT_ALLOWED', `timelock ainda não venceu: faltam ${e.csvBlocks - Math.min(...immature.map(u => u.confirmations))} blocos`, { csvBlocks: e.csvBlocks });
     const payout = await this.payoutOf(dealId, e, e.leg.from);
-    const built = buildHtlcSpend({ utxos, witnessScript: e.witnessScript, payoutScript: outputScriptOf(payout, this.cfg.network), satPerVb: await this.satPerVb(), path: 'refund', keyPriv: this.refundPriv, csvBlocks: this.cfg.csvBlocks });
+    const built = buildHtlcSpend({ utxos, witnessScript: e.witnessScript, payoutScript: outputScriptOf(payout, this.cfg.network), satPerVb: await this.satPerVb(), path: 'refund', keyPriv: this.refundPriv, csvBlocks: e.csvBlocks });
     const txid = await this.esplora.broadcast(built.hex);
     return { chain: 'bitcoin', ref: txid, submittedAt: this.now() };
   }

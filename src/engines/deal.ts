@@ -469,7 +469,7 @@ export class DealEngine {
       // final continua on-chain (EVM máquina de estados; BTC UTXO de gasto único), isto é o cinto.
       if (deal.refunds.some(r => r.legIndex === leg.index && r.status === 'REFUNDED')) { p.funding = 'PENDING'; continue; }
       try { const a = this.d.adapters.require(leg.escrowChain, this.envOf(deal)); const tx = await a.refund(deal.id, leg.index); p.funding = 'PENDING'; deal.refunds.push({ role: leg.from, legIndex: leg.index, status: 'REFUNDED', txRef: tx.ref }); await this.persist(deal, 'refunded', actor, { role: leg.from, legIndex: leg.index, tx: tx.ref }); }
-      catch (e) { allDone = false; metrics.adapterErrors.inc({ chain: leg.escrowChain, op: 'refund' }); deal.refunds.push({ role: leg.from, legIndex: leg.index, status: 'PENDING', txRef: null }); await this.persist(deal, 'refund.pending', actor, { role: leg.from, error: (e as Error).message }); }
+      catch (e) { allDone = false; metrics.adapterErrors.inc({ chain: leg.escrowChain, op: 'refund' }); deal.refunds.push({ role: leg.from, legIndex: leg.index, status: 'PENDING', txRef: null, error: String((e as Error).message ?? e).slice(0, 300) }); await this.persist(deal, 'refund.pending', actor, { role: leg.from, error: (e as Error).message }); }
     }
     if (allDone && deal.state === 'REFUNDING') await this.transition(deal, 'REFUNDED', 'system');
     if (allDone && cancelled) logger.info({ dealId: deal.id }, 'depósitos devolvidos após cancelamento');

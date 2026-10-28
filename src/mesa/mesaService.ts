@@ -749,7 +749,7 @@ export class MesaService {
       // REEMBOLSOS por perna (REFUNDED/PENDING): a UI mostra "aguardando timelock" em vez de
       // sumir com o estado — exigência da auditoria (recuperação explicável por operação).
       // (?? []: dado antigo/fake persistido pode não ter o campo — a view nunca pode quebrar)
-      refunds: (deal.refunds ?? []).map(r => ({ role: r.role, legIndex: r.legIndex, status: r.status, txRef: r.txRef })),
+      refunds: (deal.refunds ?? []).map(r => ({ role: r.role, legIndex: r.legIndex, status: r.status, txRef: r.txRef, error: r.error ?? null })),
     };
   }
 

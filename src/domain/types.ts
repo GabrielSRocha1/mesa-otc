@@ -137,7 +137,7 @@ export interface SettlementRecord {
   idempotencyKey: string;
 }
 
-export interface RefundRecord { role: Role; legIndex: number; status: 'PENDING' | 'SUBMITTED' | 'REFUNDED'; txRef: string | null }
+export interface RefundRecord { role: Role; legIndex: number; status: 'PENDING' | 'SUBMITTED' | 'REFUNDED'; txRef: string | null; /** Motivo da última tentativa PENDENTE (diagnóstico na UI — ex.: timelock faltando N blocos). */ error?: string }
 
 export interface DealEvent { seq: number; dealId: string; type: string; at: number; actor: string; payload: Record<string, unknown>; prevHash: string; hash: string }
 
