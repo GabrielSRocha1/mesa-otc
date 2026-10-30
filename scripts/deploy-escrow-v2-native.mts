@@ -14,7 +14,7 @@ import { readFileSync } from 'node:fs';
 import { createPublicClient, createWalletClient, http, encodeDeployData, keccak256, toHex } from 'viem';
 import { privateKeyToAccount } from 'viem/accounts';
 import { sepolia } from 'viem/chains';
-import { loadConfig, verumEvmConfig } from '../src/config.js';
+import { loadConfig, verumEvmConfig, PLATFORM_TREASURY } from '../src/config.js';
 
 const ONCHAIN = process.argv[2] ?? 'C:/Users/gabri/Downloads/verum-otc-onchain/verum-otc-onchain';
 const OUT = `${ONCHAIN}/contracts/evm/out`;
@@ -60,8 +60,9 @@ const linked = esc.bytecode.replaceAll(`__$${placeholderHash}$__`, libAddr.slice
 if (linked.includes('__$')) throw new Error('bytecode ainda tem placeholder de link não resolvido');
 
 // 3) Deploy do escrow (chainId, owner, guardian, attestor, treasury)
+// owner/guardian = keeper (testnet, documentado); treasury = carteira de fee da plataforma.
 const escAddr = await deploy('VerumOTCEscrowV2EVM', esc.abi, linked as `0x${string}`,
-  [11155111n, keeper.address, keeper.address, attestor.address, keeper.address], 50_000_000n);
+  [11155111n, keeper.address, keeper.address, attestor.address, PLATFORM_TREASURY.evm], 50_000_000n);
 
 // 4) Tokens ACTIVE no registry (o NATIVO não entra: sentinela dispensa registry)
 const ESCROW_ABI = [

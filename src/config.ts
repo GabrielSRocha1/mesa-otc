@@ -168,6 +168,18 @@ export function verumEvmConfig(c: Config): VerumEvmSettings | null {
   return { rpcUrl: c.VERUM_EVM_RPC_URL, chainId: Number(c.VERUM_EVM_CHAIN_ID), escrow: c.VERUM_EVM_ESCROW_ADDRESS as `0x${string}`, escrowV2: (c.VERUM_EVM_V2_ESCROW_ADDRESS as `0x${string}` | undefined) ?? null, keeperKey: c.VERUM_EVM_KEEPER_KEY as `0x${string}`, attestorKey: c.VERUM_EVM_ATTESTOR_KEY as `0x${string}`, tbtc: c.VERUM_EVM_TBTC as `0x${string}`, tusdt: c.VERUM_EVM_TUSDT as `0x${string}`, confirmations: c.VERUM_EVM_CONFIRMATIONS, explorerBase: c.VERUM_EVM_EXPLORER_BASE?.replace(/\/$/, '') ?? null };
 }
 
+/**
+ * Carteiras de TREASURY (recebem a platform fee) por família de rede — fonte única.
+ * Usadas no DEPLOY (constroem o contrato com essa treasury) e nas ops de owner (proposeConfig).
+ * No V2 a fee real vai para a treasury ARMAZENADA no contrato: trocar em contrato já implantado
+ * exige proposeConfig+applyConfig (timelock 24h), não basta editar aqui.
+ */
+export const PLATFORM_TREASURY = {
+  evm: '0x897672Cb00Fbf7aB2E8d3Dc959C342d0885Add12' as `0x${string}`,
+  solana: '98K7MqNYH7xVP8PWFj5JP9fU9AyT1E1KLVPH3oeXLfyD',
+  tron: 'TQz5rtuesY8sRTtsMpJiU4Z6xWCREAwL68',
+} as const;
+
 /** Stablecoins/majors REAIS da Ethereum mainnet (constantes — menos superfície de env). */
 export const ETH_MAINNET_TOKENS = {
   USDT: { address: '0xdAC17F958D2ee523a2206206994597C13D831ec7' as `0x${string}`, decimals: 6 },

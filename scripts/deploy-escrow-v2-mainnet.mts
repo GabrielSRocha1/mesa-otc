@@ -23,7 +23,7 @@ import { readFileSync } from 'node:fs';
 import { createPublicClient, createWalletClient, http, encodeDeployData, keccak256, toHex, formatEther } from 'viem';
 import { privateKeyToAccount } from 'viem/accounts';
 import { mainnet } from 'viem/chains';
-import { ETH_MAINNET_TOKENS } from '../src/config.js';
+import { ETH_MAINNET_TOKENS, PLATFORM_TREASURY } from '../src/config.js';
 
 const ONCHAIN = process.argv[2] ?? 'C:/Users/gabri/Downloads/verum-otc-onchain/verum-otc-onchain';
 const OUT = `${ONCHAIN}/contracts/evm/out`;
@@ -42,7 +42,9 @@ const pub = createPublicClient({ chain: mainnet, transport: http(RPC) });
 const deployer = privateKeyToAccount(KEY);
 const owner = (process.env.OWNER_ADDRESS as `0x${string}` | undefined) ?? deployer.address;
 const guardian = (process.env.GUARDIAN_ADDRESS as `0x${string}` | undefined) ?? owner;
-const treasury = (process.env.TREASURY_ADDRESS_MAINNET as `0x${string}` | undefined) ?? owner;
+// Treasury da plataforma na mainnet: env > constante PLATFORM_TREASURY.evm (carteira de fee do usuário).
+// NÃO cai mais no deployer/owner — a fee real precisa ir para a carteira de receita, não a chave de deploy.
+const treasury = (process.env.TREASURY_ADDRESS_MAINNET as `0x${string}` | undefined) ?? PLATFORM_TREASURY.evm;
 const w = createWalletClient({ chain: mainnet, transport: http(RPC), account: deployer });
 
 const chainId = await pub.getChainId();
