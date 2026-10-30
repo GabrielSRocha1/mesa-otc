@@ -35,6 +35,8 @@ type Hex = `0x${string}`;
 const ESCROW_V2_ABI = ESCROW_V2_ABI_JSON as Abi;
 const MIN_GAS_WEI = 1n * 10n ** 15n;
 const TOPUP_WEI = 4n * 10n ** 15n;
+/** Gás do createTradeV2 (~1,30M medido) — usado p/ abastecer o attestor quando o keeper registra. */
+const REGISTER_GAS_UNITS = 1_350_000n;
 const ZERO32 = ('0x' + '0'.repeat(64)) as Hex;
 /** Perna NATIVA (ETH puro, sentinela EIP-7528): deposita via msg.value no signV2; sem approve. */
 const isNativeAsset = (a: string): boolean => a.toLowerCase() === NATIVE_ASSET_EVM.toLowerCase();
@@ -321,12 +323,13 @@ export class VerumEvmV2Adapter implements SettlementAdapter, ParticipantStepProv
       const creatorAcc = this.keyring?.accountByAddress(creatorAddr) ?? null;
       const baseMeta = { tradeId, termsHash, onChainCreatedAt: Number(terms.createdAt), onChainExpiresAt: Number(terms.expiresAt), buyerLegIndex: map.buyerLegIndex, sellerLegIndex: map.sellerLegIndex ?? -1 };
       if (!creatorAcc) {
-        // CARTEIRA REAL: sem chave no backend — o registro vira um txRequest que a carteira do
-        // criador (PM1) envia. tradeId/termsHash são determinísticos, então o restante do fluxo
-        // (steps, settle) encontra a trade assim que o createTradeV2 confirmar on-chain.
-        const data = encodeFunctionData({ abi: ESCROW_V2_ABI, functionName: 'createTradeV2', args: [terms, attTuples] });
-        const meta = { ...baseMeta, registerPending: 1, registerFrom: creatorAddr, registerTx: JSON.stringify({ to: this.escrowV2, data, value: '0', chainId: this.cfg.chainId, from: creatorAddr }) } as VerumMeta;
-        return { ...this.ref(`pending:createTradeV2:${tradeId}`), meta };
+        // KEEPER REGISTRA (prod): sem chave do criador no backend, o ATTESTOR — criador sempre aceito
+        // pelo contrato — envia o createTradeV2. O gás é bancado pelo KEEPER com o que o lado-EVM
+        // pré-pagou (gas prepayment), então o registro NÃO sai da carteira do PM1 nem da plataforma.
+        const attestorAcc = privateKeyToAccount(this.cfg.attestorKey);
+        await this.fundFromKeeper(attestorAcc.address, REGISTER_GAS_UNITS);
+        const tx = await this.write('createTradeV2', [terms, attTuples], attestorAcc);
+        return { ...this.ref(tx), meta: baseMeta as VerumMeta };
       }
       await this.ensureGas(creatorAcc.address);
       const tx = await this.write('createTradeV2', [terms, attTuples], creatorAcc);
@@ -427,6 +430,47 @@ export class VerumEvmV2Adapter implements SettlementAdapter, ParticipantStepProv
   }
 
   async supersede(_dealId: string, _revision: number): Promise<TxRef | null> { return null; }
+
+  // ---------------------------------------------------------------- pré-pagamento de gás
+  /** Pré-pagamento EXIGIDO só em produção (sem keyring dev). Em dev/demo o keeper auto-paga (sem gate). */
+  gasPrepayEnforced(): boolean { return !this.keyring; }
+  /** Endereço do keeper — destino do depósito de gás que o lado-EVM pré-paga. */
+  keeperAddress(): string { return this.keeper.address; }
+  /** Keeper abastece `address` (ex.: attestor p/ registrar) até ~gasUnits×gasPrice×2, com o pré-pago. */
+  private async fundFromKeeper(address: Hex, gasUnits: bigint): Promise<void> {
+    const need = gasUnits * (await this.pub.getGasPrice()) * 2n;
+    const bal = await this.pub.getBalance({ address });
+    if (bal >= need) return;
+    const hash = await this.keeperWallet.sendTransaction({ to: address, value: need - bal, account: this.keeper, chain: this.viemChain });
+    await this.pub.waitForTransactionReceipt({ hash, confirmations: this.cfg.confirmations });
+  }
+  /** Preço de gás atual da rede (wei) para dimensionar o depósito dinâmico. */
+  async currentGasPriceWei(): Promise<bigint> { try { return await this.pub.getGasPrice(); } catch (e) { this.fail('gasPrice', e); } }
+  /**
+   * Verifica um depósito de gás: `txHash` deve ser transferência CONFIRMADA de `from` (o pagador)
+   * PARA o keeper, de valor ≥ `minWei`. Devolve o valor recebido para a contabilidade por-mesa.
+   */
+  async verifyGasPrepay(txHash: string, from: string, minWei: bigint): Promise<{ valueWei: bigint }> {
+    try {
+      const rc = await this.pub.waitForTransactionReceipt({ hash: txHash as Hex, confirmations: this.cfg.confirmations });
+      if (rc.status !== 'success') throw new DomainError('INVALID_INPUT', 'tx do pré-pagamento de gás revertida');
+      const tx = await this.pub.getTransaction({ hash: txHash as Hex });
+      const eq = (a?: string | null, b?: string | null) => !!a && !!b && a.toLowerCase() === b.toLowerCase();
+      if (!eq(tx.to, this.keeper.address)) throw new DomainError('INVALID_INPUT', 'pré-pagamento não foi enviado ao keeper');
+      if (!eq(tx.from, from)) throw new DomainError('INVALID_INPUT', 'pré-pagamento não veio do pagador do gás');
+      if (tx.value < minWei) throw new DomainError('INVALID_INPUT', `pré-pagamento insuficiente: ${tx.value} < ${minWei}`);
+      return { valueWei: tx.value };
+    } catch (e) { if (e instanceof DomainError) throw e; this.fail('verifyGasPrepay', e); }
+  }
+  /** Devolve a sobra de gás não usada ao pagador (keeper → pagador). No-op se amountWei ≤ 0. */
+  async returnGasLeftover(to: string, amountWei: bigint): Promise<string | null> {
+    if (amountWei <= 0n) return null;
+    try {
+      const hash = await this.keeperWallet.sendTransaction({ to: to as Hex, value: amountWei, account: this.keeper, chain: this.viemChain });
+      await this.pub.waitForTransactionReceipt({ hash, confirmations: this.cfg.confirmations });
+      return hash;
+    } catch (e) { this.fail('returnGasLeftover', e); }
+  }
 
   async getDealState(dealId: string): Promise<OnChainDealState> {
     const bound = await bindingOf(this.deps, dealId, 'ethereum');

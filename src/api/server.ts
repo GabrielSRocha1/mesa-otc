@@ -294,6 +294,10 @@ export async function buildApi(deps: ApiDeps): Promise<FastifyInstance> {
   app.post('/v1/deals/:id/participants/:role/bind', async (req, reply) => { const s = requireSession(req); const { id, role } = req.params as { id: string; role: Role }; return idempotent(req, reply, async () => deps.deals.view(await deps.deals.connectWallet(id, parse(RoleZ, role), s.address, s.address), s.address)); });
   app.post('/v1/deals/:id/verify', async (req, reply) => { const s = requireSession(req); const { id } = req.params as { id: string }; return idempotent(req, reply, async () => deps.deals.view(await deps.deals.verify(id, s.address), s.address)); });
   app.post('/v1/deals/:id/open', async (req, reply) => { const s = requireSession(req); const { id } = req.params as { id: string }; return idempotent(req, reply, async () => deps.deals.view(await deps.deals.open(id, s.address), s.address)); });
+  // Pré-pagamento de gás do keeper (lado-EVM): o pagador envia ETH ao keeper e informa o txHash; o
+  // backend verifica on-chain e, confirmado, registra a mesa e inicia os turnos. A abertura de uma
+  // mesa EVM responde 402 GAS_PREPAY_REQUIRED (detalhes em deal.gasPrepay) até este passo concluir.
+  app.post('/v1/deals/:id/gas-prepay', async (req, reply) => { const s = requireSession(req); const { id } = req.params as { id: string }; const { txHash } = parse(z.object({ txHash: z.string().regex(/^0x[0-9a-fA-F]{64}$/) }), req.body); return idempotent(req, reply, async () => deps.deals.view(await deps.deals.recordGasPrepay(id, txHash), s.address)); });
   /* ---------- pré-visualização (somente leitura; o backend recalcula tudo na verificação da Deal) ---------- */
   app.get('/v1/quote', async req => { requireSession(req); const q = parse(z.object({ assetIn: z.string(), assetOut: z.string(), amountInBase: z.string().regex(/^[1-9][0-9]*$/), discountBps: z.coerce.number().int().min(0).max(2000).default(0), commissionBps: z.coerce.number().int().min(0).max(5000).default(0), maxSlippageBps: z.coerce.number().int().min(1).max(1000).default(50) }), req.query);
     const assetIn = deps.registry.resolveByAssetId(q.assetIn), assetOut = deps.registry.resolveByAssetId(q.assetOut); const snapshot = await deps.price.quote([assetIn.assetId, assetOut.assetId]);
@@ -1450,6 +1454,13 @@ export async function buildApi(deps: ApiDeps): Promise<FastifyInstance> {
     const b = parse(z.object({ signature: z.string().min(20), deadline: z.number().int() }), req.body);
     const { d, pm1 } = await mesaDealOf(req, (req.params as { mesaId: string }).mesaId);
     return stepAdapterOf(d).submitParticipantStep(d.id, 'PAYMASTER_1', pm1.address, b as Record<string, unknown>);
+  });
+  // Pré-pagamento de gás do keeper (lado-EVM) na mesa: o pagador envia ETH ao keeper e informa o
+  // txHash; confirmado, o backend registra e inicia os turnos. deal.gasPrepay traz keeperAddress/valor.
+  app.post('/v1/portal/mesas/:mesaId/deal/gas-prepay', async req => {
+    const b = parse(z.object({ txHash: z.string().regex(/^0x[0-9a-fA-F]{64}$/) }), req.body);
+    const { d, pm1 } = await mesaDealOf(req, (req.params as { mesaId: string }).mesaId);
+    return deps.deals.view(await deps.deals.recordGasPrepay(d.id, b.txHash), pm1.address);
   });
   app.get('/v1/portal/mesas/:mesaId/deal/envelope', async req => {
     const { d, pm1 } = await mesaDealOf(req, (req.params as { mesaId: string }).mesaId);

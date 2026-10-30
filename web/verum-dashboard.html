@@ -2253,6 +2253,7 @@ window.addEventListener('unhandledrejection',function(e){try{console.warn('[veru
   /* ---------- Esteira ligada a uma DEAL real (DealEngine) ---------- */
   let opDeal=null, opDealTimer=null, opTurnTimer=null;
   let m3AutoRegKey=null; // auto-registro do createTradeV2: 1 disparo por operação (retry fica no botão)
+  let opGasPrepayKey=null; // pré-pagamento de gás do keeper: 1 disparo por operação (só o pagador lado-EVM)
   const OP_STEP_LABEL={SELLER:'Vendedor',PAYMASTER_1:'Pay Master 1',PAYMASTER_2:'Pay Master 2',BUYER:'Comprador'};
   const OP_SIGN_ORDER=['SELLER','PAYMASTER_1','PAYMASTER_2','BUYER'];
   function fmtCountdown(exp){ const ms=Math.max(0,exp-srvNow()); if(ms>=3600000){ const h=Math.floor(ms/3600000), m=Math.floor(ms%3600000/60000); return h+'h'+('0'+m).slice(-2)+'m restantes'; } const m=Math.floor(ms/60000), s=Math.floor(ms%60000/1000); return m+'m'+('0'+s).slice(-2)+'s restantes'; }
@@ -2283,6 +2284,21 @@ window.addEventListener('unhandledrejection',function(e){try{console.warn('[veru
     const awaiting=d.state==='AWAITING_SIGNATURES';
     const btn=$('#opStartDeal'); if(btn) btn.style.display = awaiting?'none':'';
     const sbtn=$('#opSignTurn'); if(sbtn){ sbtn.style.display = (awaiting&&d.turnRole)?'':'none'; if(!sbtn.disabled) sbtn.textContent = d.demo?'Assinar minha vez':'Assinar com Verum Wallet'; }
+    // PRÉ-PAGAMENTO DE GÁS (lado-EVM): o COMPRADOR/VENDEDOR deposita o gás do keeper ANTES do
+    // registro (o keeper registra + liquida/reembolsa com esse saldo). Dispara SÓ para o pagador
+    // (checagem silenciosa eth_accounts — nunca prompta o PM nem a carteira errada). 1x por operação.
+    if(d.gasPrepay&&d.gasPrepay.status==='PENDING'&&opGasPrepayKey!==d.id){
+      (async function(){
+        try{
+          const p=await findVerumEthProvider(); if(!p) return;
+          const accs=await p.request({method:'eth_accounts'}); const cur=accs&&accs[0];
+          if(!cur||cur.toLowerCase()!==String(d.gasPrepay.payerAddress||'').toLowerCase()) return; // só o pagador lado-EVM
+          opGasPrepayKey=d.id;
+          toast('Pré-pague o gás do keeper para abrir a mesa — confirme na carteira','ok');
+          await opGasPrepay(d); toast('Gás pré-pago ✓ — a mesa será registrada','ok'); refreshMesaDeal();
+        }catch(e){ opGasPrepayKey=null; toast('Pré-pagamento de gás pendente: '+((e&&e.message)||'recusado'),'err'); }
+      })();
+    }
     // LOCK ANTES DO OPEN: createTradeV2 pendente (open adiado até o lock BTC) — o PM1 registra
     // on-chain pela própria carteira; a janela de 40 min do escrow nasce NESTA transação.
     const rbtn=$('#opRegisterDeal'); if(rbtn) rbtn.style.display = (d.registerTx&&d.registerTx.to)?'':'none';
@@ -2407,6 +2423,20 @@ window.addEventListener('unhandledrejection',function(e){try{console.warn('[veru
       refreshMesaDeal();
     }catch(e){ toast(e.message||'Falha ao assinar','err'); }
     finally{ const b=$('#opSignTurn'); if(b){ b.disabled=false; b.textContent=(opDeal&&opDeal.demo)?'Assinar minha vez':'Assinar com Verum Wallet'; } }
+  }
+  /** Pré-pagamento de gás do keeper pelo PAGADOR (comprador/vendedor lado-EVM): envia o depósito
+   *  (requiredWei) ao keeperAddress pela carteira do papel e informa o txHash — o backend verifica
+   *  on-chain e, confirmado, registra a mesa e inicia os turnos. Usa a wallet session do participante. */
+  async function opGasPrepay(d){
+    const gp=d.gasPrepay; if(!gp) throw new Error('mesa não requer pré-pagamento de gás');
+    const p=await findVerumEthProvider(); if(!p) throw new Error('Provider EVM da Verum Wallet não injetado nesta aba.');
+    const accs=await p.request({method:'eth_requestAccounts'}); const from=accs&&accs[0];
+    if(!from||from.toLowerCase()!==String(gp.payerAddress).toLowerCase()) throw new Error('Conecte a carteira do pagador do gás ('+shortAddr(gp.payerAddress)+').');
+    const wtok=await walletSession('ethereum',from); const auth={authorization:'Bearer '+wtok};
+    const h=await p.request({method:'eth_sendTransaction',params:[{from,to:gp.keeperAddress,value:'0x'+BigInt(gp.requiredWei).toString(16)}]});
+    await evmWaitReceipt(p,h);
+    const r=await fetch(API+'/v1/deals/'+d.id+'/gas-prepay',{method:'POST',headers:{...auth,'content-type':'application/json','idempotency-key':d.id+':gasprepay'},body:JSON.stringify({txHash:h})});
+    const o=await r.json().catch(()=>({})); if(!r.ok) throw new Error(o.message||o.error||('Pré-pagamento rejeitado ('+r.status+')'));
   }
   function startTurnCountdown(){ if(opTurnTimer) clearInterval(opTurnTimer); opTurnTimer=setInterval(()=>{ const el=$('#opSteps .op-turn-chip'); if(!el){ clearInterval(opTurnTimer); return; } const cd=el.querySelector('.op-turn-cd'); if(cd) cd.textContent=fmtCountdown(Number(el.dataset.turnExp)); },1000); }
   async function refreshMesaDeal(){ if(!getTok()||opMirror) return; refreshMesaDeals(); try{ const r=await pmApi('/v1/portal/mesa/deal'); if(r&&r.deal){ opDeal=r.deal; renderEsteira(r.deal); if(!opDealTimer) startDealPolling(); } }catch(e){} }

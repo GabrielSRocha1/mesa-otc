@@ -169,6 +169,21 @@ export interface Deal {
   /** LIGHTNING_SWAP: hashlock (payment_hash) e invoice do Comprador. A mesa NÃO conhece a preimage. */
   lightningHtlcHash?: string;
   lightningInvoice?: string;
+  /** Pré-pagamento de gás EVM: o lado-EVM financia o keeper (registro + settle/refund). Ausente em deals não-EVM. */
+  gasPrepay?: GasPrepay;
+}
+
+/** Pré-pagamento de gás do keeper por mesa (gas prepayment). Valores em wei como string (JSON-safe). */
+export interface GasPrepay {
+  payerRole: Role;          // lado-EVM que banca o gás
+  payerAddress: string;     // carteira EVM do pagador (destino da devolução da sobra)
+  keeperAddress: string;    // destino do depósito
+  requiredWei: string;      // depósito exigido (dinâmico: ciclo × gasPrice × margem)
+  status: 'PENDING' | 'FUNDED' | 'RETURNED';
+  txRef?: string;           // tx do depósito do pagador → keeper
+  receivedWei?: string;     // valor efetivamente recebido
+  spentWei?: string;        // custo estimado das ops (para devolver a sobra)
+  returnTxRef?: string;     // tx de devolução da sobra (keeper → pagador)
 }
 
 export interface DealDraft {
