@@ -271,8 +271,10 @@ export class DealEngine {
     const requiredWei = estimateGasPrepayWei(await adapter.currentGasPriceWei());
     const keeperAddress = adapter.keeperAddress();
     deal.gasPrepay = { payerRole: payer.role, payerAddress: payer.address, keeperAddress, requiredWei: requiredWei.toString(), status: 'PENDING' };
-    await this.persist(deal, 'gasPrepay.required', 'system', { payer: payer.role, requiredWei: requiredWei.toString(), keeperAddress });
-    throw new DomainError('GAS_PREPAY_REQUIRED', `Pré-pagamento de gás pendente: o ${payer.role} deve enviar ${requiredWei} wei ao keeper`, { keeperAddress, requiredWei: requiredWei.toString(), payerRole: payer.role, payerAddress: payer.address });
+    // NÃO registrar o keeperAddress no evento (a timeline é visível aos participantes) — só o papel e o valor.
+    await this.persist(deal, 'gasPrepay.required', 'system', { payer: payer.role, requiredWei: requiredWei.toString() });
+    // Detalhes do erro SEM endereço do keeper/pagador (o pagador lê o keeperAddress do view gated, não do erro).
+    throw new DomainError('GAS_PREPAY_REQUIRED', `Pré-pagamento de gás pendente: o ${payer.role} deve pré-pagar o gás do keeper`, { requiredWei: requiredWei.toString(), payerRole: payer.role });
   }
   /**
    * Registra o depósito de gás: verifica a tx (do pagador → keeper, valor ≥ exigido) e, confirmado,
@@ -587,8 +589,12 @@ export class DealEngine {
   view(deal: Deal, actor: string | null, operator = false): Record<string, unknown> {
     const me = deal.participants.find(p => actor && p.address.toLowerCase() === actor.toLowerCase());
     if (!me && !operator) throw new DomainError('FORBIDDEN', 'não é participante');
-    const { htlcPreimage, ...rest } = deal as Deal & { htlcPreimage?: string };
-    return { ...rest, signatures: deal.signatures.map(s => ({ role: s.role, signer: s.signer, status: s.status, receivedAt: s.receivedAt, revision: s.revision })), myRole: me?.role ?? null, ...(me?.role === 'SELLER' && htlcPreimage ? { htlcPreimage } : {}) };
+    const { htlcPreimage, gasPrepay, ...rest } = deal as Deal & { htlcPreimage?: string };
+    // gasPrepay carrega o endereço do keeper (= carteira de fee). Só o PAGADOR (que precisa depositar
+    // o gás) e o OPERADOR veem os detalhes; demais participantes e links de visualização pública veem
+    // apenas o status — a carteira de fee/keeper não vaza pra contraparte nem pra quem tem o link.
+    const gp = gasPrepay ? ((operator || me?.role === gasPrepay.payerRole) ? gasPrepay : { status: gasPrepay.status }) : undefined;
+    return { ...rest, ...(gp ? { gasPrepay: gp } : {}), signatures: deal.signatures.map(s => ({ role: s.role, signer: s.signer, status: s.status, receivedAt: s.receivedAt, revision: s.revision })), myRole: me?.role ?? null, ...(me?.role === 'SELLER' && htlcPreimage ? { htlcPreimage } : {}) };
   }
   static assetLabel(a: CanonicalAsset): string { return `${a.code}@${a.network}`; }
 }
