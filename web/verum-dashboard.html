@@ -3848,14 +3848,15 @@ window.addEventListener('unhandledrejection',function(e){try{console.warn('[veru
     // ── CASO 1: depósito de BTC no cofre (P2WSH) ──
     if(d.htlcVault && d.htlcVault.from===me.role){
       const satsToBtc=function(s){ try{ const v=String(BigInt(s)).padStart(9,'0'); const i=v.slice(0,-8)||'0'; const f=v.slice(-8).replace(/0+$/,''); return f?i+'.'+f:i; }catch(e){ return String(s); } };
-      const btcHuman=satsToBtc(d.htlcVault.requiredSat);
+      const sendSat=String(d.htlcVault.depositSat||d.htlcVault.requiredSat); // inclui a margem de taxa
+      const btcHuman=satsToBtc(sendSat);
       const warn=isMain
         ? 'Se a operação <b>não se completar</b> (falhar ou expirar), o seu BTC <b>volta para a sua carteira com segurança</b> — mas só <b>após ~8 horas</b> (trava de tempo do cofre). Nesse período o BTC fica <b>bloqueado, nunca perdido</b>.'
         : 'Se a operação não se completar, o seu BTC volta para a sua carteira com segurança após o prazo de segurança do cofre (trava de tempo). Nesse período ele fica bloqueado, nunca perdido.';
       $('#modalRoot').innerHTML='<div class="modal-back" id="pdmBack"><div class="modal">'
         +'<h3>Depósito de BTC necessário</h3>'
         +(d.htlcVault.simulated?'<div style="margin:4px 0 10px;padding:6px 10px;border-radius:8px;background:rgba(245,158,11,.14);border:1px solid var(--amber);color:var(--amber);font-size:12px;font-weight:700">⚠ AMBIENTE DE TESTE — BTC SIMULADO</div>':'')
-        +'<p style="color:var(--ink-2);font-size:13px;margin:4px 0 10px">A operação foi aprovada. Para seguir, envie <b class="mono">'+esc(btcHuman)+' BTC</b> ('+esc(String(d.htlcVault.requiredSat))+' sats) ao <b>cofre</b> desta operação:</p>'
+        +'<p style="color:var(--ink-2);font-size:13px;margin:4px 0 10px">A operação foi aprovada. Para seguir, envie <b class="mono">'+esc(btcHuman)+' BTC</b> ('+esc(sendSat)+' sats — já inclui uma <b>margem de taxa de rede</b> para o cofre receber o valor cheio) ao <b>cofre</b> desta operação:</p>'
         +'<div class="mono" style="word-break:break-all;font-size:12px;background:var(--bg-2);border:1px solid var(--line);border-radius:8px;padding:8px;margin:6px 0">'+esc(d.htlcVault.address)+'</div>'
         +'<button class="btn btn-block" id="pdmCopy" style="height:40px">Copiar endereço do cofre</button>'
         +'<div style="margin:12px 0;padding:10px 12px;border:1px solid var(--amber);border-radius:10px;background:rgba(245,158,11,.08);color:var(--ink-2);font-size:12.5px">⏳ <b>Importante:</b> '+warn+'</div>'
@@ -3947,7 +3948,8 @@ window.addEventListener('unhandledrejection',function(e){try{console.warn('[veru
     if(myFund&&d.htlcVault&&d.htlcVault.from===me.role){
       // Sats → BTC decimal com PONTO (formato que a carteira espera no signAndSendPayment).
       const satsToBtc=function(s){ try{ const v=String(BigInt(s)).padStart(9,'0'); const i=v.slice(0,-8)||'0'; const f=v.slice(-8).replace(/0+$/,''); return f?i+'.'+f:i; }catch(e){ return String(s); } };
-      const btcHuman=satsToBtc(d.htlcVault.requiredSat);
+      const vaultSendSat=String(d.htlcVault.depositSat||d.htlcVault.requiredSat); // amountBase + margem de taxa
+      const btcHuman=satsToBtc(vaultSendSat);
       // Pagamento DECLARATIVO pela própria carteira (signAndSendPayment bitcoin): um toque envia o
       // valor exato ao cofre — sem copiar endereço. Fallback manual continua (carteira antiga/flag off).
       const provPay=solProvider(); const canPay=!!(provPay&&typeof provPay.signAndSendPayment==='function');
@@ -3970,7 +3972,7 @@ window.addEventListener('unhandledrejection',function(e){try{console.warn('[veru
       fundHtml='<div style="margin-top:12px;padding:12px;border:1px solid var(--amber);border-radius:10px">'
         +simBanner
         +'<b style="color:var(--amber)">Depósito BTC pendente</b>'
-        +'<div style="font-size:12.5px;color:var(--ink-2);margin-top:4px">Envie <b class="mono">'+esc(btcHuman)+' BTC</b> ('+esc(String(d.htlcVault.requiredSat))+' sats) ao cofre desta operação.</div>'
+        +'<div style="font-size:12.5px;color:var(--ink-2);margin-top:4px">Envie <b class="mono">'+esc(btcHuman)+' BTC</b> ('+esc(vaultSendSat)+' sats — já com margem de taxa de rede) ao cofre desta operação.</div>'
         +sentHtml
         +'' /* botão "Pagar com a carteira" REMOVIDO: "Revisar e assinar" já paga pela carteira (pFundBtcVault) e assina no mesmo ato — um CTA só, sem duplicar */
         +(sentAt?'':'<details'+(canPay?'':' open')+' style="margin-top:4px"><summary style="cursor:pointer;font-size:12px;color:var(--ink-3)">'+(canPay?'Prefere enviar manualmente?':'Enviar manualmente')+'</summary>'+manualBody+'</details>')
@@ -4391,7 +4393,9 @@ window.addEventListener('unhandledrejection',function(e){try{console.warn('[veru
       if(!prov||typeof prov.signAndSendPayment!=='function') throw new Error('Esta Verum Wallet não envia BTC pelo dApp. Alternativa: abra "Prefere enviar manualmente?" no card, envie os sats ao endereço e toque "Já enviei — verificar".');
       try{ await prov.connect(); }catch(e){}
       st('Confirme o envio do BTC na carteira…');
-      const v=String(BigInt(String(d.htlcVault.requiredSat))).padStart(9,'0'); const fr=v.slice(-8).replace(/0+$/,''); const amount=(v.slice(0,-8)||'0')+(fr?'.'+fr:'');
+      // Envia depositSat (= amountBase + margem de taxa) para o cofre receber o valor cheio mesmo se a carteira descontar a taxa.
+      const sendSat=String(d.htlcVault.depositSat||d.htlcVault.requiredSat);
+      const v=String(BigInt(sendSat)).padStart(9,'0'); const fr=v.slice(-8).replace(/0+$/,''); const amount=(v.slice(0,-8)||'0')+(fr?'.'+fr:'');
       const r=await withSigTimeout(prov.signAndSendPayment({ network:'bitcoin', outputs:[{ address:d.htlcVault.address, amount:amount, asset:{kind:'native'} }], memo:null }),'bitcoin');
       pBtcSentMark(d, r&&r.txHash);
       toast('BTC enviado ao cofre ✓ '+((r&&r.txHash)?shortAddr(r.txHash):''),'ok');

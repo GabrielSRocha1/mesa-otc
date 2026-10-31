@@ -735,7 +735,13 @@ export class MesaService {
         const meta = deal.onChain?.bitcoin?.meta as Record<string, unknown> | undefined;
         // simulated: a UI marca "BTC SIMULADO" quando a perna roda no simulador (preview/dev) —
         // exigência da auditoria: nenhum ambiente de teste pode se passar por BTC real.
-        return typeof meta?.htlcAddress === 'string' ? { address: meta.htlcAddress, requiredSat: leg.amountBase, from: leg.from, legIndex: leg.index, simulated: this.d.btcSimulated?.() ?? false } : null;
+        if (typeof meta?.htlcAddress !== 'string') return null;
+        // MARGEM DE TAXA: o Vendedor envia `amountBase + margem` (depositSat) para o cofre RECEBER o
+        // valor cheio mesmo quando a carteira desconta a taxa de rede do envio — senão o cofre fica
+        // subfinanciado (ex.: pediu 30.000, chegou 29.100) e a operação trava. O limiar de funding
+        // on-chain (adapter) continua sendo amountBase (requiredSat); a margem só garante que chega lá.
+        const feeMarginSat = 3000n;
+        return { address: meta.htlcAddress, requiredSat: leg.amountBase, depositSat: (BigInt(leg.amountBase) + feeMarginSat).toString(), from: leg.from, legIndex: leg.index, simulated: this.d.btcSimulated?.() ?? false };
       })(),
       // REGISTRO on-chain pendente (createTradeV2 do PM1): o auto-envio do approve é one-shot e
       // se perde em recusa/reload — sem este campo no poll a mesa ficava SEM retry, presa em
