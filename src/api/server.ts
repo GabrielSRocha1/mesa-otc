@@ -456,21 +456,30 @@ export async function buildApi(deps: ApiDeps): Promise<FastifyInstance> {
   // presos de EXPIRED e auto-abre HTLC com lock confirmado. Assim o reembolso é automático mesmo com o
   // painel fechado. Protegido por CRON_SECRET (a Vercel envia `Authorization: Bearer $CRON_SECRET`);
   // sem o segredo definido, exige sessão de operador (nunca fica aberto). Idempotente — seguro repetir.
+  // Varredura PARALELA com teto de concorrência e TIMEOUT POR DEAL: uma leitura de Esplora/RPC
+  // travada (ou um volume grande de deals) não congela mais a varredura inteira — cada deal tem
+  // seu prazo e as demais seguem. Sem isso, com muitas ops ativas o /ops/cron/sweep estourava o
+  // tempo (curl HTTP 000) e nem chegava a abrir a operação com o lock já confirmado.
+  const SWEEP_PER_DEAL_MS = 15_000; // prazo por deal (leitura lenta → pula e retenta na próxima rodada)
+  const SWEEP_CONCURRENCY = 5;      // paralelismo limitado (não estourar rate-limit de Esplora/RPC)
+  const sweepTimeout = <T>(p: Promise<T>, ms: number): Promise<T> => Promise.race([p, new Promise<T>((_, rej) => setTimeout(() => rej(new Error('sweep: prazo por deal excedido')), ms))]);
+  const sweepPool = async <T>(items: T[], fn: (x: T) => Promise<void>): Promise<number> => {
+    let done = 0, idx = 0;
+    await Promise.all(Array.from({ length: Math.min(SWEEP_CONCURRENCY, items.length) }, async () => {
+      while (idx < items.length) { const x = items[idx++]!; try { await sweepTimeout(fn(x), SWEEP_PER_DEAL_MS); done++; } catch { /* próxima rodada */ } }
+    }));
+    return done;
+  };
   const cronSweep = async (): Promise<{ ok: true; expired: number; refundRetried: number; recovered: number; opened: number }> => {
-    const expired = await deps.deals.expireDue();
-    let refundRetried = 0, recovered = 0, opened = 0;
-    for (const d of await deps.store.listDeals({ states: ['REFUNDING'] })) {
-      if (!d.refunds.some(r => r.status === 'PENDING')) continue;
-      try { await deps.deals.retryRefunds(d.id); refundRetried++; } catch { /* próxima rodada */ }
-    }
-    for (const d of await deps.store.listDeals({ states: ['EXPIRED'] })) {
-      if (d.refunds.length || !d.participants.some(p => p.fundingRequired)) continue;
-      try { await deps.deals.recoverExpiredFunding(d.id); recovered++; } catch { /* próxima rodada */ }
-    }
-    for (const d of await deps.store.listDeals({ states: ['LIQUIDITY_VERIFIED'] })) {
-      if (!d.terms?.legs.some(l => l.mode === 'HTLC')) continue;
-      try { await deps.deals.open(d.id, d.createdBy); opened++; } catch { /* lock ainda não confirmou */ }
-    }
+    const expired = await sweepTimeout(deps.deals.expireDue(), 60_000).catch(() => [] as string[]);
+    const [refunding, expiredDeals, liqVerified] = await Promise.all([
+      deps.store.listDeals({ states: ['REFUNDING'] }),
+      deps.store.listDeals({ states: ['EXPIRED'] }),
+      deps.store.listDeals({ states: ['LIQUIDITY_VERIFIED'] }),
+    ]);
+    const refundRetried = await sweepPool(refunding.filter(d => d.refunds.some(r => r.status === 'PENDING')), d => deps.deals.retryRefunds(d.id).then(() => {}));
+    const recovered = await sweepPool(expiredDeals.filter(d => !d.refunds.length && d.participants.some(p => p.fundingRequired)), d => deps.deals.recoverExpiredFunding(d.id).then(() => {}));
+    const opened = await sweepPool(liqVerified.filter(d => !!d.terms?.legs.some(l => l.mode === 'HTLC')), d => deps.deals.open(d.id, d.createdBy).then(() => {}));
     return { ok: true, expired: expired.length, refundRetried, recovered, opened };
   };
   app.get('/ops/cron/sweep', async req => {
