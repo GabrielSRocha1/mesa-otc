@@ -6,7 +6,10 @@ import type { CanonicalAsset, ChainRef, KeyScheme, Leg, NetEnv, Network, Partici
 export interface AdapterCapabilities { escrowNN: boolean; htlc: boolean; verifiableSigSchemes: KeyScheme[]; finalityConfirmations: number; nativeCode: string }
 export interface AssetVerification { ok: boolean; reasons: string[]; observed: { exists: boolean; decimals?: number; symbol?: string; codeHash?: string; mintAuthority?: string | null; standard?: string }; checkedAt: number }
 export type OnChainDealStatus = 'NONE' | 'REGISTERED' | 'FUNDED' | 'SETTLED' | 'REFUNDED' | 'SUPERSEDED';
-export interface OnChainDealState { status: OnChainDealStatus; revision: number; deposits: Record<number, string>; settledLegs: Record<number, string>; settledTx?: string; refundedTx?: string; dealHash?: string; expiresAt?: number; tradeId?: string }
+export interface OnChainDealState { status: OnChainDealStatus; revision: number; deposits: Record<number, string>; settledLegs: Record<number, string>; settledTx?: string; refundedTx?: string; dealHash?: string; expiresAt?: number; tradeId?: string;
+  /** Saldo confirmado VISTO on-chain para a perna externa (BTC HTLC) MESMO abaixo do exigido — sinal de
+   *  depósito PARCIAL/subfinanciado (cofre com saldo > 0 que não virou FINAL), para a recuperação varrê-lo. */
+  seenBase?: string }
 export interface TxRef { chain: Network; ref: string; submittedAt: number }
 /** Resultado de registerDeal: adapters reais devolvem meta (tradeId, termsHash, janela on-chain) persistida em deal.onChain[chain]. */
 export interface RegisterResult extends TxRef { meta?: Record<string, string | number> }

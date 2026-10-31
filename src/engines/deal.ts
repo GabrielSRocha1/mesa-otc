@@ -499,33 +499,44 @@ export class DealEngine {
    * Aqui lemos `getDealState` de cada leg e marcamos `FINAL` o que já está depositado on-chain.
    * Devolve se TODAS as legs que exigem funding estão depositadas (→ pode completar) e se ALGUMA está.
    */
-  private async reconcileFundingFromChain(deal: Deal, actor: string): Promise<{ allFunded: boolean; anyFunded: boolean }> {
-    const t = deal.terms; if (!t) return { allFunded: false, anyFunded: false };
+  private async reconcileFundingFromChain(deal: Deal, actor: string): Promise<{ allFunded: boolean; anyFunded: boolean; partialBtc: number[] }> {
+    const t = deal.terms; if (!t) return { allFunded: false, anyFunded: false, partialBtc: [] };
     const stateByChain = new Map<Network, OnChainDealState | null>();
     const stateOf = async (chain: Network): Promise<OnChainDealState | null> => {
       if (!stateByChain.has(chain)) stateByChain.set(chain, await this.d.adapters.require(chain, this.envOf(deal)).getDealState(deal.id).catch(() => null));
       return stateByChain.get(chain) ?? null;
     };
-    let allFunded = true, anyFunded = false;
+    let allFunded = true, anyFunded = false; const partialBtc: number[] = [];
     for (const leg of t.legs) {
       const p = deal.participants.find(x => x.role === leg.from); if (!p?.fundingRequired) continue;
       const st = await stateOf(leg.escrowChain);
       if (st?.deposits[leg.index]) { anyFunded = true; if (p.funding !== 'FINAL') { p.funding = 'FINAL'; await this.persist(deal, 'funding.reconciled', actor, { role: leg.from, legIndex: leg.index, chain: leg.escrowChain }); } }
-      else allFunded = false;
+      else { allFunded = false;
+        // Cofre BTC com saldo PARCIAL (seenBase > 0 mas abaixo do exigido → não virou FINAL): candidato
+        // a varredura de recuperação. Vazio (seenBase ausente/0) NÃO entra — preserva o "no-op se nunca financiada".
+        if (leg.mode === 'HTLC' && leg.escrowChain === 'bitcoin' && st?.seenBase && BigInt(st.seenBase) > 0n) partialBtc.push(leg.index);
+      }
     }
-    return { allFunded, anyFunded };
+    return { allFunded, anyFunded, partialBtc };
   }
 
   /** Reembolso permissionless: o keeper relaya; o depositante pode chamar o contrato diretamente (RL-021). */
   private async refundAll(deal: Deal, actor: string, cancelled: boolean): Promise<void> {
     const t = deal.terms; if (!t) return; let allDone = true;
-    for (const leg of t.legs) { const p = deal.participants.find(x => x.role === leg.from) as Deal['participants'][number]; if (p.funding !== 'FINAL') continue;
+    for (const leg of t.legs) { const p = deal.participants.find(x => x.role === leg.from) as Deal['participants'][number];
+      // Varre pernas FINAL (reconciliadas) E pernas BTC HTLC SUBFINANCIADAS (saldo parcial que nunca
+      // virou FINAL) — senão um depósito abaixo do exigido ficava preso. Demais não-FINAL seguem puladas.
+      const isPartialBtc = p.funding !== 'FINAL' && leg.mode === 'HTLC' && leg.escrowChain === 'bitcoin';
+      if (p.funding !== 'FINAL' && !isPartialBtc) continue;
       // GUARD de reexecução (auditoria 2026-10-19): leg já reembolsada nesta vida da deal nunca
       // re-executa o adapter — mesmo que uma detecção tardia de depósito re-marque FINAL. A defesa
       // final continua on-chain (EVM máquina de estados; BTC UTXO de gasto único), isto é o cinto.
       if (deal.refunds.some(r => r.legIndex === leg.index && r.status === 'REFUNDED')) { p.funding = 'PENDING'; continue; }
       try { const a = this.d.adapters.require(leg.escrowChain, this.envOf(deal)); const tx = await a.refund(deal.id, leg.index); p.funding = 'PENDING'; deal.refunds.push({ role: leg.from, legIndex: leg.index, status: 'REFUNDED', txRef: tx.ref }); await this.persist(deal, 'refunded', actor, { role: leg.from, legIndex: leg.index, tx: tx.ref }); }
-      catch (e) { allDone = false; metrics.adapterErrors.inc({ chain: leg.escrowChain, op: 'refund' }); deal.refunds.push({ role: leg.from, legIndex: leg.index, status: 'PENDING', txRef: null, error: String((e as Error).message ?? e).slice(0, 300) }); await this.persist(deal, 'refund.pending', actor, { role: leg.from, error: (e as Error).message }); }
+      catch (e) { const msg = String((e as Error).message ?? e);
+        // Cofre BTC parcial VAZIO (nada depositado): nada a devolver — não vira pendência (evita retry eterno).
+        if (isPartialBtc && /nada depositado|não financiado|sem fundos|sem UTXO/i.test(msg)) continue;
+        allDone = false; metrics.adapterErrors.inc({ chain: leg.escrowChain, op: 'refund' }); deal.refunds.push({ role: leg.from, legIndex: leg.index, status: 'PENDING', txRef: null, error: msg.slice(0, 300) }); await this.persist(deal, 'refund.pending', actor, { role: leg.from, error: msg }); }
     }
     if (allDone && deal.state === 'REFUNDING') await this.transition(deal, 'REFUNDED', 'system');
     if (allDone && cancelled) logger.info({ dealId: deal.id }, 'depósitos devolvidos após cancelamento');
@@ -546,8 +557,11 @@ export class DealEngine {
   async recoverExpiredFunding(dealId: string): Promise<Deal> {
     return this.withDeal(dealId, async deal => {
       if (deal.state !== 'EXPIRED') return deal;
-      const { anyFunded } = await this.reconcileFundingFromChain(deal, 'system');
-      if (!anyFunded) return deal;
+      const { anyFunded, partialBtc } = await this.reconcileFundingFromChain(deal, 'system');
+      // Recupera se há perna FINAL (reconciliada) OU cofre BTC PARCIAL (subfinanciado com saldo): sem
+      // o segundo, um depósito abaixo do exigido ficava preso pra sempre (refundAll só cobria FINAL).
+      const sweepable = partialBtc.filter(i => !deal.refunds.some(r => r.legIndex === i && r.status === 'REFUNDED'));
+      if (!anyFunded && !sweepable.length) return deal;
       await this.transition(deal, 'REFUNDING', 'system');
       await this.refundAll(deal, 'keeper', false);
       return deal;

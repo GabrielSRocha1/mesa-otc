@@ -460,8 +460,9 @@ export class BitcoinChainAdapter implements SettlementAdapter {
     if (spend?.preimage) return { status: 'SETTLED', revision: e.revision, deposits: { [e.leg.index]: e.leg.amountBase }, settledLegs: { [e.leg.index]: spend.txid }, settledTx: spend.txid, dealHash: e.dealHash, expiresAt: e.expiresAt };
     if (spend) return { status: 'REFUNDED', revision: e.revision, deposits: {}, settledLegs: {}, refundedTx: spend.txid, dealHash: e.dealHash, expiresAt: e.expiresAt };
     const utxos = await this.htlcUtxos(e);
-    const funded = utxos.filter(u => u.confirmations >= this.cfg.confirmations).reduce((s, u) => s + u.valueSat, 0n) >= BigInt(e.leg.amountBase);
-    return { status: funded ? 'FUNDED' : 'REGISTERED', revision: e.revision, deposits: funded ? { [e.leg.index]: e.leg.amountBase } : {}, settledLegs: {}, dealHash: e.dealHash, expiresAt: e.expiresAt };
+    const seen = utxos.filter(u => u.confirmations >= this.cfg.confirmations).reduce((s, u) => s + u.valueSat, 0n);
+    const funded = seen >= BigInt(e.leg.amountBase);
+    return { status: funded ? 'FUNDED' : 'REGISTERED', revision: e.revision, deposits: funded ? { [e.leg.index]: e.leg.amountBase } : {}, settledLegs: {}, dealHash: e.dealHash, expiresAt: e.expiresAt, ...(seen > 0n ? { seenBase: seen.toString() } : {}) };
   }
 
   async waitFinal(ref: string): Promise<TxStatus> {
