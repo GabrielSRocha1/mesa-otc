@@ -20,14 +20,13 @@ export const htlcHashOf = (preimageHex: string): string => sha256Hex(hexToBytes(
 export const splitEqual = (commissionBps: number, n: number): number[] => { if (n <= 0) return []; const base = Math.floor(commissionBps / n); const arr = Array<number>(n).fill(base); arr[0] = (arr[0] ?? 0) + commissionBps - base * n; return arr; };
 import type { Store } from '../db/repository.js';
 import type { AdapterRegistry, ApprovalSignature, DealCommitment, OnChainDealState, SettlementAdapter } from '../adapters/types.js';
-import { evmGasPayer, estimateGasPrepayWei, lifecycleGasUnits } from './gasPrepay.js';
+import { evmGasPayer, estimateGasPrepayWei } from './gasPrepay.js';
 /** Capacidades de pré-pagamento de gás que o adaptador EVM V2 expõe (duck-typed: sim/não-EVM não têm). */
 interface GasPrepayAdapter {
   gasPrepayEnforced(): boolean;
   keeperAddress(): string;
   currentGasPriceWei(): Promise<bigint>;
   verifyGasPrepay(txHash: string, from: string, minWei: bigint): Promise<{ valueWei: bigint }>;
-  returnGasLeftover(to: string, amountWei: bigint): Promise<string | null>;
 }
 import type { AssetRegistry } from './assetRegistry.js';
 import type { PriceEngine } from './price.js';
@@ -96,8 +95,6 @@ export class DealEngine {
     if (PRE_SETTLING_EXPIRABLE.has(deal.state) && this.now() >= deal.expiresAt && to !== 'EXPIRED' && to !== 'CANCELLED' && to !== 'BLOCKED') { await this.expireNow(deal, 'system'); throw new DomainError('DEAL_EXPIRED', 'Deal expirada'); }
     assertTransition(deal.state, to); const from = deal.state; deal.state = to; metrics.transitions.inc({ from, to });
     await this.persist(deal, 'state', actor, { from, to, ...payload }); logger.info({ dealId: deal.id, from, to }, 'transição');
-    // Ciclo EVM concluído → devolve a sobra do pré-pagamento de gás ao pagador (best-effort, assíncrono).
-    if ((to === 'SETTLED' || to === 'REFUNDED' || to === 'CANCELLED') && deal.gasPrepay?.status === 'FUNDED') void this.returnGasLeftoverBestEffort(deal.id);
   }
 
   /* ---------- ordem sequencial de assinatura + janela rolante por assinante ---------- */
@@ -257,7 +254,7 @@ export class DealEngine {
   /* ---------- pré-pagamento de gás do keeper (lado-EVM banca registro + settle/refund) ---------- */
   private isGasPrepayAdapter(a: unknown): a is GasPrepayAdapter {
     const o = a as Partial<GasPrepayAdapter> | null;
-    return !!o && typeof o.gasPrepayEnforced === 'function' && typeof o.keeperAddress === 'function' && typeof o.currentGasPriceWei === 'function' && typeof o.verifyGasPrepay === 'function' && typeof o.returnGasLeftover === 'function';
+    return !!o && typeof o.gasPrepayEnforced === 'function' && typeof o.keeperAddress === 'function' && typeof o.currentGasPriceWei === 'function' && typeof o.verifyGasPrepay === 'function';
   }
   /**
    * Bloqueia o registro da perna EVM enquanto o lado-EVM não pré-pagar o gás do keeper. Em deals
@@ -298,27 +295,6 @@ export class DealEngine {
     // registro ocorre quando o lock confirmar (auto-open). Não falhar o POST por isso.
     try { return await this.open(dealId, deal.createdBy); }
     catch (e) { logger.warn({ dealId, err: (e as Error).message }, 'open pós-gas-prepay adiado (lock/registro pendente)'); return this.get(dealId); }
-  }
-  /**
-   * Devolve a sobra de gás não usada ao pagador quando a mesa termina (SETTLED/REFUNDED/CANCELLED).
-   * Best-effort: nunca quebra a transição. Sobra = recebido − (ciclo × gasPrice atual).
-   */
-  private async returnGasLeftoverBestEffort(dealId: string): Promise<void> {
-    try {
-      await this.withDeal(dealId, async deal => {
-        const gp = deal.gasPrepay;
-        if (!gp || gp.status !== 'FUNDED') return;
-        const adapter = this.d.adapters.get('ethereum', this.envOf(deal));
-        if (!this.isGasPrepayAdapter(adapter)) return;
-        const received = BigInt(gp.receivedWei ?? '0');
-        const spent = lifecycleGasUnits() * await adapter.currentGasPriceWei(); // custo estimado SEM margem
-        const leftover = received > spent ? received - spent : 0n;
-        const next = { ...gp, status: 'RETURNED' as const, spentWei: spent.toString() };
-        if (leftover > 0n) { const tx = await adapter.returnGasLeftover(gp.payerAddress, leftover); if (tx) next.returnTxRef = tx; }
-        deal.gasPrepay = next;
-        await this.persist(deal, 'gasPrepay.returned', 'system', { leftoverWei: leftover.toString(), returnTx: next.returnTxRef ?? null });
-      });
-    } catch (e) { logger.warn({ dealId, err: (e as Error).message }, 'devolução de sobra de gás falhou (best-effort)'); }
   }
 
   /* ---------- 7. abertura para assinaturas ---------- */

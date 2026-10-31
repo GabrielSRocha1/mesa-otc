@@ -179,11 +179,9 @@ export interface GasPrepay {
   payerAddress: string;     // carteira EVM do pagador (destino da devolução da sobra)
   keeperAddress: string;    // destino do depósito
   requiredWei: string;      // depósito exigido (dinâmico: ciclo × gasPrice × margem)
-  status: 'PENDING' | 'FUNDED' | 'RETURNED';
+  status: 'PENDING' | 'FUNDED';
   txRef?: string;           // tx do depósito do pagador → keeper
-  receivedWei?: string;     // valor efetivamente recebido
-  spentWei?: string;        // custo estimado das ops (para devolver a sobra)
-  returnTxRef?: string;     // tx de devolução da sobra (keeper → pagador)
+  receivedWei?: string;     // valor efetivamente recebido (o keeper retém; não há devolução de sobra)
 }
 
 export interface DealDraft {

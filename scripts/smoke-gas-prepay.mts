@@ -112,20 +112,11 @@ await wait(await keeperW.writeContract({ address: ESCROW, abi: ABI, functionName
 const sellerEth1 = await pub.getBalance({ address: seller.address });
 const buyerUsdt = await pub.readContract({ address: evm.tusdt, abi: ERC20, functionName: 'balanceOf', args: [buyer.address] }) as bigint;
 
-// ───────────────────────────── 5) keeper devolve a sobra ao comprador
-const spent = lifecycleGasUnits() * gasPrice;              // custo estimado do ciclo (sem margem)
-const leftover = deposit > spent ? deposit - spent : 0n;
-const buyerEthBeforeReturn = await pub.getBalance({ address: buyer.address });
-console.log(`[5] keeper devolve a sobra ao comprador: ${formatEther(leftover)} ETH (depósito ${formatEther(deposit)} − ciclo ${formatEther(spent)})…`);
-if (leftover > 0n) await wait(await keeperW.sendTransaction({ to: buyer.address, value: leftover, account: keeper, chain: sepolia }));
-const buyerEthAfterReturn = await pub.getBalance({ address: buyer.address });
-
+// ───────────────────────────── 5) resultado (o keeper RETÉM o depósito — sem devolução de sobra)
 console.log('\n===== resultado =====');
 const settledOk = sellerEth1 - sellerEth0 === BUY && buyerUsdt === SELL;
-const returnedOk = buyerEthAfterReturn - buyerEthBeforeReturn === leftover;
 console.log(`Liquidação: Vendedor +${formatEther(sellerEth1 - sellerEth0)} ETH (esp ${formatEther(BUY)}) · Comprador +${buyerUsdt} tUSDT (esp ${SELL}) → ${settledOk ? 'OK' : 'DIVERGE'}`);
 console.log(`Registro: feito pelo ATTESTOR (não PM1) ✓`);
-console.log(`Gás: comprador pré-pagou ${formatEther(deposit)} ETH, sobra devolvida ${formatEther(leftover)} ETH → custo líquido do ciclo p/ o comprador ${formatEther(deposit - leftover)} ETH`);
-console.log(`Devolução da sobra creditada ao comprador: ${returnedOk ? 'OK' : 'DIVERGE'}`);
-if (settledOk && returnedOk) console.log('\n✓ E2E PRÉ-PAGAMENTO DE GÁS CONFIRMADO (pagou → attestor registrou → liquidou → sobra devolvida)');
+console.log(`Gás: comprador pré-pagou ${formatEther(deposit)} ETH ao keeper (RETIDO; sem devolução de sobra)`);
+if (settledOk) console.log('\n✓ E2E PRÉ-PAGAMENTO DE GÁS CONFIRMADO (pagou → attestor registrou → liquidou)');
 else { console.error('\n✗ divergência no fluxo'); process.exit(1); }

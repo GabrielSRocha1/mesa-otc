@@ -462,16 +462,6 @@ export class VerumEvmV2Adapter implements SettlementAdapter, ParticipantStepProv
       return { valueWei: tx.value };
     } catch (e) { if (e instanceof DomainError) throw e; this.fail('verifyGasPrepay', e); }
   }
-  /** Devolve a sobra de gás não usada ao pagador (keeper → pagador). No-op se amountWei ≤ 0. */
-  async returnGasLeftover(to: string, amountWei: bigint): Promise<string | null> {
-    if (amountWei <= 0n) return null;
-    try {
-      const hash = await this.keeperWallet.sendTransaction({ to: to as Hex, value: amountWei, account: this.keeper, chain: this.viemChain });
-      await this.pub.waitForTransactionReceipt({ hash, confirmations: this.cfg.confirmations });
-      return hash;
-    } catch (e) { this.fail('returnGasLeftover', e); }
-  }
-
   async getDealState(dealId: string): Promise<OnChainDealState> {
     const bound = await bindingOf(this.deps, dealId, 'ethereum');
     if (!bound) return { status: 'NONE', revision: 0, deposits: {}, settledLegs: {} };
