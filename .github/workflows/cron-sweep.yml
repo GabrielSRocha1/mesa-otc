@@ -1,0 +1,34 @@
+name: cron-sweep
+
+# Reembolso/expiração AUTOMÁTICOS sem o usuário abrir a mesa: bate no
+# /ops/cron/sweep (expira operações vencidas → reembolsa → recupera fundos
+# presos → reabre HTLC confirmado). No plano Hobby o cron nativo da Vercel só
+# roda 1x/dia, então este workflow é o acionador frequente.
+#
+# Pré-requisitos (uma vez):
+#  - Vercel: env CRON_SECRET (production + preview) com o MESMO valor do secret abaixo.
+#  - GitHub: repo secret CRON_SECRET (Settings → Secrets → Actions) com esse valor.
+#  - Opcional: repo variable SWEEP_URL (default = produção).
+on:
+  schedule:
+    - cron: '*/5 * * * *'   # a cada ~5 min (mínimo do GitHub; pode atrasar sob carga)
+  workflow_dispatch: {}       # permite rodar manualmente pela aba Actions
+
+jobs:
+  sweep:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Chamar /ops/cron/sweep
+        env:
+          CRON_SECRET: ${{ secrets.CRON_SECRET }}
+          SWEEP_URL: ${{ vars.SWEEP_URL || 'https://otcdesk.verumcrypto.com/ops/cron/sweep' }}
+        run: |
+          if [ -z "$CRON_SECRET" ]; then echo "CRON_SECRET ausente (configure o secret do repo)"; exit 1; fi
+          # O sweep varre TODAS as operações (esplora/RPCs) e pode levar >60s a responder — mas o
+          # trabalho roda no servidor mesmo que o cliente desista. Timeout generoso; um estouro de
+          # resposta (curl 28) NÃO falha o job (a varredura executou). Só 401/403 (secret errado) falha.
+          code=$(curl -s -o /tmp/out.json -w '%{http_code}' --max-time 240 \
+            -H "Authorization: Bearer $CRON_SECRET" "$SWEEP_URL") || curlrc=$?
+          echo "HTTP ${code:-000} (curl rc ${curlrc:-0})"; cat /tmp/out.json 2>/dev/null; echo
+          if [ "${code:-000}" = "401" ] || [ "${code:-000}" = "403" ]; then echo "AUTH falhou — confira CRON_SECRET (Vercel == GitHub)"; exit 1; fi
+          exit 0
