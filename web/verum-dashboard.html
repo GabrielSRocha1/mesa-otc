@@ -3837,6 +3837,54 @@ window.addEventListener('unhandledrejection',function(e){try{console.warn('[veru
     if(d&&d.state==='AWAITING_SIGNATURES'&&d.turnRole===c.role) return '<span class="badge wait">→ '+(c.isMe?'Sua vez':'Vez de assinar')+'</span>';
     return '<span class="badge ok">✓ Conectado</span>';
   }
+  let pDepositModalKey=null; // pop-up de depósito: 1 disparo por operação (o participante pode reabrir pelo card)
+  /** Pop-up que aparece ao participante quando ele precisa DEPOSITAR: BTC no cofre (lado Vendedor da
+   *  rota HTLC) com o aviso das ~8h, ou gás (ETH) ao keeper (lado-EVM). Reaproveita o fluxo existente
+   *  "Revisar e assinar" (#pSignBtn) p/ o BTC e o opGasPrepay p/ o gás. Nunca cobre outro modal aberto. */
+  function pDepositModal(d, me, env){
+    if(!d) return;
+    if(($('#modalRoot').innerHTML||'').trim()) return; // não cobrir o modal de assinatura/2FA
+    const isMain=(env==='mainnet');
+    // ── CASO 1: depósito de BTC no cofre (P2WSH) ──
+    if(d.htlcVault && d.htlcVault.from===me.role){
+      const satsToBtc=function(s){ try{ const v=String(BigInt(s)).padStart(9,'0'); const i=v.slice(0,-8)||'0'; const f=v.slice(-8).replace(/0+$/,''); return f?i+'.'+f:i; }catch(e){ return String(s); } };
+      const btcHuman=satsToBtc(d.htlcVault.requiredSat);
+      const warn=isMain
+        ? 'Se a operação <b>não se completar</b> (falhar ou expirar), o seu BTC <b>volta para a sua carteira com segurança</b> — mas só <b>após ~8 horas</b> (trava de tempo do cofre). Nesse período o BTC fica <b>bloqueado, nunca perdido</b>.'
+        : 'Se a operação não se completar, o seu BTC volta para a sua carteira com segurança após o prazo de segurança do cofre (trava de tempo). Nesse período ele fica bloqueado, nunca perdido.';
+      $('#modalRoot').innerHTML='<div class="modal-back" id="pdmBack"><div class="modal">'
+        +'<h3>Depósito de BTC necessário</h3>'
+        +(d.htlcVault.simulated?'<div style="margin:4px 0 10px;padding:6px 10px;border-radius:8px;background:rgba(245,158,11,.14);border:1px solid var(--amber);color:var(--amber);font-size:12px;font-weight:700">⚠ AMBIENTE DE TESTE — BTC SIMULADO</div>':'')
+        +'<p style="color:var(--ink-2);font-size:13px;margin:4px 0 10px">A operação foi aprovada. Para seguir, envie <b class="mono">'+esc(btcHuman)+' BTC</b> ('+esc(String(d.htlcVault.requiredSat))+' sats) ao <b>cofre</b> desta operação:</p>'
+        +'<div class="mono" style="word-break:break-all;font-size:12px;background:var(--bg-2);border:1px solid var(--line);border-radius:8px;padding:8px;margin:6px 0">'+esc(d.htlcVault.address)+'</div>'
+        +'<button class="btn btn-block" id="pdmCopy" style="height:40px">Copiar endereço do cofre</button>'
+        +'<div style="margin:12px 0;padding:10px 12px;border:1px solid var(--amber);border-radius:10px;background:rgba(245,158,11,.08);color:var(--ink-2);font-size:12.5px">⏳ <b>Importante:</b> '+warn+'</div>'
+        +'<button class="btn btn-primary btn-block" id="pdmSign" style="height:48px">Enviar BTC e assinar pela carteira</button>'
+        +'<button class="btn btn-block" id="pdmClose" style="height:40px;margin-top:8px">Fechar</button>'
+        +'</div></div>';
+      $('#pdmBack').addEventListener('click',e=>{ if(e.target.id==='pdmBack') closeModal(); });
+      $('#pdmClose').addEventListener('click',closeModal);
+      const cp=$('#pdmCopy'); if(cp) cp.addEventListener('click',()=>{ clip(d.htlcVault.address); toast('Endereço do cofre copiado','ok'); });
+      const sg=$('#pdmSign'); if(sg) sg.addEventListener('click',()=>{ closeModal(); const b=$('#pSignBtn'); if(b) b.click(); });
+      return;
+    }
+    // ── CASO 2: pré-pagamento de gás (ETH) ao keeper (pagador lado-EVM) ──
+    if(d.gasPrepay && d.gasPrepay.status==='PENDING' && me.role===d.gasPrepay.payerRole && d.gasPrepay.keeperAddress){
+      const weiToEth=function(w){ try{ const v=String(BigInt(w)).padStart(19,'0'); const i=v.slice(0,-18)||'0'; const f=v.slice(-18).replace(/0+$/,'').slice(0,8); return f?i+'.'+f:i; }catch(e){ return String(w); } };
+      const ethHuman=weiToEth(d.gasPrepay.requiredWei||'0');
+      $('#modalRoot').innerHTML='<div class="modal-back" id="pdmBack"><div class="modal">'
+        +'<h3>Pré-pagamento de gás necessário</h3>'
+        +'<p style="color:var(--ink-2);font-size:13px;margin:4px 0 10px">Para o keeper <b>registrar e liquidar</b> esta operação na blockchain, envie um depósito de gás ao keeper: <b class="mono">'+esc(ethHuman)+' ETH</b>.</p>'
+        +'<div style="margin:10px 0;padding:10px 12px;border:1px solid var(--line);border-radius:10px;color:var(--ink-2);font-size:12.5px">Esse valor cobre o gás das transações on-chain da operação (registro + liquidação). Ele fica com o keeper.</div>'
+        +'<button class="btn btn-primary btn-block" id="pdmGas" style="height:48px">Pré-pagar gás pela carteira</button>'
+        +'<button class="btn btn-block" id="pdmClose" style="height:40px;margin-top:8px">Fechar</button>'
+        +'</div></div>';
+      $('#pdmBack').addEventListener('click',e=>{ if(e.target.id==='pdmBack') closeModal(); });
+      $('#pdmClose').addEventListener('click',closeModal);
+      const g=$('#pdmGas'); if(g) g.addEventListener('click',async()=>{ g.disabled=true; g.textContent='Confirme na carteira…'; try{ await opGasPrepay(d); closeModal(); toast('Gás pré-pago ✓','ok'); }catch(e){ g.disabled=false; g.textContent='Pré-pagar gás pela carteira'; toast((e&&e.message)||'Falha no pré-pagamento','err'); } });
+      return;
+    }
+  }
   function pRender(){
     const m=pDto; if(!m) return;
     // AUTO-CURA de layout: a reentrada esconde as seções e, se ela disparar no meio do fluxo
@@ -3893,6 +3941,9 @@ window.addEventListener('unhandledrejection',function(e){try{console.warn('[veru
     // card de depósito aparece JÁ nessa fase (a janela de 40 min só nasce quando o lock confirma
     // e a operação abre sozinha). Em AWAITING_SIGNATURES segue valendo para as demais pernas.
     const myFund=d&&(d.state==='AWAITING_SIGNATURES'||d.state==='LIQUIDITY_VERIFIED')?((d.funding||[]).find(f=>f.role===me.role&&f.status!=='FINAL')):null;
+    // POP-UP de depósito: abre sozinho 1x por operação quando o participante precisa depositar
+    // (BTC no cofre com aviso das 8h, ou gás ETH ao keeper). O card inline abaixo continua como reforço.
+    try { if(d){ const needsBtc=!!(myFund&&d.htlcVault&&d.htlcVault.from===me.role); const needsGas=!!(d.gasPrepay&&d.gasPrepay.status==='PENDING'&&me.role===d.gasPrepay.payerRole); if((needsBtc||needsGas)&&pDepositModalKey!==d.id){ pDepositModalKey=d.id; pDepositModal(d,me,m.environment); } } } catch(e){}
     if(myFund&&d.htlcVault&&d.htlcVault.from===me.role){
       // Sats → BTC decimal com PONTO (formato que a carteira espera no signAndSendPayment).
       const satsToBtc=function(s){ try{ const v=String(BigInt(s)).padStart(9,'0'); const i=v.slice(0,-8)||'0'; const f=v.slice(-8).replace(/0+$/,''); return f?i+'.'+f:i; }catch(e){ return String(s); } };
@@ -3923,7 +3974,7 @@ window.addEventListener('unhandledrejection',function(e){try{console.warn('[veru
         +sentHtml
         +'' /* botão "Pagar com a carteira" REMOVIDO: "Revisar e assinar" já paga pela carteira (pFundBtcVault) e assina no mesmo ato — um CTA só, sem duplicar */
         +(sentAt?'':'<details'+(canPay?'':' open')+' style="margin-top:4px"><summary style="cursor:pointer;font-size:12px;color:var(--ink-3)">'+(canPay?'Prefere enviar manualmente?':'Enviar manualmente')+'</summary>'+manualBody+'</details>')
-        +'<div style="font-size:11.5px;color:var(--ink-3);margin-top:6px">Você pode enviar a qualquer momento (independe da contraparte). Se a operação não se completar, o valor volta para você após o prazo de segurança.</div>'
+        +'<div style="font-size:11.5px;color:var(--ink-3);margin-top:6px">Você pode enviar a qualquer momento (independe da contraparte). Se a operação não se completar, o BTC volta para você com segurança após o prazo do cofre'+(m.environment==='mainnet'?' (~8 horas na rede principal)':'')+'.</div>'
         +'</div>';
     } else if(myFund){
       // Perna de TOKEN (escrow EVM/Solana/Tron ou lock HTLC Solana): a carteira consegue depositar
