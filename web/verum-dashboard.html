@@ -2429,6 +2429,7 @@ window.addEventListener('unhandledrejection',function(e){try{console.warn('[veru
    *  on-chain e, confirmado, registra a mesa e inicia os turnos. Usa a wallet session do participante. */
   async function opGasPrepay(d){
     const gp=d.gasPrepay; if(!gp) throw new Error('mesa não requer pré-pagamento de gás');
+    if(!gp.payerAddress||!gp.keeperAddress) throw new Error('Dados do pré-pagamento incompletos — atualize a página e tente de novo.');
     const p=await findVerumEthProvider(); if(!p) throw new Error('Provider EVM da Verum Wallet não injetado nesta aba.');
     const accs=await p.request({method:'eth_requestAccounts'}); const from=accs&&accs[0];
     if(!from||from.toLowerCase()!==String(gp.payerAddress).toLowerCase()) throw new Error('Conecte a carteira do pagador do gás ('+shortAddr(gp.payerAddress)+').');

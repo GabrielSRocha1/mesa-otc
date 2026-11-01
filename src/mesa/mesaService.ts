@@ -762,7 +762,9 @@ export class MesaService {
       gasPrepay: (() => {
         const gp = deal.gasPrepay;
         if (!gp) return null;
-        if (viewerRole && viewerRole === gp.payerRole) return { payerRole: gp.payerRole, status: gp.status, requiredWei: gp.requiredWei, keeperAddress: gp.keeperAddress, txRef: gp.txRef ?? null, receivedWei: gp.receivedWei ?? null };
+        // payerAddress é o endereço DO PRÓPRIO pagador (a UI valida que a carteira conectada é a dele
+        // antes de enviar) — sem esse campo o opGasPrepay comparava com undefined e falhava sempre.
+        if (viewerRole && viewerRole === gp.payerRole) return { payerRole: gp.payerRole, payerAddress: gp.payerAddress, status: gp.status, requiredWei: gp.requiredWei, keeperAddress: gp.keeperAddress, txRef: gp.txRef ?? null, receivedWei: gp.receivedWei ?? null };
         return { payerRole: gp.payerRole, status: gp.status };
       })(),
       // REEMBOLSOS por perna (REFUNDED/PENDING): a UI mostra "aguardando timelock" em vez de
