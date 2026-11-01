@@ -236,7 +236,8 @@ export class DealEngine {
     if (deal.onChain[chain]?.registered && deal.onChain[chain]?.revision === deal.revision) return; // retry idempotente
     const c = this.commitment(deal);
     const adapter = this.d.adapters.require(chain, this.envOf(deal));
-    if (chain === 'ethereum') await this.assertGasPrepaid(deal, adapter, c); // bloqueia o registro EVM até o lado-EVM pré-pagar o gás do keeper
+    // (O pré-pagamento de gás NÃO bloqueia mais o registro: o keeper adianta o gás do registro e o
+    //  lado-EVM pré-paga NO TURNO DELE, depois de Vendedor+PM assinarem — ver assertGasPrepaidForSigner.)
     try {
       const tx = await adapter.registerDeal(c);
       deal.onChain[chain] = { registered: true, revision: deal.revision, ...(tx.meta ? { meta: tx.meta } : {}) };
@@ -261,17 +262,22 @@ export class DealEngine {
    * não-EVM (ou adaptador simulado, sem as capacidades) é no-op — preserva todos os fluxos atuais.
    * Calcula o depósito DINÂMICO (gasPrice atual × ciclo × margem), grava PENDENTE e lança 402.
    */
-  private async assertGasPrepaid(deal: Deal, adapter: SettlementAdapter, c: DealCommitment): Promise<void> {
-    if (!this.isGasPrepayAdapter(adapter) || !adapter.gasPrepayEnforced()) return; // dev/demo (keyring) auto-paga
+  /**
+   * Gate do pré-pagamento de gás NO TURNO do assinante: só dispara quando é a vez do PAGADOR lado-EVM
+   * (comprador em BTC↔ETH / mesma-rede) assinar — ou seja, depois de Vendedor+PM. Antes disso é no-op.
+   * Em dev/demo (keyring) ou deals não-EVM também é no-op. Lança GAS_PREPAY_REQUIRED (e grava PENDENTE).
+   */
+  private async assertGasPrepaidForSigner(deal: Deal, role: Role): Promise<void> {
     if (deal.gasPrepay?.status === 'FUNDED') return;
-    const payer = evmGasPayer(c);
+    const t = deal.terms; if (!t || !t.legs.some(l => l.escrowChain === 'ethereum')) return; // sem perna EVM
+    const adapter = this.d.adapters.get('ethereum', this.envOf(deal));
+    if (!this.isGasPrepayAdapter(adapter) || !adapter.gasPrepayEnforced()) return; // dev/demo auto-paga
+    const payer = evmGasPayer(this.commitment(deal));
+    if (payer.role !== role) return; // só no turno do PAGADOR (depois de Vendedor+PM)
     const requiredWei = estimateGasPrepayWei(await adapter.currentGasPriceWei());
-    const keeperAddress = adapter.keeperAddress();
-    deal.gasPrepay = { payerRole: payer.role, payerAddress: payer.address, keeperAddress, requiredWei: requiredWei.toString(), status: 'PENDING' };
-    // NÃO registrar o keeperAddress no evento (a timeline é visível aos participantes) — só o papel e o valor.
+    deal.gasPrepay = { payerRole: payer.role, payerAddress: payer.address, keeperAddress: adapter.keeperAddress(), requiredWei: requiredWei.toString(), status: 'PENDING' };
     await this.persist(deal, 'gasPrepay.required', 'system', { payer: payer.role, requiredWei: requiredWei.toString() });
-    // Detalhes do erro SEM endereço do keeper/pagador (o pagador lê o keeperAddress do view gated, não do erro).
-    throw new DomainError('GAS_PREPAY_REQUIRED', `Pré-pagamento de gás pendente: o ${payer.role} deve pré-pagar o gás do keeper`, { requiredWei: requiredWei.toString(), payerRole: payer.role });
+    throw new DomainError('GAS_PREPAY_REQUIRED', `Pré-pagamento de gás pendente: o ${payer.role} deve pré-pagar o gás do keeper antes de assinar`, { requiredWei: requiredWei.toString(), payerRole: payer.role });
   }
   /**
    * Registra o depósito de gás: verifica a tx (do pagador → keeper, valor ≥ exigido) e, confirmado,
@@ -281,7 +287,7 @@ export class DealEngine {
     await this.withDeal(dealId, async deal => {
       const gp = deal.gasPrepay;
       if (!gp) throw new DomainError('INVALID_INPUT', 'esta mesa não requer pré-pagamento de gás');
-      if (gp.status !== 'PENDING') return deal; // idempotente (já FUNDED/RETURNED)
+      if (gp.status !== 'PENDING') return deal; // idempotente (já FUNDED)
       const adapter = this.d.adapters.require('ethereum', this.envOf(deal));
       if (!this.isGasPrepayAdapter(adapter)) throw new DomainError('SETTLEMENT_NOT_ALLOWED', 'adaptador EVM sem suporte a pré-pagamento');
       const { valueWei } = await adapter.verifyGasPrepay(txHash, gp.payerAddress, BigInt(gp.requiredWei));
@@ -290,9 +296,11 @@ export class DealEngine {
       return deal;
     });
     const deal = await this.get(dealId);
-    // Agora FUNDED → registerChain passa pelo gate. Best-effort: numa mesa cross-chain o lock BTC
-    // pode ainda não ter confirmado (open lança FUNDING_REQUIRED) — o gás já está pré-pago e o
-    // registro ocorre quando o lock confirmar (auto-open). Não falhar o POST por isso.
+    // Gás FUNDED. O pré-pagamento agora ocorre NO TURNO do pagador (depois de Vendedor+PM assinarem),
+    // então a mesa já está AWAITING_SIGNATURES — NÃO reabrir (open() é transição ilegal daqui). O
+    // pagador apenas reenvia a assinatura dele, que passa pelo gate assertGasPrepaidForSigner.
+    // Só reabrimos no fluxo legado (mesa ainda LIQUIDITY_VERIFIED).
+    if (deal.state !== 'LIQUIDITY_VERIFIED') return deal;
     try { return await this.open(dealId, deal.createdBy); }
     catch (e) { logger.warn({ dealId, err: (e as Error).message }, 'open pós-gas-prepay adiado (lock/registro pendente)'); return this.get(dealId); }
   }
@@ -413,6 +421,9 @@ export class DealEngine {
       const order = this.signingOrder(deal); const idx = order.indexOf(sig.role);
       const pending = order.slice(0, idx).filter(r => !this.hasSigned(deal, r));
       if (pending.length) { metrics.signaturesRejected.inc({ reason: 'out_of_order' }); throw new DomainError('SIGNATURE_OUT_OF_ORDER', `Aguardando assinatura de ${pending[0]} antes de ${sig.role}`); }
+      // GÁS: já é a vez deste papel (Vendedor+PM assinaram). Se ELE é o pagador lado-EVM e ainda não
+      // pré-pagou o gás do keeper, exige agora — antes de depositar/assinar. No-op p/ não-pagador.
+      await this.assertGasPrepaidForSigner(deal, sig.role);
       // JANELA POR ASSINANTE: se os 5 min da vez atual estouraram (antes do teto global), a Deal expira.
       // Quando o teto global já venceu, deixa a validação lançar DEAL_EXPIRED (semântica de deal expirada).
       if (this.now() < deal.expiresAt && this.turnExpired(deal)) { metrics.signaturesRejected.inc({ reason: 'turn_expired' }); await this.expireNow(deal, 'system'); throw new DomainError('SIGNATURE_EXPIRED', 'Prazo de 5 minutos desta assinatura expirou'); }
