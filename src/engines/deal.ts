@@ -269,15 +269,28 @@ export class DealEngine {
    */
   private async assertGasPrepaidForSigner(deal: Deal, role: Role): Promise<void> {
     if (deal.gasPrepay?.status === 'FUNDED') return;
-    const t = deal.terms; if (!t || !t.legs.some(l => l.escrowChain === 'ethereum')) return; // sem perna EVM
+    const due = await this.ensureGasPrepayFlag(deal, role);
+    if (!due) return;
+    await this.persist(deal, 'gasPrepay.required', 'system', { payer: deal.gasPrepay!.payerRole, requiredWei: deal.gasPrepay!.requiredWei });
+    throw new DomainError('GAS_PREPAY_REQUIRED', `Pré-pagamento de gás pendente: o ${deal.gasPrepay!.payerRole} deve pré-pagar o gás do keeper antes de assinar`, { requiredWei: deal.gasPrepay!.requiredWei, payerRole: deal.gasPrepay!.payerRole });
+  }
+  /**
+   * Popula deal.gasPrepay=PENDING quando `role` é o pagador lado-EVM e o gás ainda não foi pré-pago.
+   * NÃO persiste nem lança — usado tanto pela VIEW (pop-up proativo quando a vez chega ao pagador)
+   * quanto pelo gate assertGasPrepaidForSigner. Retorna true se há pré-pagamento pendente para `role`.
+   */
+  private async ensureGasPrepayFlag(deal: Deal, role: Role): Promise<boolean> {
+    if (deal.gasPrepay?.status === 'FUNDED') return false;
+    const t = deal.terms; if (!t || !t.legs.some(l => l.escrowChain === 'ethereum')) return false; // sem perna EVM
     const adapter = this.d.adapters.get('ethereum', this.envOf(deal));
-    if (!this.isGasPrepayAdapter(adapter) || !adapter.gasPrepayEnforced()) return; // dev/demo auto-paga
+    if (!this.isGasPrepayAdapter(adapter) || !adapter.gasPrepayEnforced()) return false; // dev/demo auto-paga
     const payer = evmGasPayer(this.commitment(deal));
-    if (payer.role !== role) return; // só no turno do PAGADOR (depois de Vendedor+PM)
-    const requiredWei = estimateGasPrepayWei(await adapter.currentGasPriceWei());
-    deal.gasPrepay = { payerRole: payer.role, payerAddress: payer.address, keeperAddress: adapter.keeperAddress(), requiredWei: requiredWei.toString(), status: 'PENDING' };
-    await this.persist(deal, 'gasPrepay.required', 'system', { payer: payer.role, requiredWei: requiredWei.toString() });
-    throw new DomainError('GAS_PREPAY_REQUIRED', `Pré-pagamento de gás pendente: o ${payer.role} deve pré-pagar o gás do keeper antes de assinar`, { requiredWei: requiredWei.toString(), payerRole: payer.role });
+    if (payer.role !== role) return false; // só o PAGADOR (comprador em BTC↔ETH) pré-paga
+    if (!deal.gasPrepay) {
+      const requiredWei = estimateGasPrepayWei(await adapter.currentGasPriceWei());
+      deal.gasPrepay = { payerRole: payer.role, payerAddress: payer.address, keeperAddress: adapter.keeperAddress(), requiredWei: requiredWei.toString(), status: 'PENDING' };
+    }
+    return true;
   }
   /**
    * Registra o depósito de gás: verifica a tx (do pagador → keeper, valor ≥ exigido) e, confirmado,
@@ -444,6 +457,10 @@ export class DealEngine {
       const rec = { id: newId('SG'), dealId: deal.id, revision: deal.revision, role: sig.role, signer: p.address, scheme: sig.scheme, envelopeHash: sha256Hex(envelope.message), signedHash: envelope.payload.dealHash, signature: sig.signature, nonce: sig.nonce, receivedAt: this.now(), status: 'valid' as const };
       await this.d.store.insertSignature(rec); deal.signatures.push(rec); deal.validSignatures = deal.signatures.filter(s => s.revision === deal.revision && s.status === 'valid').length; metrics.signaturesAccepted.inc();
       this.startTurn(deal); // avança a vez para o próximo papel e reinicia a janela de 5 min (null quando todos assinaram)
+      // PROATIVO: se a vez acabou de passar para o pagador lado-EVM, marca o gás como PENDENTE AGORA
+      // (sem lançar) — assim a view da mesa dele abre o pop-up de pré-pagamento ANTES de ele tentar
+      // assinar. O gate em assertGasPrepaidForSigner segue exigindo de fato quando ele assinar.
+      if (deal.turnRole) { try { await this.ensureGasPrepayFlag(deal, deal.turnRole); } catch (e) { logger.warn({ dealId: deal.id, err: (e as Error).message }, 'flag de gás proativa falhou (seguindo)'); } }
       await this.persist(deal, 'signature.accepted', actor, { role: sig.role, count: deal.validSignatures, required: deal.requiredSignatures, turnRole: deal.turnRole, turnExpiresAt: deal.turnExpiresAt });
       if (deal.validSignatures === deal.requiredSignatures && deal.participants.every(x => !x.fundingRequired || x.funding === 'FINAL')) { await this.transition(deal, 'FULLY_SIGNED', 'system'); await this.transition(deal, 'SETTLEMENT_VALIDATION', 'system'); this.events.emit('settle', deal.id); }
       return { deal, count: deal.validSignatures };

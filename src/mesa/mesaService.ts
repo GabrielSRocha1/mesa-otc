@@ -14,7 +14,7 @@ import type { MesaInviteRow, Store } from '../db/repository.js';
 import type { PortalService, WalletAddress, PayMaster } from '../portal/portal.js';
 import type { WalletAuth, Session } from '../wallet/auth.js';
 import type { AuditLog } from '../audit/audit.js';
-import type { Deal } from '../domain/types.js';
+import type { Deal, Role } from '../domain/types.js';
 import { verifySolana, verifyTron, verifyBitcoin } from '../engines/signature.js';
 import { getChain } from '../chains/registry.js';
 import { deriveMesaStatus } from './status.js';
@@ -710,7 +710,7 @@ export class MesaService {
   }
 
   /** Resumo canônico de uma operação (deal) para a UI — mesma forma na mesa, na lista e no deep link. */
-  private dealSummary(deal: Deal | null): Record<string, unknown> | null {
+  private dealSummary(deal: Deal | null, viewerRole?: Role): Record<string, unknown> | null {
     if (!deal) return null;
     return {
       id: deal.id, state: deal.state, createdAt: deal.createdAt,
@@ -752,6 +752,16 @@ export class MesaService {
         const meta = deal.onChain?.ethereum?.meta as Record<string, unknown> | undefined;
         return meta?.registerPending && typeof meta.registerTx === 'string' ? JSON.parse(meta.registerTx) as Record<string, unknown> : null;
       })(),
+      // PRÉ-PAGAMENTO DE GÁS pendente: aparece SÓ depois de Vendedor+PM assinarem (a vez chega ao
+      // pagador lado-EVM). A UI do pagador abre o pop-up e mostra quanto + para qual carteira (keeper)
+      // enviar. REDAÇÃO: keeperAddress/requiredWei só para o PRÓPRIO pagador — os demais (e o público)
+      // veem apenas papel+status, nunca o endereço do keeper (= carteira de fee).
+      gasPrepay: (() => {
+        const gp = deal.gasPrepay;
+        if (!gp) return null;
+        if (viewerRole && viewerRole === gp.payerRole) return { payerRole: gp.payerRole, status: gp.status, requiredWei: gp.requiredWei, keeperAddress: gp.keeperAddress, txRef: gp.txRef ?? null, receivedWei: gp.receivedWei ?? null };
+        return { payerRole: gp.payerRole, status: gp.status };
+      })(),
       // REEMBOLSOS por perna (REFUNDED/PENDING): a UI mostra "aguardando timelock" em vez de
       // sumir com o estado — exigência da auditoria (recuperação explicável por operação).
       // (?? []: dado antigo/fake persistido pode não ter o campo — a view nunca pode quebrar)
@@ -761,14 +771,16 @@ export class MesaService {
 
   /** Resumo de UMA operação específica da mesa (deep link /mesa?mesa=&op=). Verifica que a operação
    *  pertence à mesa; autoriza participante (sessão da própria mesa) ou admin (dono). Só dados públicos. */
-  async mesaDealSummary(mesaId: string, dealId: string, _viewer: { kind: 'admin' } | { kind: 'participant'; chairId: string }): Promise<{ deal: Record<string, unknown> | null; irreversible: boolean }> {
+  async mesaDealSummary(mesaId: string, dealId: string, viewer: { kind: 'admin' } | { kind: 'participant'; chairId: string }): Promise<{ deal: Record<string, unknown> | null; irreversible: boolean }> {
     const mesa = this.mesaById(mesaId);
     if (!mesa) throw new DomainError('INVALID_INPUT', 'Mesa não encontrada.');
     const belongs = mesa.dealId === dealId || (mesa.dealIds ?? []).includes(dealId);
     if (!belongs) throw new DomainError('INVALID_INPUT', 'Operação não pertence a esta mesa.');
     const deal = await this.d.getDeal(dealId);
     if (!deal) throw new DomainError('INVALID_INPUT', 'Operação não encontrada.');
-    return { deal: this.dealSummary(deal), irreversible: this.isIrreversible(deal) };
+    // Mesmo recorte do link da mesa: só o PAGADOR do gás vê keeperAddress/requiredWei (pop-up).
+    const viewerRole = viewer.kind === 'participant' ? mesa.chairs.find(c => c.chairId === viewer.chairId)?.role : undefined;
+    return { deal: this.dealSummary(deal, viewerRole), irreversible: this.isIrreversible(deal) };
   }
 
   async mesaViewFor(mesa: MesaRecord, viewer: { kind: 'admin' } | { kind: 'participant'; chairId: string }): Promise<Record<string, unknown>> {
@@ -808,6 +820,8 @@ export class MesaService {
     const me = mesa.chairs.find(c => c.chairId === viewer.chairId);
     return {
       ...base,
+      // deal REDACIONADO para ESTE participante: só o pagador do gás vê keeperAddress/requiredWei.
+      deal: this.dealSummary(deal, me?.role),
       viewer: me ? { chairId: me.chairId, role: me.role, roleLabel: CHAIR_ROLE_LABEL[me.role], firstName: me.firstName ?? null, wallet: me.wallet ? this.shortAddr(me.wallet.address) : null, asset: me.expectedAsset.symbol,
         // LIGHTNING_SWAP: o Comprador precisa informar a invoice antes do approve; a UI mostra o campo.
         lnInvoiceNeeded: me.role === 'BUYER' && deriveSettlementPlan(mesa.chairs)?.mode === 'LIGHTNING_SWAP' && !me.lightningInvoice,
