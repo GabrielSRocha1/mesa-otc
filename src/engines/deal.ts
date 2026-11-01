@@ -120,6 +120,11 @@ export class DealEngine {
     // depósito confirma (fund→FINAL), a janela REINICIA do zero para a assinatura em si.
     const p = deal.participants.find(x => x.role === deal.turnRole);
     if (p?.fundingRequired && p.funding !== 'FINAL') return false;
+    // GÁS idem (incidente mainnet op 3): o pré-pagamento do PAGADOR DA VEZ é espera de blockchain +
+    // verificação (carteira, confirmações EVM, retry do registro) — não é demora de assinatura.
+    // Enquanto PENDING na vez dele, o turno NÃO expira (o teto global deal.expiresAt segue valendo);
+    // quando confirma (FUNDED), recordGasPrepay REINICIA a janela só para assinar.
+    if (deal.gasPrepay?.status === 'PENDING' && deal.gasPrepay.payerRole === deal.turnRole) return false;
     return true;
   }
 
