@@ -2427,17 +2427,42 @@ window.addEventListener('unhandledrejection',function(e){try{console.warn('[veru
   /** Pré-pagamento de gás do keeper pelo PAGADOR (comprador/vendedor lado-EVM): envia o depósito
    *  (requiredWei) ao keeperAddress pela carteira do papel e informa o txHash — o backend verifica
    *  on-chain e, confirmado, registra a mesa e inicia os turnos. Usa a wallet session do participante. */
-  async function opGasPrepay(d){
+  // onPhase('sent'|'confirmed'|'recording') — a UI fecha o pop-up já no 'sent' (carteira aprovou) e
+  // acompanha o resto em 2º plano. O REGISTRO no backend tem RETRY: a verificação do servidor espera
+  // confirmações extras e pode estourar o timeout do serverless — repetir com o mesmo idempotency-key
+  // é seguro e conclui quando a rede alcança (incidente op 3: o modal ficava pendurado aqui).
+  async function opGasPrepay(d,onPhase){
+    const ph=onPhase||function(){};
     const gp=d.gasPrepay; if(!gp) throw new Error('mesa não requer pré-pagamento de gás');
     if(!gp.payerAddress||!gp.keeperAddress) throw new Error('Dados do pré-pagamento incompletos — atualize a página e tente de novo.');
     const p=await findVerumEthProvider(); if(!p) throw new Error('Provider EVM da Verum Wallet não injetado nesta aba.');
     const accs=await p.request({method:'eth_requestAccounts'}); const from=accs&&accs[0];
     if(!from||from.toLowerCase()!==String(gp.payerAddress).toLowerCase()) throw new Error('Conecte a carteira do pagador do gás ('+shortAddr(gp.payerAddress)+').');
     const wtok=await walletSession('ethereum',from); const auth={authorization:'Bearer '+wtok};
-    const h=await p.request({method:'eth_sendTransaction',params:[{from,to:gp.keeperAddress,value:'0x'+BigInt(gp.requiredWei).toString(16)}]});
+    // ANTI-PAGAMENTO-DUPLO: se um envio anterior desta mesma operação já saiu da carteira (registro
+    // falhou no meio), REUSA o txHash salvo — nunca cobra o pagador duas vezes.
+    let h=null; try{ h=localStorage.getItem('verum_gasph_'+d.id)||null; }catch(e){}
+    if(!h){
+      h=await p.request({method:'eth_sendTransaction',params:[{from,to:gp.keeperAddress,value:'0x'+BigInt(gp.requiredWei).toString(16)}]});
+      try{ localStorage.setItem('verum_gasph_'+d.id,h); }catch(e){}
+    }
+    ph('sent',h);
     await evmWaitReceipt(p,h);
-    const r=await fetch(API+'/v1/deals/'+d.id+'/gas-prepay',{method:'POST',headers:{...auth,'content-type':'application/json','idempotency-key':d.id+':gasprepay'},body:JSON.stringify({txHash:h})});
-    const o=await r.json().catch(()=>({})); if(!r.ok) throw new Error(o.message||o.error||('Pré-pagamento rejeitado ('+r.status+')'));
+    ph('confirmed',h);
+    let lastErr=null;
+    for(let i=0;i<12;i++){ // ~90s de retries — cobre confirmações extras exigidas pelo servidor
+      ph('recording',h);
+      try{
+        const r=await fetch(API+'/v1/deals/'+d.id+'/gas-prepay',{method:'POST',headers:{...auth,'content-type':'application/json','idempotency-key':d.id+':gasprepay'},body:JSON.stringify({txHash:h})});
+        if(r.ok){ try{ localStorage.removeItem('verum_gasph_'+d.id); }catch(e){} return; }
+        const o=await r.json().catch(()=>({}));
+        // 4xx = erro DEFINITIVO (tx errada/valor insuficiente) — não adianta repetir.
+        if(r.status<500) throw new Error(o.message||o.error||('Pré-pagamento rejeitado ('+r.status+')'));
+        lastErr=new Error(o.message||('Erro '+r.status));
+      }catch(e){ if(e&&/rejeitado|insuficiente|não veio|não foi enviado|revertida|incompletos/i.test(e.message||'')) throw e; lastErr=e; }
+      await new Promise(rs=>setTimeout(rs,7000));
+    }
+    throw (lastErr||new Error('O registro do pré-pagamento não confirmou — o gás FOI enviado; recarregue a página e tente assinar.'));
   }
   function startTurnCountdown(){ if(opTurnTimer) clearInterval(opTurnTimer); opTurnTimer=setInterval(()=>{ const el=$('#opSteps .op-turn-chip'); if(!el){ clearInterval(opTurnTimer); return; } const cd=el.querySelector('.op-turn-cd'); if(cd) cd.textContent=fmtCountdown(Number(el.dataset.turnExp)); },1000); }
   async function refreshMesaDeal(){ if(!getTok()||opMirror) return; refreshMesaDeals(); try{ const r=await pmApi('/v1/portal/mesa/deal'); if(r&&r.deal){ opDeal=r.deal; renderEsteira(r.deal); if(!opDealTimer) startDealPolling(); } }catch(e){} }
@@ -3887,9 +3912,24 @@ window.addEventListener('unhandledrejection',function(e){try{console.warn('[veru
         +'</div></div>';
       $('#pdmBack').addEventListener('click',e=>{ if(e.target.id==='pdmBack') closeModal(); });
       $('#pdmClose').addEventListener('click',closeModal);
-      // Pré-pagou → SEGUE DIRETO para a assinatura: o pRefresh re-renderiza com FUNDED e o
-      // auto-pull ("ser puxado para assinar") reabre a revisão sozinho — um fluxo só, sem beco.
-      const g=$('#pdmGas'); if(g) g.addEventListener('click',async()=>{ g.disabled=true; g.textContent='Confirme na carteira…'; try{ await opGasPrepay(d); closeModal(); toast('Gás pré-pago ✓ — agora é só assinar.','ok'); pRefresh(); }catch(e){ g.disabled=false; g.textContent='Pré-pagar gás pela carteira'; toast((e&&e.message)||'Falha no pré-pagamento','err'); } });
+      // FLUXO SEM PARADA (incidente op 3 — o modal ficava pendurado "Confirme na carteira…"):
+      // carteira aprovou → FECHA o pop-up na hora e segue em 2º plano (confirmação + registro com
+      // retry). FUNDED → pRefresh → o auto-pull abre a revisão de assinatura SOZINHO. Falhou depois
+      // de enviado → rearma a trava e reabre o modal com o erro. Recusou na carteira → modal fica.
+      const g=$('#pdmGas'); if(g) g.addEventListener('click',async()=>{
+        g.disabled=true; g.textContent='Confirme na carteira…';
+        let sent=false;
+        try{
+          await opGasPrepay(d,function(phase){
+            if(phase==='sent'&&!sent){ sent=true; closeModal(); toast('Gás enviado ✓ — confirmando na rede… a assinatura abre sozinha em instantes.','ok'); }
+          });
+          toast('Gás pré-pago ✓ — abrindo a assinatura…','ok');
+          pRefresh();
+        }catch(e){
+          if(sent){ pDepositModalKey=null; toast((e&&e.message)||'Falha ao registrar o pré-pagamento','err'); pRefresh(); }
+          else { g.disabled=false; g.textContent='Pré-pagar gás pela carteira'; toast((e&&e.message)||'Falha no pré-pagamento','err'); }
+        }
+      });
       return true;
     }
     return false;
