@@ -472,7 +472,13 @@ window.addEventListener('unhandledrejection',function(e){try{console.warn('[veru
     const i=v3Info;
     if(i.status==='EXPIRED'){ return renderState('err','Convite expirado','Peça ao Pay Master um novo convite.'); }
     if(i.status==='REVOKED'){ return renderState('err','Convite revogado','Peça ao Pay Master um novo convite.'); }
-    if(i.status==='USED'){ return renderState('err','Convite já utilizado','Este convite já foi usado. Se foi você, abra a mesa pelo link que recebeu após conectar.'); }
+    if(i.status==='USED'){
+      // NÃO é beco sem saída: o convite de uso único já foi consumido por quem conectou esta cadeira
+      // (a pessoa pretendida). Reabrir o link leva de volta à mesa (/ver/<mesaId>), onde o pop-up de
+      // depósito/gás aparece. Se o token de sessão ainda estiver no aparelho, ela age pela carteira.
+      if(i.mesaId){ renderState('ok','Abrindo a mesa…','Sua cadeira já está conectada. Levando você para a mesa.'); window.location.replace('/ver/'+encodeURIComponent(i.mesaId)); return; }
+      return renderState('err','Convite já utilizado','Este convite já foi usado. Se foi você, abra a mesa pelo link que recebeu após conectar.');
+    }
     const tick=v3Countdown(i.expiresAt);
     const r=ROLE[i.role]||{label:i.roleLabel||i.role,cls:'',ico:''};
     const needCode=!i.codeValid;

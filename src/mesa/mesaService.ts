@@ -305,13 +305,16 @@ export class MesaService {
   }
 
   /** Resolve o convite para a página pública. `code` ausente → metadados mínimos (fallback de digitação). */
-  async resolveInvite(inviteId: string, code?: string): Promise<{ mesaCode: string; role: MesaChairRole; roleLabel: string; asset: string; network: string; networkLabel: string; status: 'PENDING' | 'USED' | 'REVOKED' | 'EXPIRED'; expiresAt: number; serverTime: number; codeValid: boolean }> {
+  async resolveInvite(inviteId: string, code?: string): Promise<{ mesaId: string; mesaCode: string; role: MesaChairRole; roleLabel: string; asset: string; network: string; networkLabel: string; status: 'PENDING' | 'USED' | 'REVOKED' | 'EXPIRED'; expiresAt: number; serverTime: number; codeValid: boolean }> {
     const { invite, mesa, chair } = await this.inviteOrThrow(inviteId);
     const now = this.now();
     const status = invite.status === 'PENDING' && (invite.expiresAt <= now || (mesa.expiresAt != null && now >= mesa.expiresAt) || mesa.cancelled) ? 'EXPIRED' : invite.status;
     const codeValid = !!code && hashesEqual(codeHashOf(inviteId, code), invite.codeHash);
     if (invite.status === 'PENDING' && status === 'PENDING') void this.audit('mesa.convite.validado', 'public', { mesaId: mesa.mesaId, inviteId, codePresent: !!code, codeValid });
-    return { mesaCode: mesa.code, role: chair.role, roleLabel: CHAIR_ROLE_LABEL[chair.role], asset: chair.expectedAsset.symbol, network: mesa.network, networkLabel: getChain(mesa.network)?.displayName ?? mesa.network, status, expiresAt: invite.expiresAt, serverTime: now, codeValid };
+    // mesaId: convite JÁ USADO deve levar de volta à mesa (/ver/<mesaId>), onde o pop-up de
+    // depósito/gás aparece — não um beco sem saída. O token de sessão (se existir no aparelho)
+    // é reusado lá; sem ele a pessoa vê a leitura pública e pode reconectar.
+    return { mesaId: mesa.mesaId, mesaCode: mesa.code, role: chair.role, roleLabel: CHAIR_ROLE_LABEL[chair.role], asset: chair.expectedAsset.symbol, network: mesa.network, networkLabel: getChain(mesa.network)?.displayName ?? mesa.network, status, expiresAt: invite.expiresAt, serverTime: now, codeValid };
   }
 
   /** Challenge de entrada — texto exibido INTEGRALMENTE ao usuário e assinado pela Verum Wallet. */
