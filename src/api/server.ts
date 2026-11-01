@@ -462,25 +462,37 @@ export async function buildApi(deps: ApiDeps): Promise<FastifyInstance> {
   // tempo (curl HTTP 000) e nem chegava a abrir a operação com o lock já confirmado.
   const SWEEP_PER_DEAL_MS = 15_000; // prazo por deal (leitura lenta → pula e retenta na próxima rodada)
   const SWEEP_CONCURRENCY = 5;      // paralelismo limitado (não estourar rate-limit de Esplora/RPC)
-  const sweepTimeout = <T>(p: Promise<T>, ms: number): Promise<T> => Promise.race([p, new Promise<T>((_, rej) => setTimeout(() => rej(new Error('sweep: prazo por deal excedido')), ms))]);
-  const sweepPool = async <T>(items: T[], fn: (x: T) => Promise<void>): Promise<number> => {
+  // TETO DE TEMPO TOTAL por chamada: crons externos cortam cedo (cron-job.org free = 30s; curl
+  // --max-time). Acima disso a resposta "estoura" e o cron marca FALHA mesmo com o trabalho andando.
+  // Como a varredura é IDEMPOTENTE e roda a cada minuto, limitamos o relógio total e o resto é
+  // varrido nas próximas rodadas (sem perder nada). Override por env SWEEP_BUDGET_MS.
+  const SWEEP_BUDGET_MS = Number(process.env.SWEEP_BUDGET_MS ?? 22_000);
+  const sweepTimeout = <T>(p: Promise<T>, ms: number): Promise<T> => Promise.race([p, new Promise<T>((_, rej) => setTimeout(() => rej(new Error('sweep: prazo excedido')), ms))]);
+  const sweepPool = async <T>(items: T[], fn: (x: T) => Promise<void>, deadline: number): Promise<number> => {
     let done = 0, idx = 0;
     await Promise.all(Array.from({ length: Math.min(SWEEP_CONCURRENCY, items.length) }, async () => {
-      while (idx < items.length) { const x = items[idx++]!; try { await sweepTimeout(fn(x), SWEEP_PER_DEAL_MS); done++; } catch { /* próxima rodada */ } }
+      while (idx < items.length && Date.now() < deadline) {
+        const x = items[idx++]!; const budget = Math.min(SWEEP_PER_DEAL_MS, deadline - Date.now());
+        if (budget <= 0) break;
+        try { await sweepTimeout(fn(x), budget); done++; } catch { /* próxima rodada */ }
+      }
     }));
     return done;
   };
-  const cronSweep = async (): Promise<{ ok: true; expired: number; refundRetried: number; recovered: number; opened: number }> => {
-    const expired = await sweepTimeout(deps.deals.expireDue(), 60_000).catch(() => [] as string[]);
+  const cronSweep = async (): Promise<{ ok: true; expired: number; refundRetried: number; recovered: number; opened: number; truncated: boolean }> => {
+    const deadline = Date.now() + SWEEP_BUDGET_MS;
+    const left = () => Math.max(0, deadline - Date.now());
+    // expireDue não pode consumir o orçamento todo — reserva tempo para as varreduras seguintes.
+    const expired = await sweepTimeout(deps.deals.expireDue(), Math.min(15_000, left())).catch(() => [] as string[]);
     const [refunding, expiredDeals, liqVerified] = await Promise.all([
       deps.store.listDeals({ states: ['REFUNDING'] }),
       deps.store.listDeals({ states: ['EXPIRED'] }),
       deps.store.listDeals({ states: ['LIQUIDITY_VERIFIED'] }),
     ]);
-    const refundRetried = await sweepPool(refunding.filter(d => d.refunds.some(r => r.status === 'PENDING')), d => deps.deals.retryRefunds(d.id).then(() => {}));
-    const recovered = await sweepPool(expiredDeals.filter(d => !d.refunds.length && d.participants.some(p => p.fundingRequired)), d => deps.deals.recoverExpiredFunding(d.id).then(() => {}));
-    const opened = await sweepPool(liqVerified.filter(d => !!d.terms?.legs.some(l => l.mode === 'HTLC')), d => deps.deals.open(d.id, d.createdBy).then(() => {}));
-    return { ok: true, expired: expired.length, refundRetried, recovered, opened };
+    const refundRetried = await sweepPool(refunding.filter(d => d.refunds.some(r => r.status === 'PENDING')), d => deps.deals.retryRefunds(d.id).then(() => {}), deadline);
+    const recovered = await sweepPool(expiredDeals.filter(d => !d.refunds.length && d.participants.some(p => p.fundingRequired)), d => deps.deals.recoverExpiredFunding(d.id).then(() => {}), deadline);
+    const opened = await sweepPool(liqVerified.filter(d => !!d.terms?.legs.some(l => l.mode === 'HTLC')), d => deps.deals.open(d.id, d.createdBy).then(() => {}), deadline);
+    return { ok: true, expired: expired.length, refundRetried, recovered, opened, truncated: Date.now() >= deadline };
   };
   app.get('/ops/cron/sweep', async req => {
     const secret = process.env.CRON_SECRET?.trim();
