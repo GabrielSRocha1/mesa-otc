@@ -314,7 +314,12 @@ export class DealEngine {
       if (!this.isGasPrepayAdapter(adapter)) throw new DomainError('SETTLEMENT_NOT_ALLOWED', 'adaptador EVM sem suporte a pré-pagamento');
       const { valueWei } = await adapter.verifyGasPrepay(txHash, gp.payerAddress, BigInt(gp.requiredWei));
       deal.gasPrepay = { ...gp, status: 'FUNDED', txRef: txHash, receivedWei: valueWei.toString() };
-      await this.persist(deal, 'gasPrepay.funded', 'system', { txRef: txHash, receivedWei: valueWei.toString() });
+      // JANELA JUSTA (incidente mainnet 2026-11-01): pagar o gás consome boa parte dos 5 min da vez
+      // (carteira + confirmações EVM + verificação) — a op expirava NA ASSINATURA logo após o pagador
+      // ter pago. Pagar o gás é PROGRESSO verificável: reinicia a janela da vez dele para os 5 min
+      // cobrirem só o que falta (signV2 + aprovação). Não beneficia terceiros (só na vez do pagador).
+      if (deal.state === 'AWAITING_SIGNATURES' && deal.turnRole === gp.payerRole) this.startTurn(deal);
+      await this.persist(deal, 'gasPrepay.funded', 'system', { txRef: txHash, receivedWei: valueWei.toString(), turnExpiresAt: deal.turnExpiresAt });
       return deal;
     });
     const deal = await this.get(dealId);
