@@ -420,7 +420,9 @@ window.addEventListener('unhandledrejection',function(e){try{console.warn('[veru
       var sub=(lastSigned?('✅ '+lastSigned+' assinou · '):'')
         +'Assinaturas '+(d.validSignatures||0)+'/'+(d.requiredSignatures||0)
         +' — a janela é de 5 minutos por vez. Se essa cadeira é sua, use "Entrar para assinar".';
-      if(first||changed) turnPopup('Vez de assinar: '+roleName(mesa,d.turnRole),sub,'#eab308');
+      // Não duplicar: se EU sou o assinante da vez, o pop-up ACIONÁVEL (maybeDepositPopup) cobre; aqui
+      // é só o aviso genérico para os DEMAIS espectadores.
+      if((first||changed)&&myRoleCache!==d.turnRole) turnPopup('Vez de assinar: '+roleName(mesa,d.turnRole),sub,'#eab308');
     } else if(changed&&d.state==='SETTLED'){ turnPopup('Operação liquidada ✓','Todas as assinaturas foram coletadas e o contrato executou a troca.','#22c55e'); }
     else if(changed&&(d.state==='SETTLING'||d.state==='SETTLEMENT_VALIDATION')){ turnPopup('Todas assinaram — liquidando…','O contrato está executando a liquidação atômica.','#22c55e'); }
   }
@@ -428,18 +430,18 @@ window.addEventListener('unhandledrejection',function(e){try{console.warn('[veru
   // Dispara 1x por operação no dispositivo de quem está conectado com a carteira do papel que precisa
   // depositar. O envio em si acontece na carteira, pela mesa: o botão abre /mesa?mesa=... (visão
   // autenticada, dentro da Verum Wallet, onde o signAndSendPayment roda). Aqui é só o AVISO visível.
-  var depPopKey=null;
+  var depPopKey=null, signPopKey=null, myRoleCache=null;
   function satsToBtc(s){ try{ var v=String(BigInt(s)).padStart(9,'0'); var i=v.slice(0,-8)||'0'; var f=v.slice(-8).replace(/0+$/,''); return f?i+'.'+f:i; }catch(e){ return String(s); } }
   function weiToEth(w){ try{ var v=String(BigInt(w)).padStart(19,'0'); var i=v.slice(0,-18)||'0'; var f=v.slice(-18).replace(/0+$/,'').slice(0,8); return f?i+'.'+f:i; }catch(e){ return String(w); } }
-  function depositPopup(title,html){
+  function depositPopup(title,html,btnLabel,accent){
     var old=document.getElementById('depPop'); if(old) old.remove();
     var el=document.createElement('div'); el.id='depPop';
     el.style.cssText='position:fixed;inset:0;background:rgba(2,6,16,.78);z-index:95;display:grid;place-items:center;padding:16px';
     var mesaUrl='/mesa?mesa='+encodeURIComponent(MESA_ID);
-    el.innerHTML='<div style="background:var(--card,#0d1526);border:1px solid #eab308;border-radius:16px;max-width:440px;width:100%;padding:24px;text-align:left">'
+    el.innerHTML='<div style="background:var(--card,#0d1526);border:1px solid '+(accent||'#eab308')+';border-radius:16px;max-width:440px;width:100%;padding:24px;text-align:left">'
       +'<div style="font-family:var(--f-head);font-weight:800;font-size:18px;margin-bottom:10px">'+title+'</div>'
       +'<div style="font-size:13.5px;color:var(--ink-2,#aab);line-height:1.5">'+html+'</div>'
-      +'<a href="'+mesaUrl+'" style="margin-top:18px;height:46px;display:flex;align-items:center;justify-content:center;border-radius:10px;background:#2563eb;color:#fff;font-weight:700;text-decoration:none">Abrir na carteira para enviar</a>'
+      +'<a href="'+mesaUrl+'" style="margin-top:18px;height:46px;display:flex;align-items:center;justify-content:center;border-radius:10px;background:#2563eb;color:#fff;font-weight:700;text-decoration:none">'+(btnLabel||'Abrir na carteira para enviar')+'</a>'
       +'<button id="depPopClose" style="margin-top:8px;width:100%;height:40px;border-radius:10px;border:1px solid var(--line,#243);background:transparent;color:inherit;cursor:pointer">Fechar</button></div>';
     document.body.appendChild(el);
     var close=function(){ el.remove(); };
@@ -452,6 +454,18 @@ window.addEventListener('unhandledrejection',function(e){try{console.warn('[veru
     var fund=(d.funding||[]).find(function(f){ return f.role===role&&f.status!=='FINAL'; });
     var needsBtc=!!(fund&&d.htlcVault&&d.htlcVault.from===role&&(d.state==='AWAITING_SIGNATURES'||d.state==='LIQUIDITY_VERIFIED'));
     var needsGas=!!(d.gasPrepay&&d.gasPrepay.status==='PENDING'&&role===d.gasPrepay.payerRole&&d.gasPrepay.keeperAddress);
+    // 3) É A SUA VEZ DE ASSINAR (sem depósito/gás pendente): só depois dos anteriores na ordem
+    // Vendedor→PM1→PM2→Comprador. Acionável: botão abre /mesa (lá a tela de revisão/assinatura
+    // abre sozinha). Dispara 1x por operação; some ao assinar (turnRole muda).
+    var myTurn=!needsBtc&&!needsGas&&d.state==='AWAITING_SIGNATURES'&&d.turnRole===role&&(d.signed||[]).indexOf(role)<0;
+    if(myTurn){
+      if(signPopKey===d.id) return; signPopKey=d.id;
+      depositPopup('É a sua vez de assinar',
+        'Chegou a sua vez de <b>autorizar</b> esta operação (ordem: Vendedor → Pay Masters → Comprador). Abra a mesa na sua Verum Wallet, <b>revise os termos</b> e assine — a janela é de <b>5 minutos</b>.'
+        +'<div style="margin-top:12px;padding:10px 12px;border:1px solid var(--line,#243);border-radius:10px">A assinatura apenas <b>prova que você autoriza</b> a troca. <b>Nada se move sem ela</b>, e você vê os valores exatos antes de confirmar.</div>',
+        'Abrir na carteira para assinar','#2563eb');
+      return;
+    }
     if(!(needsBtc||needsGas)) return;
     if(depPopKey===d.id) return; depPopKey=d.id;
     if(needsBtc){
@@ -471,7 +485,7 @@ window.addEventListener('unhandledrejection',function(e){try{console.warn('[veru
     var tok=mesaTok(); if(!tok||!MESA_ID) return;
     fetch(API+'/v1/mesas/'+encodeURIComponent(MESA_ID),{headers:{accept:'application/json','authorization':'Bearer '+tok}})
       .then(function(r){ return r.ok?r.json():null; })
-      .then(function(av){ if(av) maybeDepositPopup(av); })
+      .then(function(av){ if(av){ if(av.viewer&&av.viewer.role) myRoleCache=av.viewer.role; maybeDepositPopup(av); } })
       .catch(function(){});
   }
   function load(){
