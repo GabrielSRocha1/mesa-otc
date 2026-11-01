@@ -3856,6 +3856,9 @@ window.addEventListener('unhandledrejection',function(e){try{console.warn('[veru
     return data;
   }
   let pDto=null, pBalAt=0, pBal=null, pDepChkAt=0;
+  // ETA de confirmação do BTC conforme o AMBIENTE da mesa (mainnet = 3 blocos ≈ ~30 min; os textos
+  // fixos "testnet ~10 min" apareciam errados em mesa mainnet).
+  function pBtcEta(){ return (pDto&&pDto.environment==='mainnet')?'~30 min — 3 blocos na rede Bitcoin':'~10 min na testnet'; }
   function pBadgePart(c){
     if(!c.connected) return '<span class="badge wait">Aguardando conexão</span>';
     const d=pDto&&pDto.deal;
@@ -4013,7 +4016,7 @@ window.addEventListener('unhandledrejection',function(e){try{console.warn('[veru
       const sentAt=pBtcSentAt(d);
       const sentMin=sentAt?Math.max(0,Math.floor((Date.now()-sentAt)/60000)):0;
       const sentHtml=sentAt
-        ?('<div style="margin:8px 0;padding:10px;border:1px solid var(--line);border-radius:10px;font-size:13px">✅ Depósito enviado — aguardando a confirmação da rede (~10 min na testnet) · ⏱ há <span id="pVaultElapsed" data-sent="'+sentAt+'">'+sentMin+'</span> min'
+        ?('<div style="margin:8px 0;padding:10px;border:1px solid var(--line);border-radius:10px;font-size:13px">✅ Depósito enviado — aguardando a confirmação da rede ('+pBtcEta()+') · ⏱ há <span id="pVaultElapsed" data-sent="'+sentAt+'">'+sentMin+'</span> min'
           +(sentMin>=40?'<div style="font-size:11.5px;color:var(--ink-3);margin-top:4px">Está demorando mais que o normal — o depósito continua valendo; a tela retoma sozinha quando confirmar.</div>':'')
           +'</div><button class="btn btn-block" id="pVaultCheck" style="height:40px">Verificar agora</button>')
         :'';
@@ -4457,7 +4460,7 @@ window.addEventListener('unhandledrejection',function(e){try{console.warn('[veru
     // cobrem o simulador/bloco imediato; seguindo pendente, devolve {pending} — o chamador fecha o
     // modal e a retomada é AUTOMÁTICA (watch no pRefresh + auto-pull/auto-sign quando confirmar).
     for(let i=0;i<3;i++){
-      st('Aguardando confirmação do bloco… (testnet ~10 min)');
+      st('Aguardando confirmação do bloco… ('+pBtcEta()+')');
       await new Promise(function(r){ setTimeout(r,i?20000:4000); });
       try{ await check(); pBtcSentClear(d); st('Depósito confirmado ✓'); return; }
       catch(e){ if(!/mempool|confirma|financiado|envie/i.test((e&&e.message)||'')) throw e; }
@@ -4494,7 +4497,7 @@ window.addEventListener('unhandledrejection',function(e){try{console.warn('[veru
         // assina automaticamente (auto-pull/auto-sign). Nada se perde e nada reenvia.
         if(fr&&fr.pending){
           closeModal();
-          toast('BTC enviado ✓ — aguardando a confirmação da rede (~10 min). Esta tela acompanha e retoma sozinha.','ok');
+          toast('BTC enviado ✓ — aguardando a confirmação da rede ('+pBtcEta()+'). Esta tela acompanha e retoma sozinha.','ok');
           pRefresh(); return;
         }
         // LOCK ANTES DO OPEN: o depósito confirmado ABRIU a operação no backend (auto-open). Se a
@@ -4555,7 +4558,7 @@ window.addEventListener('unhandledrejection',function(e){try{console.warn('[veru
   // (ferramenta de suporte) e nos regex de roteamento (/mempool|confirma/i etc.), que leem e.message.
   function pHumanErr(msg){
     var m=String(msg||'');
-    if(/mempool|na fila/i.test(m)) return 'Seu envio está na fila da rede — aguarde a confirmação (~10 min na testnet). Nada se perdeu.';
+    if(/mempool|na fila/i.test(m)) return 'Seu envio está na fila da rede — aguarde a confirmação ('+pBtcEta()+'). Nada se perdeu.';
     if(/FUNDING_REQUIRED|ainda não financiado|sem depósito|Deposite no escrow/i.test(m)) return 'O depósito ainda não foi confirmado na rede. Assim que confirmar, o passo seguinte abre sozinho.';
     if(/não registrada on-chain|createTradeV2|registerPending/i.test(m)) return 'O contrato da operação ainda está sendo registrado na rede pelo Pay Master (~1–2 min). Tente de novo em instantes.';
     if(/allowance|approve|Autorize o token/i.test(m)) return 'Falta autorizar o valor na sua carteira. Toque de novo e confirme a autorização quando a carteira abrir.';
