@@ -3842,8 +3842,12 @@ window.addEventListener('unhandledrejection',function(e){try{console.warn('[veru
    *  rota HTLC) com o aviso das ~8h, ou gás (ETH) ao keeper (lado-EVM). Reaproveita o fluxo existente
    *  "Revisar e assinar" (#pSignBtn) p/ o BTC e o opGasPrepay p/ o gás. Nunca cobre outro modal aberto. */
   function pDepositModal(d, me, env){
-    if(!d) return;
-    if(($('#modalRoot').innerHTML||'').trim()) return; // não cobrir o modal de assinatura/2FA
+    // Retorna true SÓ quando o modal foi de fato renderizado — o chamador usa isso para consumir a
+    // trava de 1-disparo. (Antes a trava era consumida ANTES do render: se outro modal estivesse
+    // aberto, o pop-up de gás/BTC era engolido para sempre — o Comprador batia em GAS_PREPAY_REQUIRED
+    // sem nunca ter visto o aviso.)
+    if(!d) return false;
+    if(($('#modalRoot').innerHTML||'').trim()) return false; // não cobrir o modal de assinatura/2FA
     const isMain=(env==='mainnet');
     // ── CASO 1: depósito de BTC no cofre (P2WSH) ──
     if(d.htlcVault && d.htlcVault.from===me.role){
@@ -3867,7 +3871,7 @@ window.addEventListener('unhandledrejection',function(e){try{console.warn('[veru
       $('#pdmClose').addEventListener('click',closeModal);
       const cp=$('#pdmCopy'); if(cp) cp.addEventListener('click',()=>{ clip(d.htlcVault.address); toast('Endereço do cofre copiado','ok'); });
       const sg=$('#pdmSign'); if(sg) sg.addEventListener('click',()=>{ closeModal(); const b=$('#pSignBtn'); if(b) b.click(); });
-      return;
+      return true;
     }
     // ── CASO 2: pré-pagamento de gás (ETH) ao keeper (pagador lado-EVM) ──
     if(d.gasPrepay && d.gasPrepay.status==='PENDING' && me.role===d.gasPrepay.payerRole && d.gasPrepay.keeperAddress){
@@ -3882,9 +3886,12 @@ window.addEventListener('unhandledrejection',function(e){try{console.warn('[veru
         +'</div></div>';
       $('#pdmBack').addEventListener('click',e=>{ if(e.target.id==='pdmBack') closeModal(); });
       $('#pdmClose').addEventListener('click',closeModal);
-      const g=$('#pdmGas'); if(g) g.addEventListener('click',async()=>{ g.disabled=true; g.textContent='Confirme na carteira…'; try{ await opGasPrepay(d); closeModal(); toast('Gás pré-pago ✓','ok'); }catch(e){ g.disabled=false; g.textContent='Pré-pagar gás pela carteira'; toast((e&&e.message)||'Falha no pré-pagamento','err'); } });
-      return;
+      // Pré-pagou → SEGUE DIRETO para a assinatura: o pRefresh re-renderiza com FUNDED e o
+      // auto-pull ("ser puxado para assinar") reabre a revisão sozinho — um fluxo só, sem beco.
+      const g=$('#pdmGas'); if(g) g.addEventListener('click',async()=>{ g.disabled=true; g.textContent='Confirme na carteira…'; try{ await opGasPrepay(d); closeModal(); toast('Gás pré-pago ✓ — agora é só assinar.','ok'); pRefresh(); }catch(e){ g.disabled=false; g.textContent='Pré-pagar gás pela carteira'; toast((e&&e.message)||'Falha no pré-pagamento','err'); } });
+      return true;
     }
+    return false;
   }
   function pRender(){
     const m=pDto; if(!m) return;
@@ -3944,7 +3951,7 @@ window.addEventListener('unhandledrejection',function(e){try{console.warn('[veru
     const myFund=d&&(d.state==='AWAITING_SIGNATURES'||d.state==='LIQUIDITY_VERIFIED')?((d.funding||[]).find(f=>f.role===me.role&&f.status!=='FINAL')):null;
     // POP-UP de depósito: abre sozinho 1x por operação quando o participante precisa depositar
     // (BTC no cofre com aviso das 8h, ou gás ETH ao keeper). O card inline abaixo continua como reforço.
-    try { if(d){ const needsBtc=!!(myFund&&d.htlcVault&&d.htlcVault.from===me.role); const needsGas=!!(d.gasPrepay&&d.gasPrepay.status==='PENDING'&&me.role===d.gasPrepay.payerRole); if((needsBtc||needsGas)&&pDepositModalKey!==d.id){ pDepositModalKey=d.id; pDepositModal(d,me,m.environment); } } } catch(e){}
+    try { if(d){ const needsBtc=!!(myFund&&d.htlcVault&&d.htlcVault.from===me.role); const needsGas=!!(d.gasPrepay&&d.gasPrepay.status==='PENDING'&&me.role===d.gasPrepay.payerRole); if((needsBtc||needsGas)&&pDepositModalKey!==d.id){ if(pDepositModal(d,me,m.environment)) pDepositModalKey=d.id; } } } catch(e){}
     if(myFund&&d.htlcVault&&d.htlcVault.from===me.role){
       // Sats → BTC decimal com PONTO (formato que a carteira espera no signAndSendPayment).
       const satsToBtc=function(s){ try{ const v=String(BigInt(s)).padStart(9,'0'); const i=v.slice(0,-8)||'0'; const f=v.slice(-8).replace(/0+$/,''); return f?i+'.'+f:i; }catch(e){ return String(s); } };
@@ -4114,9 +4121,14 @@ window.addEventListener('unhandledrejection',function(e){try{console.warn('[veru
     // modal já aberto. Fora da vez, reseta a trava. (Antes travava em solProvider() ⇒ só abria em
     // turno Solana; PM/outros papéis em EVM/BTC ficavam só com o pop-up informativo.)
     try{
-      if(myTurn||preOpenPay){
+      // PRIORIDADE DO GÁS: se EU sou o pagador e o pré-pagamento está PENDENTE, o modal de gás manda
+      // — NÃO abrir a revisão de assinatura por cima (ela sobrescrevia o #modalRoot e o Comprador
+      // assinava direto num GAS_PREPAY_REQUIRED sem nunca ver o aviso). Pré-pagou → o próximo render
+      // cai aqui normalmente e a revisão abre sozinha.
+      const gasPend=!!(d&&d.gasPrepay&&d.gasPrepay.status==='PENDING'&&d.gasPrepay.payerRole===me.role);
+      if((myTurn||preOpenPay)&&!gasPend){
         const key=d.id+':'+me.role+(preOpenPay?':lock':'');
-        if(pAutoTurnKey!==key && !document.querySelector('#modalRoot #pRvBack')){
+        if(pAutoTurnKey!==key && !(($('#modalRoot').innerHTML||'').trim())){
           pAutoTurnKey=key; pReview();
           // FUSÃO depósito→assinatura: quem JÁ DEPOSITOU (funding FINAL) não toca em mais nada —
           // a assinatura da vez dispara sozinha e o deslize na carteira vira a ÚNICA ação do
@@ -4471,6 +4483,10 @@ window.addEventListener('unhandledrejection',function(e){try{console.warn('[veru
       closeModal(); toast('Assinatura registrada ✓','ok'); pRefresh();
     }catch(e){
       if(pStaleSession(e)) return;
+      // GÁS PENDENTE não é "erro" para o usuário: fecha a revisão, rearma a trava do pop-up e
+      // atualiza — o render reabre o MODAL DE GÁS (com valor + botão de pagar pela carteira), e
+      // depois de pago a revisão de assinatura volta sozinha (auto-pull).
+      if(e&&e.code==='GAS_PREPAY_REQUIRED'){ closeModal(); pDepositModalKey=null; toast('Antes de assinar: pré-pague o gás do keeper — abrindo o aviso…','info'); pRefresh(); return; }
       // Erro PERSISTENTE e copiável (o toast some em ~3s — inviável de ler/printar no dapp-browser do
       // celular). Mostra código + mensagem + etapa pra diagnosticar exatamente onde a assinatura falhou.
       pErrBox('Falha ao assinar', ((e&&e.code)?('['+e.code+'] '):'')+((e&&e.message)||String(e))); if(btn){ btn.disabled=false; btn.textContent='Assinar e continuar'; }
