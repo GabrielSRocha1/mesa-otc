@@ -275,6 +275,15 @@ export class DealEngine {
     throw new DomainError('GAS_PREPAY_REQUIRED', `Pré-pagamento de gás pendente: o ${deal.gasPrepay!.payerRole} deve pré-pagar o gás do keeper antes de assinar`, { requiredWei: deal.gasPrepay!.requiredWei, payerRole: deal.gasPrepay!.payerRole });
   }
   /**
+   * Gate PÚBLICO para as rotas de passo on-chain (/onchain-tx): o pagador lado-EVM não pode executar
+   * o signV2 (que MOVE o pagamento dele para o escrow) antes de pré-pagar o gás — senão ele paga o
+   * escrow e só depois esbarra no gate da aprovação, deixando fundos no contrato com gás pendente.
+   * No-op para os demais papéis/estados; lança GAS_PREPAY_REQUIRED (e grava PENDENTE) para o pagador.
+   */
+  async requireGasPrepaid(dealId: string, role: Role): Promise<void> {
+    await this.withDeal(dealId, async deal => { await this.assertGasPrepaidForSigner(deal, role); return deal; });
+  }
+  /**
    * Popula deal.gasPrepay=PENDING quando `role` é o pagador lado-EVM e o gás ainda não foi pré-pago.
    * NÃO persiste nem lança — usado tanto pela VIEW (pop-up proativo quando a vez chega ao pagador)
    * quanto pelo gate assertGasPrepaidForSigner. Retorna true se há pré-pagamento pendente para `role`.

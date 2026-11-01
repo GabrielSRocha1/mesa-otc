@@ -404,6 +404,9 @@ export async function buildApi(deps: ApiDeps): Promise<FastifyInstance> {
     const d = await deps.deals.get(id);
     const me = requireParticipant(d, s);
     if (!d.terms?.legs.length) throw new DomainError('SETTLEMENT_NOT_ALLOWED', 'termos não congelados');
+    // GATE DO GÁS ANTES DE MOVER DINHEIRO: o pagador lado-EVM não executa o signV2 (que deposita o
+    // pagamento dele no escrow) sem o gás pré-pago — senão ele paga o escrow e trava na aprovação.
+    await deps.deals.requireGasPrepaid(id, me.role);
     const a = stepAdapterOf(d, me.role);
     return idempotent(req, reply, async () => {
       const r = await a.submitParticipantStep(id, me.role, s.address, b as Record<string, unknown>);
