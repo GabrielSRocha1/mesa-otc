@@ -1347,11 +1347,7 @@ export async function buildApi(deps: ApiDeps): Promise<FastifyInstance> {
     // == valores do fixing) e TRAVA o registro (imutável). Devolve o fixingHash que entra no deal
     // (terms.pricing) e, portanto, no envelope assinado pelos 4. FIXED → null (nenhuma mudança no fluxo).
     const indexedFixingHash = await deps.indexedPricing.lockForApproval(mesa, pm.id);
-    // buyerAmountInBase FIXADO na mesa SEMPRE sobrescreve a perna do comprador — indexado OU manual.
-    // (Incidente mainnet op 3: o override só era passado no modo indexado; mesa FIXED com valor do
-    //  comprador configurado manualmente caía no ORÁCULO — PM fixou 0,01034 ETH e a operação nasceu
-    //  com 0,0078. O motor já suporta fixedAmountOutBase independente do fixing — deal.ts.)
-    const body = { ...b, amountInBase: mesa.config?.amountInBase ?? b.amountInBase, discountBps: mesa.config?.discountBps ?? b.discountBps, commissionBps: mesa.config?.commissionBps ?? b.commissionBps, ...(mesa.config?.buyerAmountInBase ? { fixedAmountOutBase: mesa.config.buyerAmountInBase } : {}), ...(indexedFixingHash ? { indexedFixingHash } : {}) };
+    const body = { ...b, amountInBase: mesa.config?.amountInBase ?? b.amountInBase, discountBps: mesa.config?.discountBps ?? b.discountBps, commissionBps: mesa.config?.commissionBps ?? b.commissionBps, ...(indexedFixingHash ? { indexedFixingHash, ...(mesa.config?.buyerAmountInBase ? { fixedAmountOutBase: mesa.config.buyerAmountInBase } : {}) } : {}) };
     // Plano HTLC_BTC → deal REAL com os ativos das CADEIRAS (BTC nativo ↔ token no escrow V2).
     // Demais planos seguem o caminho legado (base dev) até o wiring ESCROW_DIRECT/CROSS_CHAIN.
     const plan = deriveSettlementPlan(mesa.chairs);
