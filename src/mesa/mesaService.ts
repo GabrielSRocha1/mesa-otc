@@ -739,12 +739,12 @@ export class MesaService {
         // simulated: a UI marca "BTC SIMULADO" quando a perna roda no simulador (preview/dev) —
         // exigência da auditoria: nenhum ambiente de teste pode se passar por BTC real.
         if (typeof meta?.htlcAddress !== 'string') return null;
-        // MARGEM DE TAXA: o Vendedor envia `amountBase + margem` (depositSat) para o cofre RECEBER o
-        // valor cheio mesmo quando a carteira desconta a taxa de rede do envio — senão o cofre fica
-        // subfinanciado (ex.: pediu 30.000, chegou 29.100) e a operação trava. O limiar de funding
-        // on-chain (adapter) continua sendo amountBase (requiredSat); a margem só garante que chega lá.
-        const feeMarginSat = 3000n;
-        return { address: meta.htlcAddress, requiredSat: leg.amountBase, depositSat: (BigInt(leg.amountBase) + feeMarginSat).toString(), from: leg.from, legIndex: leg.index, simulated: this.d.btcSimulated?.() ?? false };
+        // DEPÓSITO CRAVADO (exigência do cliente 2026-11-02): o Vendedor envia EXATAMENTE o exigido —
+        // sem margem. Comprovado nas 3 ops mainnet que a Verum Wallet envia o valor pedido INTEIRO
+        // (taxa de rede paga POR FORA, troco de volta); a margem de 3.000 sats virava sobra presa no
+        // fluxo. Se alguma carteira descontar a taxa do envio, o cofre fica subfinanciado e a proteção
+        // existente cobre: top-up no MESMO endereço soma, e o reembolso automático varre cofre parcial.
+        return { address: meta.htlcAddress, requiredSat: leg.amountBase, depositSat: leg.amountBase, from: leg.from, legIndex: leg.index, simulated: this.d.btcSimulated?.() ?? false };
       })(),
       // REGISTRO on-chain pendente (createTradeV2 do PM1): o auto-envio do approve é one-shot e
       // se perde em recusa/reload — sem este campo no poll a mesa ficava SEM retry, presa em

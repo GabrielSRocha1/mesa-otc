@@ -60,12 +60,16 @@ export class PriceEngine {
     const amountIn = BigInt(p.amountInBase); const decIn = 10n ** BigInt(p.assetIn.decimals); const decOut = 10n ** BigInt(p.assetOut.decimals);
     const usdInS = amountIn * pInS / decIn; // USD * 1e12
     const commissionBps = p.commissionBps ?? 0; if (p.discountBps + commissionBps > 10000) throw new DomainError('INVALID_INPUT', 'Deságio + comissão não podem ultrapassar 100%');
-    // DESÁGIO pago pelo VENDEDOR: o desconto sai da PERNA DO VENDEDOR (amountIn), não do que o
-    // comprador paga. O comprador paga o valor cheio menos só a comissão; o vendedor ENTREGA
-    // amountIn × (1 − deságio). Antes o deságio reduzia amountOut — invertia quem o arcava.
-    const usdOutS = usdInS * BigInt(10000 - commissionBps) / 10000n; const usdCommissionS = usdInS * BigInt(commissionBps) / 10000n;
+    // DESÁGIO NO PREÇO, não na quantidade (exigência do cliente 2026-11-02): o Vendedor entrega
+    // EXATAMENTE o escrito (30.000 sats = 30.000 cravado no cofre) e o desconto reduz o que o
+    // COMPRADOR paga — compra OTC com deságio, como a tela de criação exibe. A comissão dos PMs sai
+    // do valor JÁ DESCONTADO (e é debitada do que o Vendedor recebe): perna do comprador =
+    // usdIn × (1−deságio) × (1−comissão); o total on-chain do comprador = usdIn × (1−deságio) + taxa.
+    const usdAfterDiscountS = usdInS * BigInt(10000 - p.discountBps) / 10000n;
+    const usdCommissionS = usdAfterDiscountS * BigInt(commissionBps) / 10000n;
+    const usdOutS = usdAfterDiscountS - usdCommissionS;
     const amountOut = usdOutS * decOut / pOutS;
-    const amountInEffective = amountIn * BigInt(10000 - p.discountBps) / 10000n; // perna do vendedor já com o deságio
+    const amountInEffective = amountIn; // o Vendedor entrega o valor CHEIO escrito — nada descontado da perna dele
     const fee = amountOut * BigInt(p.platformFeeBps) / 10000n; const net = amountOut - fee;
     const usd = (s: bigint) => (Number(s) / 1e12).toFixed(2);
     return { amountOutBase: amountOut.toString(), amountInEffectiveBase: amountInEffective.toString(), feeBase: fee.toString(), pricing: {

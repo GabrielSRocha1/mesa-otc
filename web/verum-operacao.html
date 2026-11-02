@@ -471,7 +471,7 @@ window.addEventListener('unhandledrejection',function(e){try{console.warn('[veru
     if(needsBtc){
       var sendSat=String(d.htlcVault.depositSat||d.htlcVault.requiredSat);
       depositPopup('Depósito de BTC necessário',
-        'A operação foi aprovada. Para seguir, você precisa enviar <b class="mono">'+satsToBtc(sendSat)+' BTC</b> ('+sendSat+' sats — já inclui uma <b>margem de taxa de rede</b>) ao <b>cofre</b> desta operação.'
+        'A operação foi aprovada. Para seguir, você precisa enviar <b class="mono">'+satsToBtc(sendSat)+' BTC</b> ('+sendSat+' sats — valor <b>exato</b>; a taxa de rede a carteira paga por fora) ao <b>cofre</b> desta operação.'
         +'<div style="margin-top:12px;padding:10px 12px;border:1px solid #eab308;border-radius:10px;background:rgba(234,179,8,.08)">⏳ <b>Importante:</b> se a operação <b>não se completar</b>, o seu BTC <b>volta para a sua carteira com segurança</b> — mas só <b>após ~8 horas</b> (trava de tempo do cofre). Nesse período fica bloqueado, nunca perdido.</div>'
         +'<div style="margin-top:10px">Toque abaixo para abrir a mesa na sua Verum Wallet e enviar com um toque.</div>');
     } else {
