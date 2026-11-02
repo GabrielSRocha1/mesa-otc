@@ -305,6 +305,17 @@ window.addEventListener('unhandledrejection',function(e){try{console.warn('[veru
     var head='<div class="op-head"><div class="titw"><h1>Negociação OTC</h1><p>Mesa '+esc(mesa.code||'')+' · acompanhe os detalhes da operação (somente leitura).</p></div>'
       +'<div class="op-status">'+(mesa.environment==='mainnet'?'<span class="op-badge" style="background:rgba(239,68,68,.15);color:#ef4444;border:1px solid #ef4444;font-weight:700">MAINNET — FUNDOS REAIS</span>':'')+statusPill(mesa.status)
       +(mesa.expiresAt?'<span class="op-exp">Expira em <b style="color:var(--ink-2)">'+esc(fmtDate(mesa.expiresAt))+'</b></span>':'')+'</div></div>';
+    // MOTIVO DA FALHA (nunca silenciosa): bloqueio/risco e erro da liquidação + estado dos reembolsos.
+    if(deal&&(deal.blocked||deal.settlementFailure)){
+      var why=[];
+      if(deal.settlementFailure){ if(deal.settlementFailure.reason) why.push(esc(deal.settlementFailure.reason)); (deal.settlementFailure.legs||[]).forEach(function(l){ why.push('Perna '+l.index+': '+esc(l.error||l.step)); }); }
+      if(deal.blocked&&deal.blocked.reason&&why.indexOf(esc(deal.blocked.reason))<0) why.push(esc(deal.blocked.reason));
+      var refHtml=(deal.refunds||[]).map(function(r){ return '<div style="font-size:12px;color:var(--ink-2)">↩ Reembolso '+(r.role==='SELLER'?'do Vendedor':'do Comprador')+': '+(r.status==='REFUNDED'?'<b style="color:#22c55e">devolvido ✓</b>':('pendente'+(r.error?' — '+esc(r.error):'')))+'</div>'; }).join('');
+      head+='<section class="card" style="border-color:#ef4444;margin-bottom:12px"><div style="font-weight:800;color:#ef4444;margin-bottom:6px">Por que a operação falhou</div>'
+        +(why.length?('<div style="font-size:12.5px;color:var(--ink-2);word-break:break-word">'+why.join('<br>')+'</div>'):'<div style="font-size:12.5px;color:var(--ink-3)">Motivo não registrado.</div>')
+        +(refHtml?('<div style="margin-top:8px;border-top:1px solid var(--line);padding-top:8px">'+refHtml+'<div style="font-size:11.5px;color:var(--ink-3);margin-top:4px">Devoluções são automáticas: ETH após a janela do contrato (~40 min), BTC após a trava de tempo do cofre (~8 h).</div></div>'):'')
+        +'</section>';
+    }
 
     var partsHtml=chairs.length?chairs.map(function(c){return partCard(c,bal[c.role]);}).join(''):'';
     var parts='<div class="op-parts" style="grid-template-columns:repeat('+Math.max(1,Math.min(4,chairs.length))+',1fr)">'+partsHtml+'</div>';

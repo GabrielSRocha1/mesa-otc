@@ -767,6 +767,15 @@ export class MesaService {
         if (viewerRole && viewerRole === gp.payerRole) return { payerRole: gp.payerRole, payerAddress: gp.payerAddress, status: gp.status, requiredWei: gp.requiredWei, keeperAddress: gp.keeperAddress, txRef: gp.txRef ?? null, receivedWei: gp.receivedWei ?? null };
         return { payerRole: gp.payerRole, status: gp.status };
       })(),
+      // MOTIVO DA FALHA visível (incidente op 4 mainnet: a liquidação falhou e a mesa só mostrava
+      // "FAILED", sem nenhum porquê — nem para o PM). Expõe o bloqueio/risco e a falha de
+      // liquidação, truncados. Falha de operação NUNCA pode ser silenciosa para quem está na mesa.
+      blocked: deal.risk ? { reason: String(deal.risk.reason ?? '').slice(0, 300), rule: deal.risk.rule ?? null } : null,
+      settlementFailure: (() => {
+        const s = deal.settlement;
+        if (!s || s.status !== 'FAILED') return null;
+        return { reason: String(s.failureReason ?? '').slice(0, 300), legs: (s.legs ?? []).filter(l => l.error).map(l => ({ index: l.index, step: l.step, error: String(l.error).slice(0, 200) })) };
+      })(),
       // REEMBOLSOS por perna (REFUNDED/PENDING): a UI mostra "aguardando timelock" em vez de
       // sumir com o estado — exigência da auditoria (recuperação explicável por operação).
       // (?? []: dado antigo/fake persistido pode não ter o campo — a view nunca pode quebrar)
