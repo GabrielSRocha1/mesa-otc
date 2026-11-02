@@ -2949,18 +2949,21 @@ window.addEventListener('unhandledrejection',function(e){try{console.warn('[veru
     return 0;
   }
   function m3Round(n,dec){ const d=Math.min(dec==null?6:dec,6); let s=Number(n).toFixed(d); if(s.indexOf('.')>=0) s=s.replace(/\.?0+$/,''); return s; }
-  // Preenche a quantidade do COMPRADOR em tempo real = quantidade do Vendedor × preço do token do
-  // Vendedor ÷ preço do token do Comprador (preço de mercado). Não atropela digitação manual no campo.
+  // Preenche a quantidade do COMPRADOR em tempo real = quantidade do Vendedor × preço de mercado,
+  // JÁ COM O DESÁGIO DESCONTADO — o que aparece é o que o Comprador efetivamente paga (pedido do
+  // cliente 2026-11-02: antes mostrava o câmbio cheio e a operação cobrava com deságio, confundindo).
+  // Não atropela digitação manual no campo; recalcula quando o deságio muda.
   function m3OnSellAmt(){
     const sell=m3TokenOf('sell'), buy=m3TokenOf('buy'), out=$('#m3cBuyAmt');
-    let auto=false, rate=null;
+    let auto=false, rate=null, descBps=0;
     if(sell&&buy&&out&&document.activeElement!==out){
       const sp=m3AssetPriceUsd(sell), bp=m3AssetPriceUsd(buy);
       const v=parseFloat(String(($('#m3cSellAmt').value||'')).replace(',','.'));
-      if(isFinite(v)&&v>0&&sp>0&&bp>0){ out.value=m3Round(v*sp/bp,buy.decimals); auto=true; rate=sp/bp; }
+      descBps=pctToBps($('#opFeeDesc').value)||0; if(descBps<0||descBps>2000) descBps=0;
+      if(isFinite(v)&&v>0&&sp>0&&bp>0){ out.value=m3Round(v*(sp/bp)*(1-descBps/10000),buy.decimals); auto=true; rate=sp/bp; }
     }
     m3AmtPreview();
-    if(auto){ const be=$('#m3cBuyBase'); if(be&&sell&&buy) be.textContent='= '+out.value+' '+buy.symbol+' · preço de mercado (1 '+sell.symbol+' ≈ '+m3Round(rate,buy.decimals)+' '+buy.symbol+')'; }
+    if(auto){ const be=$('#m3cBuyBase'); if(be&&sell&&buy) be.textContent='= '+out.value+' '+buy.symbol+' · já com deságio de '+(descBps/100).toLocaleString('pt-BR')+'% (mercado: 1 '+sell.symbol+' ≈ '+m3Round(rate,buy.decimals)+' '+buy.symbol+')'; }
   }
   // Dados consolidados do wizard (validados a cada transição de passo).
   function m3WizardData(){
@@ -3777,6 +3780,7 @@ window.addEventListener('unhandledrejection',function(e){try{console.warn('[veru
     on('#m3cSubmit',m3SubmitCreate);
     const sa=$('#m3cSellAmt'); if(sa) sa.addEventListener('input',m3OnSellAmt);   // vendedor → calcula comprador
     const ba=$('#m3cBuyAmt'); if(ba) ba.addEventListener('input',m3AmtPreview);    // comprador: ajuste manual livre
+    const fdsc=$('#opFeeDesc'); if(fdsc) fdsc.addEventListener('input',m3OnSellAmt); // deságio mudou → recalcula o valor do comprador (já descontado)
     const adv=$('#m3cAdvLink'); if(adv) adv.addEventListener('click',e=>{ e.preventDefault(); const box=$('#m3cAdv'); box.style.display=box.style.display==='none'?'':'none'; });
     const md=$('#m3cMode'); if(md) md.addEventListener('change',m3RenderChairRows);
     // Escolha de moeda: campo clicável → modal com TODAS as moedas de TODAS as redes (ícones).
