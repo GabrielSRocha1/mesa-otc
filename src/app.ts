@@ -423,7 +423,7 @@ export async function createApp(config: Config, o: AppOverrides = {}): Promise<A
     // REEMBOLSO AUTOMÁTICO (auditoria 2026-10-19): deals em REFUNDING com legs PENDING são
     // retentadas pelo keeper — é assim que o refund BTC pós-CSV (~48h) sai SOZINHO quando o
     // timelock vence, sem operador rodar script. Espaçado (~2 min) p/ não spammar RPC/Esplora.
-    if (ticks % 24 === 0) { for (const d of await store.listDeals({ states: ['REFUNDING'] })) { if (!d.refunds.some(r => r.status === 'PENDING')) continue; try { await deals.retryRefunds(d.id); } catch (e) { logger.warn({ dealId: d.id, err: (e as Error).message }, 'retryRefunds agendado falhou'); } } }
+    if (ticks % 24 === 0) { for (const d of await store.listDeals({ states: ['REFUNDING', 'BLOCKED'] })) { if (!d.refunds.some(r => r.status === 'PENDING')) continue; try { await deals.retryRefunds(d.id); } catch (e) { logger.warn({ dealId: d.id, err: (e as Error).message }, 'retryRefunds agendado falhou'); } } }
     // CURA DE FUNDOS PRESOS (incidente refund BTC 2026-10-22): deal que expirou ANTES do lock BTC
     // confirmar nunca chegava a REFUNDING (reconciliação de expireNow é one-shot + exige confs).
     // Relemos o on-chain das EXPIRED com funding exigido e ainda sem reembolso; se o depósito

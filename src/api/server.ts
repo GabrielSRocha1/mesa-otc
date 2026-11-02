@@ -488,7 +488,9 @@ export async function buildApi(deps: ApiDeps): Promise<FastifyInstance> {
     // expireDue não pode consumir o orçamento todo — reserva tempo para as varreduras seguintes.
     const expired = await sweepTimeout(deps.deals.expireDue(), Math.min(15_000, left())).catch(() => [] as string[]);
     const [refunding, expiredDeals, liqVerified] = await Promise.all([
-      deps.store.listDeals({ states: ['REFUNDING'] }),
+      // BLOCKED também: deal bloqueada na validação da liquidação com reembolso PENDENTE caía num
+      // buraco entre os filtros (incidente op 3) — retryRefunds agora cura BLOCKED→REFUNDING.
+      deps.store.listDeals({ states: ['REFUNDING', 'BLOCKED'] }),
       deps.store.listDeals({ states: ['EXPIRED'] }),
       deps.store.listDeals({ states: ['LIQUIDITY_VERIFIED'] }),
     ]);
@@ -1014,7 +1016,7 @@ export async function buildApi(deps: ApiDeps): Promise<FastifyInstance> {
     // Serverless sem scheduler: o poll do admin também retenta reembolsos PENDENTES (ex.: refund
     // BTC aguardando o timelock CSV). Throttle por instância (90 s): cada tentativa consulta a
     // rede e gera evento de auditoria — o poll de segundos não pode virar spam.
-    if (d && d.state === 'REFUNDING' && d.refunds.some(r => r.status === 'PENDING') && Date.now() - (refundRetryAt.get(id) ?? 0) > 90_000) {
+    if (d && (d.state === 'REFUNDING' || d.state === 'BLOCKED') && d.refunds.some(r => r.status === 'PENDING') && Date.now() - (refundRetryAt.get(id) ?? 0) > 90_000) {
       refundRetryAt.set(id, Date.now());
       try { d = await deps.deals.retryRefunds(id); } catch { /* fica PENDING até a próxima */ }
     }
@@ -1615,7 +1617,7 @@ export async function buildApi(deps: ApiDeps): Promise<FastifyInstance> {
       try { await deps.deals.open(dealId, d.createdBy); } catch { /* FUNDING_REQUIRED até o lock confirmar — o registro do cofre já persistiu */ }
       return;
     }
-    if (d.state === 'REFUNDING' && d.refunds.some(r => r.status === 'PENDING') && Date.now() - (refundRetryAt.get(dealId) ?? 0) > 90_000) {
+    if ((d.state === 'REFUNDING' || d.state === 'BLOCKED') && d.refunds.some(r => r.status === 'PENDING') && Date.now() - (refundRetryAt.get(dealId) ?? 0) > 90_000) {
       refundRetryAt.set(dealId, Date.now());
       try { await deps.deals.retryRefunds(dealId); } catch { /* fica PENDING até a próxima */ }
     }

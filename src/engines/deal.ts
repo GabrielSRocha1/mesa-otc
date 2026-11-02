@@ -589,7 +589,13 @@ export class DealEngine {
     if (allDone && cancelled) logger.info({ dealId: deal.id }, 'depósitos devolvidos após cancelamento');
   }
   /** Reprocessa reembolsos pendentes (recuperação após falha de RPC). */
-  async retryRefunds(dealId: string): Promise<Deal> { return this.withDeal(dealId, async deal => { if (deal.state !== 'REFUNDING') return deal; deal.refunds = deal.refunds.filter(r => r.status !== 'PENDING'); await this.refundAll(deal, 'keeper', false); return deal; }); }
+  async retryRefunds(dealId: string): Promise<Deal> { return this.withDeal(dealId, async deal => {
+    // BLOCKED com reembolso PENDENTE (incidente mainnet op 3, 2026-11-02): a validação da liquidação
+    // falhou (ex.: expirada no meio), refundAll marcou PENDING, mas a deal ficou em BLOCKED — fora
+    // dos filtros do cron (REFUNDING no retry, EXPIRED na recuperação) e o reembolso nunca engatava
+    // (ETH do Comprador preso no escrow). BLOCKED→REFUNDING é transição legal: destrava e segue.
+    if (deal.state === 'BLOCKED' && deal.refunds.some(r => r.status === 'PENDING')) await this.transition(deal, 'REFUNDING', 'system');
+    if (deal.state !== 'REFUNDING') return deal; deal.refunds = deal.refunds.filter(r => r.status !== 'PENDING'); await this.refundAll(deal, 'keeper', false); return deal; }); }
 
   /**
    * CURA de fundos presos (incidente refund BTC 2026-10-22): a reconciliação de `expireNow` é
