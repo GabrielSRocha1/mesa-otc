@@ -22,6 +22,7 @@ import { VerumTronV2Adapter } from './adapters/verum/tronV2.js';
 import { VerumEvmDevKeyring, TronDevKeyring } from './adapters/verum/keyring.js';
 import { AssetRegistry, defaultRegistry } from './engines/assetRegistry.js';
 import { PriceEngine, StaticPriceSource, type PriceSource } from './engines/price.js';
+import { CoinGeckoRefresher, LivePriceSource } from './engines/priceLive.js';
 import { LiquidityEngine, StaticLiquiditySource, type LiquiditySource } from './engines/liquidity.js';
 import { RouterEngine } from './engines/router.js';
 import { SignatureEngine, envelopeFor, verifyEvm, verifySolana, verifyBitcoin, verifyTron } from './engines/signature.js';
@@ -272,7 +273,8 @@ export async function createApp(config: Config, o: AppOverrides = {}): Promise<A
   }
   // Preços/profundidade dev: assetIds reais das testnets entram na fonte estática.
   const prices: Record<string, number> = { ...LOCAL_PRICES };
-  // Ativos mainnet na fonte estática (gate MAX_DEAL_USD; follow-up: preço de mercado via CoinGecko).
+  // Ativos mainnet: os valores abaixo são só SEMENTES do mapa — em runtime o CoinGeckoRefresher os
+  // sobrescreve com o mercado AO VIVO, e sem busca boa a cotação é rejeitada (nunca serve a semente).
   if (evmMainCfg) { prices['eip155:1/slip44:60'] = 2_418.75; prices[`eip155:1/erc20:${ETH_MAINNET_TOKENS.USDT.address.toLowerCase()}`] = 1.0; prices[`eip155:1/erc20:${ETH_MAINNET_TOKENS.USDC.address.toLowerCase()}`] = 1.0; prices[`eip155:1/erc20:${ETH_MAINNET_TOKENS.WBTC.address.toLowerCase()}`] = 64_230.5; prices[`eip155:1/erc20:${ETH_MAINNET_TOKENS.WETH.address.toLowerCase()}`] = 2_418.75; }
   if (btcMainCfg) prices[`bip122:${adapters.require('bitcoin', 'mainnet').chain.chainId}/slip44:0`] = 64_230.5;
   if (verumEvmCfg) { prices[`eip155:${verumEvmCfg.chainId}/erc20:${verumEvmCfg.tbtc.toLowerCase()}`] = 64_230.5; prices[`eip155:${verumEvmCfg.chainId}/erc20:${verumEvmCfg.tusdt.toLowerCase()}`] = 1.0002; prices[`eip155:${verumEvmCfg.chainId}/slip44:60`] = 2_418.75; prices[`eip155:${verumEvmCfg.chainId}/erc20:${WETH_SEPOLIA.toLowerCase()}`] = 2_418.75; }
@@ -282,7 +284,24 @@ export async function createApp(config: Config, o: AppOverrides = {}): Promise<A
   prices['lightning:ln/btc'] = 64_230.5; // BTC via Lightning — mesmo preço do BTC nativo
   if (solCfg) { const solChainId = adapters.require('solana').chain.chainId; prices[`solana:${solChainId}/token:${solCfg.tusdtMint}`] = 1.0001; prices[`solana:${solChainId}/token:${solCfg.tbtcMint}`] = 64_230.5; prices[`solana:${solChainId}/token:${WSOL_MINT}`] = 151.2; prices[`solana:${solChainId}/slip44:501`] = 151.2; }
   const depth: Record<string, number> = Object.fromEntries(Object.keys(prices).map(k => [k, 8_000_000]));
-  const priceSources = (o.priceSources as StaticPriceSource[] | undefined) ?? [new StaticPriceSource('Pyth', 1.0, prices), new StaticPriceSource('Chainlink', 1.0, prices), new StaticPriceSource('Coinbase', 0.8, prices), new StaticPriceSource('Kraken', 0.8, prices)];
+  // PREÇO AO VIVO (CoinGecko) nos ativos MAINNET — fundos reais nunca na tabela estática (incidente
+  // op 3: BTC fixado em $64k vs mercado → perna do Comprador ~24% abaixo do justo). Uma busca única
+  // (single-flight, TTL 45s) atualiza o MAPA compartilhado; as 4 fontes servem o mesmo valor (consenso
+  // interno, sem disparar o disjuntor de dispersão) e o carimbo real faz o maxQuoteAgeMs rejeitar
+  // cotação velha → deal mainnet FALHA (fail-closed) se o CoinGecko ficar fora, nunca volta ao estático.
+  const liveIds: Record<string, string> = {};
+  if (btcMainCfg) liveIds[`bip122:${adapters.require('bitcoin', 'mainnet').chain.chainId}/slip44:0`] = 'bitcoin';
+  if (evmMainCfg) {
+    liveIds['eip155:1/slip44:60'] = 'ethereum';
+    liveIds[`eip155:1/erc20:${ETH_MAINNET_TOKENS.WBTC.address.toLowerCase()}`] = 'wrapped-bitcoin';
+    liveIds[`eip155:1/erc20:${ETH_MAINNET_TOKENS.WETH.address.toLowerCase()}`] = 'weth';
+    liveIds[`eip155:1/erc20:${ETH_MAINNET_TOKENS.USDT.address.toLowerCase()}`] = 'tether';
+    liveIds[`eip155:1/erc20:${ETH_MAINNET_TOKENS.USDC.address.toLowerCase()}`] = 'usd-coin';
+  }
+  const cgRefresher = Object.keys(liveIds).length ? new CoinGeckoRefresher(prices, liveIds) : null;
+  const liveSet = new Set(Object.keys(liveIds));
+  const mkPriceSrc = (name: string, w: number): StaticPriceSource => cgRefresher ? new LivePriceSource(name, w, prices, cgRefresher, liveSet) : new StaticPriceSource(name, w, prices);
+  const priceSources = (o.priceSources as StaticPriceSource[] | undefined) ?? [mkPriceSrc('Pyth', 1.0), mkPriceSrc('Chainlink', 1.0), mkPriceSrc('Coinbase', 0.8), mkPriceSrc('Kraken', 0.8)];
   const liquiditySources = (o.liquiditySources as StaticLiquiditySource[] | undefined) ?? [new StaticLiquiditySource('Binance', 1.0, depth), new StaticLiquiditySource('Coinbase', 0.9, depth), new StaticLiquiditySource('Jupiter', 0.7, depth)];
   const price = new PriceEngine(priceSources, undefined, now); const liquidity = new LiquidityEngine(liquiditySources, undefined, now);
   const router = new RouterEngine(adapters); const signature = new SignatureEngine(store, config.OTC_ENV, escrowByChain, now);
