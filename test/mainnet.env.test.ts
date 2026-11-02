@@ -3,7 +3,7 @@
  * mainnet (BTC↔Ethereum), hash back-compat, leitura de saldos por ambiente e roteamento fail-closed.
  */
 import { describe, it, expect } from 'vitest';
-import { makeApp, btcWallet, evmWallet } from './helpers.js';
+import { makeApp, btcWallet, evmWallet, signAs } from './helpers.js';
 import { AdapterRegistry } from '../src/adapters/types.js';
 import { computeDealHash, type Terms } from '../src/domain/types.js';
 import { getChain } from '../src/chains/registry.js';
@@ -163,6 +163,16 @@ describe('dual-ambiente — regra de par da mesa MAINNET', () => {
     expect(deal.state).toBe('AWAITING_SIGNATURES');
     expect(deal.onChain.bitcoin?.registered).toBe(true);
     expect(spyTestnet.called).toBe(0); // o adapter TESTNET nunca foi tocado
+    // REGRESSÃO (incidente op 4 mainnet, 2026-11-02): a VALIDAÇÃO da liquidação re-planeja a rota —
+    // sem o netEnv ela planejava em TESTNET (contratos diferentes da rota mainnet assinada) e TODA
+    // liquidação mainnet morria em ROUTE_CHANGED com 3/3 assinadas. Vai até o SETTLED de verdade.
+    await app.deals.fund(deal.id, 'SELLER', seller.address);
+    await app.deals.fund(deal.id, 'BUYER', buyer.address);
+    for (const r of [{ role: 'SELLER' as const, w: seller }, { role: 'PAYMASTER_1' as const, w: pm1 }, { role: 'BUYER' as const, w: buyer }]) await signAs(app, deal.id, r.role, r.w);
+    const rec = await app.settlement.settle(deal.id);
+    expect(rec.status).toBe('DONE');
+    expect((await app.deals.get(deal.id)).state).toBe('SETTLED');
+    expect(spyTestnet.called).toBe(0);
     await app.close();
   }, 60_000);
 });

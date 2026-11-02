@@ -63,7 +63,11 @@ export class SettlementEngine {
     }
     // 6. rota ainda viável e idêntica à assinada
     try {
-      const routes = await this.d.router.plan({ assetIn: t.legs[0]!.asset, assetOut: t.legs[1]!.asset, participants: t.participants, expiresInSec: Math.max(60, Math.floor((t.expiresAt - this.now()) / 1000)) });
+      // netEnv OBRIGATÓRIO (incidente op 4 mainnet, 2026-11-02): sem ele o router re-planejava no
+      // ambiente DEFAULT (testnet) → contratos de testnet ≠ rota mainnet assinada → ROUTE_CHANGED
+      // em TODA liquidação mainnet, com 3/3 assinadas e fundos depositados. Fail-closed segurou
+      // (ninguém perdeu nada), mas nenhuma mesa mainnet conseguia liquidar.
+      const routes = await this.d.router.plan({ assetIn: t.legs[0]!.asset, assetOut: t.legs[1]!.asset, participants: t.participants, expiresInSec: Math.max(60, Math.floor((t.expiresAt - this.now()) / 1000)), netEnv: envOfDeal(deal) });
       const same = routes.find(r => r.routeId === t.route.routeId && r.viable && r.legs.every((l, i) => l.escrowChain === t.route.legs[i]?.escrowChain && l.escrowContract === t.route.legs[i]?.escrowContract && l.mode === t.route.legs[i]?.mode));
       if (!same) fail('rota', 'ROUTE_CHANGED', 'rota assinada não é mais viável ou mudou'); else pass('rota', t.route.routeId);
     } catch (e) { if (isTransient(e)) throw e; fail('rota', 'ROUTE_CHANGED', (e as Error).message); }
