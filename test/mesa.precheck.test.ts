@@ -14,7 +14,7 @@ async function mesaComToken(app: Awaited<ReturnType<typeof makeApp>>['app']) {
   const token = r.json<{ token: string }>().token;
   const mesa = (await app.api.inject({ method: 'POST', url: '/v1/portal/mesas', headers: pmHeaders(token), payload: { network: 'tron', chairs: [
     { role: 'SELLER', expectedAsset: { network: 'bitcoin', contractOrMint: null, decimals: 8, symbol: 'BTC' } },
-    { role: 'BUYER', expectedAsset: { network: 'tron', contractOrMint: 'TR7NHqjeKQxGTCi8q8ZY4pL8otSzgjLj6t', decimals: 6, symbol: 'USDT' } },
+    { role: 'BUYER', expectedAsset: { network: 'ethereum', contractOrMint: null, decimals: 18, symbol: 'ETH' } },
   ] } })).json<{ mesaId: string }>();
   return { token, mesaId: mesa.mesaId };
 }
@@ -94,6 +94,93 @@ describe('balancePreCheck — rota e gate de assinatura', () => {
     const { token, mesaId } = await mesaComToken(app);
     const cancel = await app.api.inject({ method: 'POST', url: `/v1/portal/mesas/${mesaId}/cancel`, headers: pmHeaders(token), payload: { reason: 'mudei de ideia' } });
     expect(cancel.statusCode, cancel.body).toBe(200);
+    await app.close();
+  }, 60_000);
+
+  it('recibo pós-liquidação: Vendedor vê saldo de ETH (recebido) e Comprador vê saldo de BTC — antes = agora − recebido', async () => {
+    const readers = {
+      native: async (network: string) => ({ amount: network === 'ethereum' ? 0.05 : (network === 'bitcoin' ? 0.001 : 0) }),
+      tokens: async () => [],
+      priceUsdOf: async () => 2000,
+      tokenDirect: async () => null,
+    };
+    const { app } = await makeApp({ balanceReaders: readers as never });
+    const r = await app.api.inject({ method: 'POST', url: '/v1/portal/register', payload: { name: 'PM', email: uniqueEmail('receipt'), password: 'senha-forte-1' } });
+    const token = r.json<{ token: string }>().token;
+    const mesaId = (await app.api.inject({ method: 'POST', url: '/v1/portal/mesas', headers: pmHeaders(token), payload: { network: 'ethereum', chairs: [
+      { role: 'SELLER', expectedAsset: { network: 'bitcoin', contractOrMint: null, decimals: 8, symbol: 'BTC' } },
+      { role: 'BUYER', expectedAsset: { network: 'ethereum', contractOrMint: null, decimals: 18, symbol: 'ETH' } },
+    ] } })).json<{ mesaId: string }>().mesaId;
+    const mesa = app.mesa.mesaById(mesaId)!;
+    // Carteiras MULTICHAIN: cada papel tem endereço na rede que FINANCIA e na que RECEBE.
+    mesa.chairs.find(c => c.role === 'SELLER')!.wallet = { network: 'bitcoin', address: 'tb1qseller', addresses: [{ network: 'bitcoin', address: 'tb1qseller' }, { network: 'ethereum', address: '0x2222222222222222222222222222222222222222' }] } as never;
+    mesa.chairs.find(c => c.role === 'BUYER')!.wallet = { network: 'ethereum', address: '0x1111111111111111111111111111111111111111', addresses: [{ network: 'ethereum', address: '0x1111111111111111111111111111111111111111' }, { network: 'bitcoin', address: 'tb1qbuyerbtc' }] } as never;
+    const deal = {
+      id: 'OTC-receipt-1', state: 'SETTLED', revision: 1, createdAt: Date.now(), expiresAt: Date.now() + 3600_000, version: 1,
+      requiredSignatures: 2, validSignatures: 2, signatures: [],
+      participants: [
+        { role: 'SELLER', address: 'tb1qseller', fundingRequired: true, funding: 'FINAL' },
+        { role: 'BUYER', address: '0x1111111111111111111111111111111111111111', fundingRequired: true, funding: 'FINAL' },
+      ],
+      terms: { legs: [
+        { index: 0, from: 'SELLER', to: 'BUYER', asset: { network: 'bitcoin', contractOrMint: null, decimals: 8, code: 'BTC' }, amountBase: '20000', escrowChain: 'bitcoin', mode: 'HTLC' },
+        { index: 1, from: 'BUYER', to: 'SELLER', asset: { network: 'ethereum', contractOrMint: null, decimals: 18, code: 'ETH' }, amountBase: '34000000000000000', escrowChain: 'ethereum', mode: 'escrow' },
+      ] },
+    } as unknown as Deal;
+    await app.store.insertDeal(deal);
+    app.mesa.attachDeal(mesa, deal.id);
+    const body = (await app.api.inject({ method: 'GET', url: `/v1/mesas/${mesaId}/receipt-balances`, headers: pmHeaders(token) })).json<{ settled: boolean; balances: Array<{ role: string; symbol: string; received: number; current: number; before: number }> }>();
+    expect(body.settled).toBe(true);
+    const seller = body.balances.find(b => b.role === 'SELLER')!;
+    expect(seller.symbol).toBe('ETH');
+    expect(seller.received).toBeCloseTo(0.034, 6);
+    expect(seller.current).toBeCloseTo(0.05, 6);
+    expect(seller.before).toBeCloseTo(0.016, 6);
+    const buyer = body.balances.find(b => b.role === 'BUYER')!;
+    expect(buyer.symbol).toBe('BTC');
+    expect(buyer.received).toBeCloseTo(0.0002, 8);
+    expect(buyer.current).toBeCloseTo(0.001, 8);
+    expect(buyer.before).toBeCloseTo(0.0008, 8);
+    await app.close();
+  }, 60_000);
+
+  it('exigência do COMPRADOR vem da perna do deal (ETH), não só do gás: comprador com gás mas sem ETH suficiente é barrado', async () => {
+    // Leitores mock: 0,01 ETH na conta (gás US$ 20 → passa), mas a perna do comprador pede 0,034 ETH.
+    const readers = {
+      native: async () => ({ amount: 0.01 }),
+      tokens: async () => [],
+      priceUsdOf: async () => 2000,
+      tokenDirect: async () => null,
+    };
+    const { app } = await makeApp({ balanceReaders: readers as never });
+    const r = await app.api.inject({ method: 'POST', url: '/v1/portal/register', payload: { name: 'PM', email: uniqueEmail('buyeramt'), password: 'senha-forte-1' } });
+    const token = r.json<{ token: string }>().token;
+    const mesaId = (await app.api.inject({ method: 'POST', url: '/v1/portal/mesas', headers: pmHeaders(token), payload: { network: 'ethereum', chairs: [
+      { role: 'SELLER', expectedAsset: { network: 'bitcoin', contractOrMint: null, decimals: 8, symbol: 'BTC' } },
+      { role: 'BUYER', expectedAsset: { network: 'ethereum', contractOrMint: null, decimals: 18, symbol: 'ETH' } },
+    ] } })).json<{ mesaId: string }>().mesaId;
+    // Conecta carteiras direto nas cadeiras (simula o join multichain).
+    const mesa = app.mesa.mesaById(mesaId)!;
+    mesa.chairs.find(c => c.role === 'SELLER')!.wallet = { network: 'bitcoin', address: 'tb1qseller', addresses: [{ network: 'bitcoin', address: 'tb1qseller' }] } as never;
+    mesa.chairs.find(c => c.role === 'BUYER')!.wallet = { network: 'ethereum', address: '0x1111111111111111111111111111111111111111', addresses: [{ network: 'ethereum', address: '0x1111111111111111111111111111111111111111' }] } as never;
+    // Deal vinculado com a perna do COMPRADOR exigindo 0,034 ETH; VENDEDOR já FINAL (dispensado).
+    const deal = {
+      id: 'OTC-buyeramt-1', state: 'AWAITING_SIGNATURES', revision: 1, createdAt: Date.now(), expiresAt: Date.now() + 3600_000, version: 1,
+      requiredSignatures: 2, validSignatures: 0, signatures: [],
+      participants: [
+        { role: 'SELLER', address: 'tb1qseller', fundingRequired: true, funding: 'FINAL' },
+        { role: 'BUYER', address: '0x1111111111111111111111111111111111111111', fundingRequired: true, funding: 'PENDING' },
+      ],
+      terms: { legs: [
+        { index: 0, from: 'SELLER', to: 'BUYER', asset: { network: 'bitcoin', contractOrMint: null, decimals: 8 }, amountBase: '20000', escrowChain: 'bitcoin', mode: 'HTLC' },
+        { index: 1, from: 'BUYER', to: 'SELLER', asset: { network: 'ethereum', contractOrMint: null, decimals: 18 }, amountBase: '34000000000000000', escrowChain: 'ethereum', mode: 'escrow' },
+      ] },
+    } as unknown as Deal;
+    await app.store.insertDeal(deal);
+    app.mesa.attachDeal(mesa, deal.id);
+    const body = (await app.api.inject({ method: 'GET', url: `/v1/portal/mesas/${mesaId}/precheck`, headers: pmHeaders(token) })).json<{ ok: boolean; failures: string[] }>();
+    expect(body.ok).toBe(false);
+    expect(body.failures.join(' | ')).toMatch(/Comprador: saldo de ETH insuficiente/);
     await app.close();
   }, 60_000);
 });

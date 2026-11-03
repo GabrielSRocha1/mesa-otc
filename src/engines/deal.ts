@@ -8,6 +8,7 @@ import { z } from 'zod';
 import { computeDealHash, newId, randomHex, sha256Hex, canonicalize, NETWORK_KEY_SCHEME, ROLE_ORDER, SIGNING_ORDER, PRE_SETTLING_EXPIRABLE, TERMINAL_STATES, type Deal, type DealState, type Environment, type Leg, type Participant, type Role, type Terms, type CanonicalAsset, type Network } from '../domain/types.js';
 
 import { SIGN_WINDOW_MS } from '../domain/constants.js';
+import { CREATION_WINDOW_SECONDS } from '../onchain/core/constants.js';
 /** Janela rolante por assinante: cada papel tem SIGN_WINDOW_MINUTES QUANDO chega a vez dele. */
 const SIGNER_WINDOW_MS = SIGN_WINDOW_MS;
 import { DomainError } from '../domain/errors.js';
@@ -18,7 +19,15 @@ export const htlcHashOf = (preimageHex: string): string => sha256Hex(hexToBytes(
 /** Divisão igualitária da comissão em bps; o resíduo de arredondamento vai para o primeiro Pay Master. */
 export const splitEqual = (commissionBps: number, n: number): number[] => { if (n <= 0) return []; const base = Math.floor(commissionBps / n); const arr = Array<number>(n).fill(base); arr[0] = (arr[0] ?? 0) + commissionBps - base * n; return arr; };
 import type { Store } from '../db/repository.js';
-import type { AdapterRegistry, ApprovalSignature, DealCommitment, OnChainDealState } from '../adapters/types.js';
+import type { AdapterRegistry, ApprovalSignature, DealCommitment, OnChainDealState, SettlementAdapter } from '../adapters/types.js';
+import { evmGasPayer, estimateGasPrepayWei } from './gasPrepay.js';
+/** Capacidades de pré-pagamento de gás que o adaptador EVM V2 expõe (duck-typed: sim/não-EVM não têm). */
+interface GasPrepayAdapter {
+  gasPrepayEnforced(): boolean;
+  keeperAddress(): string;
+  currentGasPriceWei(): Promise<bigint>;
+  verifyGasPrepay(txHash: string, from: string, minWei: bigint): Promise<{ valueWei: bigint }>;
+}
 import type { AssetRegistry } from './assetRegistry.js';
 import type { PriceEngine } from './price.js';
 import type { LiquidityEngine } from './liquidity.js';
@@ -43,7 +52,14 @@ export const CreateDealInput = z.object({
   // LIGHTNING_SWAP: o hashlock e a invoice vêm do COMPRADOR (a mesa não gera a preimage). payment_hash
   // da invoice == lightningHtlcHash == htlcHash do deal. Só válidos quando a perna é lightning.
   lightningHtlcHash: z.string().regex(/^[0-9a-f]{64}$/i).optional(),
-  lightningInvoice: z.string().min(10).optional()
+  lightningInvoice: z.string().min(10).optional(),
+  // Operar Indexado: hash do fixing (preço indexado já congelado em valores fixos antes das assinaturas).
+  // Quando presente, entra em terms.pricing.indexedFixingHash → dealHash → assinaturas. Opcional (FIXED não envia).
+  indexedFixingHash: z.string().regex(/^[0-9a-f]{64}$/i).optional(),
+  // Operar Indexado: quoteAmount já fixado (perna do Comprador). Substitui o amountOut do oráculo.
+  fixedAmountOutBase: z.string().regex(/^[1-9][0-9]*$/).optional(),
+  /** Ambiente de REDE da operação (mesa mainnet). Ausente = testnet (compat total). */
+  netEnv: z.enum(['mainnet', 'testnet']).optional()
 });
 export type CreateDealInputT = z.infer<typeof CreateDealInput>;
 
@@ -104,6 +120,11 @@ export class DealEngine {
     // depósito confirma (fund→FINAL), a janela REINICIA do zero para a assinatura em si.
     const p = deal.participants.find(x => x.role === deal.turnRole);
     if (p?.fundingRequired && p.funding !== 'FINAL') return false;
+    // GÁS idem (incidente mainnet op 3): o pré-pagamento do PAGADOR DA VEZ é espera de blockchain +
+    // verificação (carteira, confirmações EVM, retry do registro) — não é demora de assinatura.
+    // Enquanto PENDING na vez dele, o turno NÃO expira (o teto global deal.expiresAt segue valendo);
+    // quando confirma (FUNDED), recordGasPrepay REINICIA a janela só para assinar.
+    if (deal.gasPrepay?.status === 'PENDING' && deal.gasPrepay.payerRole === deal.turnRole) return false;
     return true;
   }
 
@@ -119,7 +140,8 @@ export class DealEngine {
     if (input.discountBps + input.commissionBps > 10000) throw new DomainError('INVALID_INPUT', 'Deságio + comissão não podem ultrapassar 100%');
     const assetIn = this.d.registry.resolve(input.assetIn); const assetOut = this.d.registry.resolve(input.assetOut);
     if (assetIn.assetId === assetOut.assetId) throw new DomainError('INVALID_INPUT', 'Ativo de saída deve ser diferente do de entrada');
-    const participants: Participant[] = input.participants.map(p => { const a = this.d.adapters.get(p.network); if (!a) throw new DomainError('ADAPTER_UNAVAILABLE', `Rede ${p.network} não suportada`); if (a.chain.chainId !== p.chainId) throw new DomainError('WALLET_INVALID', `chainId ${p.chainId} inválido para ${p.network}`); if (!a.validateAddress(p.address)) throw new DomainError('WALLET_INVALID', `Endereço inválido para ${p.network}: ${p.address}`); return { ...p, keyScheme: NETWORK_KEY_SCHEME[p.network] }; }).sort((a, b) => ROLE_ORDER[a.role] - ROLE_ORDER[b.role]);
+    const netEnv = input.netEnv ?? 'testnet';
+    const participants: Participant[] = input.participants.map(p => { const a = this.d.adapters.get(p.network, netEnv); if (!a) throw new DomainError('ADAPTER_UNAVAILABLE', netEnv === 'mainnet' ? `Rede ${p.network} sem adaptador MAINNET configurado` : `Rede ${p.network} não suportada`); if (a.chain.chainId !== p.chainId) throw new DomainError('WALLET_INVALID', `chainId ${p.chainId} inválido para ${p.network}`); if (!a.validateAddress(p.address)) throw new DomainError('WALLET_INVALID', `Endereço inválido para ${p.network}: ${p.address}`); return { ...p, keyScheme: NETWORK_KEY_SCHEME[p.network] }; }).sort((a, b) => ROLE_ORDER[a.role] - ROLE_ORDER[b.role]);
     const seller = participants.find(p => p.role === 'SELLER') as Participant; const buyer = participants.find(p => p.role === 'BUYER') as Participant;
     // Exceção LIGHTNING: o Vendedor (market-maker) entrega BTC via nó LN e assina/recebe no EVM —
     // a carteira dele NÃO fica na "rede" lightning. A entrega é do nó, não da carteira do papel.
@@ -133,7 +155,7 @@ export class DealEngine {
     // LIGHTNING: a perna BTC (assetIn 'lightning', do VENDEDOR/market-maker) é ENTREGUE no settle —
     // o Vendedor NÃO deposita. fundingRequired do Vendedor = false; só o Comprador (USDT) financia.
     const lnSell = assetIn.network === 'lightning';
-    const deal: Deal = { id, version: 1, state: 'DRAFT', revision: 1, terms: null, hash: null, draft: { assetIn, assetOut, amountInBase: input.amountInBase, discountBps: input.discountBps, commissionBps: input.commissionBps, commissionSplitBps: split, maxSlippageBps: input.maxSlippageBps, maxPriceDriftBps: input.maxPriceDriftBps, expiresInSec: input.expiresInSec, participants },
+    const deal: Deal = { id, version: 1, state: 'DRAFT', revision: 1, terms: null, hash: null, draft: { assetIn, assetOut, amountInBase: input.amountInBase, discountBps: input.discountBps, commissionBps: input.commissionBps, commissionSplitBps: split, maxSlippageBps: input.maxSlippageBps, maxPriceDriftBps: input.maxPriceDriftBps, expiresInSec: input.expiresInSec, participants, ...(input.indexedFixingHash ? { indexedFixingHash: input.indexedFixingHash.toLowerCase() } : {}), ...(input.fixedAmountOutBase ? { fixedAmountOutBase: input.fixedAmountOutBase } : {}), ...(netEnv === 'mainnet' ? { netEnv } : {}) },
       participants: participants.map(p => { const fundReq = (p.role === 'SELLER' && !lnSell) || p.role === 'BUYER'; return { ...p, connected: p.address.toLowerCase() === actor.toLowerCase(), fundingRequired: fundReq, funding: fundReq ? 'PENDING' : 'N/A', riskLevel: 'UNKNOWN' }; }),
       requiredSignatures: participants.length, validSignatures: 0, signatures: [], settlement: null, refunds: [], risk: null, createdBy: actor, createdAt: t, updatedAt: t, expiresAt: t + input.expiresInSec * 1000, turnRole: null, turnExpiresAt: null, shareToken: randomHex(32), onChain: {},
       ...(input.lightningHtlcHash ? { lightningHtlcHash: input.lightningHtlcHash.toLowerCase() } : {}), ...(input.lightningInvoice ? { lightningInvoice: input.lightningInvoice } : {}) } as Deal;
@@ -167,8 +189,8 @@ export class DealEngine {
     if (deal.state !== 'WALLETS_CONNECTED' && deal.state !== 'ASSETS_VERIFIED') throw new DomainError('ILLEGAL_TRANSITION', `Verificação não permitida em ${deal.state}`);
     try {
       if (deal.state === 'WALLETS_CONNECTED') {
-        for (const a of [dr.assetIn, dr.assetOut]) { this.d.registry.resolve(a); await this.d.registry.verifyOnChain(a, this.d.adapters); }
-        const seller = deal.participants.find(p => p.role === 'SELLER') as Participant; const bal = await this.d.adapters.require(dr.assetIn.network).getBalance(seller.address, dr.assetIn);
+        for (const a of [dr.assetIn, dr.assetOut]) { this.d.registry.resolve(a); await this.d.registry.verifyOnChain(a, this.d.adapters, this.envOf(deal)); }
+        const seller = deal.participants.find(p => p.role === 'SELLER') as Participant; const bal = await this.d.adapters.require(dr.assetIn.network, this.envOf(deal)).getBalance(seller.address, dr.assetIn);
         if (bal < BigInt(dr.amountInBase)) throw new DomainError('FUNDING_REQUIRED', 'Saldo do Vendedor insuficiente para a quantidade', { balance: bal.toString() });
         await this.transition(deal, 'ASSETS_VERIFIED', actor);
       }
@@ -178,11 +200,16 @@ export class DealEngine {
       const riskDecision = await this.d.risk.assessDeal(deal, Number(econ.pricing.usdValueIn)); if (riskDecision === 'BLOCK') { await this.blockInternal(deal, 'Limite de risco excedido', 'RS-050 · limits', 'system'); throw new DomainError('RISK_BLOCKED', 'Operação bloqueada por limites de risco'); }
       const liq = await this.d.liquidity.assess({ assetIn: dr.assetIn, assetOut: dr.assetOut, sizeUsd: Number(econ.pricing.usdValueIn), maxSlippageBps: dr.maxSlippageBps });
       if (!liq.sufficient) { await this.persist(deal, 'liquidity.insufficient', actor, { reasons: liq.reasons }); throw new DomainError('LIQUIDITY_INSUFFICIENT', liq.reasons.join('; '), { assessment: liq }); }
-      const routes = await this.d.router.plan({ assetIn: dr.assetIn, assetOut: dr.assetOut, participants: dr.participants, expiresInSec: Math.max(60, Math.floor((deal.expiresAt - this.now()) / 1000)) }); const route = this.d.router.select(routes);
+      const routes = await this.d.router.plan({ assetIn: dr.assetIn, assetOut: dr.assetOut, participants: dr.participants, expiresInSec: Math.max(60, Math.floor((deal.expiresAt - this.now()) / 1000)), netEnv: this.envOf(deal) }); const route = this.d.router.select(routes);
       const escrowFor = (n: Network) => route.legs.find(l => l.escrowChain === n) as Terms['route']['legs'][number];
+      // Operar Indexado: a perna do Comprador é a quantidade JÁ FIXADA (quoteAmount do fixing), não o
+      // amountOut do oráculo. FIXED mantém o amountOut do oráculo (comportamento atual, intacto). O fee de
+      // protocolo (líquido do Vendedor) acompanha a perna efetivamente entregue ao Vendedor.
+      const amountOutBase = dr.fixedAmountOutBase ?? econ.amountOutBase;
+      const feeBase = BigInt(amountOutBase) * BigInt(this.d.config.platformFeeBps) / 10000n;
       const legs: Leg[] = [
         { index: 0, asset: dr.assetIn, amountBase: econ.amountInEffectiveBase, from: 'SELLER', to: 'BUYER', escrowChain: dr.assetIn.network, escrowContract: escrowFor(dr.assetIn.network).escrowContract, mode: escrowFor(dr.assetIn.network).mode },
-        { index: 1, asset: dr.assetOut, amountBase: econ.amountOutBase, from: 'BUYER', to: 'SELLER', escrowChain: dr.assetOut.network, escrowContract: escrowFor(dr.assetOut.network).escrowContract, mode: escrowFor(dr.assetOut.network).mode }
+        { index: 1, asset: dr.assetOut, amountBase: amountOutBase, from: 'BUYER', to: 'SELLER', escrowChain: dr.assetOut.network, escrowContract: escrowFor(dr.assetOut.network).escrowContract, mode: escrowFor(dr.assetOut.network).mode }
       ];
       // HTLC on-chain: a mesa GERA a preimage (exposta só ao Vendedor; override no runner resumível).
       // LIGHTNING_SWAP: o htlcHash vem do COMPRADOR (deal.lightningHtlcHash) — a mesa NÃO conhece a
@@ -191,7 +218,12 @@ export class DealEngine {
       const htlc = route.kind === 'HTLC' ? { preimage: this.d.config.htlcPreimageHex && /^[0-9a-f]{64}$/i.test(this.d.config.htlcPreimageHex) ? this.d.config.htlcPreimageHex.toLowerCase() : randomHex(32) } : null;
       const htlcHash = route.kind === 'LIGHTNING_SWAP' ? lnHash : (htlc ? htlcHashOf(htlc.preimage) : undefined);
       if (route.kind === 'LIGHTNING_SWAP' && !htlcHash) throw new DomainError('INVALID_INPUT', 'operação Lightning exige lightningHtlcHash (payment_hash da invoice do Comprador)');
-      const terms: Terms = { schemaVersion: 1, environment: this.d.config.env, dealId: deal.id, revision: deal.revision, createdAt: deal.createdAt, expiresAt: deal.expiresAt, participants: dr.participants, requiredSignatures: deal.requiredSignatures, legs, pricing: econ.pricing, route: { routeId: route.routeId, kind: route.kind, legs: route.legs, ...(htlcHash ? { htlcHash } : {}) }, dealNonce: randomHex(16) };
+      // Operar Indexado: o fixing (preço indexado já congelado) entra no pricing congelado → dealHash →
+      // envelope assinado pelos 4. FIXED não tem fixing: campo omitido (canonicalize ignora undefined → hash idêntico).
+      const pricing = (dr.indexedFixingHash || dr.fixedAmountOutBase)
+        ? { ...econ.pricing, ...(dr.indexedFixingHash ? { indexedFixingHash: dr.indexedFixingHash } : {}), ...(dr.fixedAmountOutBase ? { netAmountSellerBase: (BigInt(amountOutBase) - feeBase).toString() } : {}) }
+        : econ.pricing;
+      const terms: Terms = { schemaVersion: 1, environment: this.d.config.env, dealId: deal.id, revision: deal.revision, createdAt: deal.createdAt, expiresAt: deal.expiresAt, participants: dr.participants, requiredSignatures: deal.requiredSignatures, legs, pricing, route: { routeId: route.routeId, kind: route.kind, legs: route.legs, ...(htlcHash ? { htlcHash } : {}) }, dealNonce: randomHex(16), ...(this.envOf(deal) === 'mainnet' ? { netEnv: 'mainnet' as const } : {}) };
       deal.terms = terms; deal.hash = computeDealHash(terms); (deal as Deal & { htlcPreimage?: string }).htlcPreimage = htlc?.preimage;
       await this.transition(deal, 'LIQUIDITY_VERIFIED', actor, { dealHash: deal.hash.dealHash, routeId: route.routeId, priceSnapshotId: snapshot.id, liquidity: { depthUsd: liq.depthUsd, slippageBps: liq.slippageBps } });
       // O registro on-chain acontece no OPEN (não aqui): escrow real tem janela FIXA de 40 min a
@@ -200,12 +232,19 @@ export class DealEngine {
       return deal;
     } finally { end(); }
   }
+  /** Ambiente de REDE da deal: terms congelados mandam; antes do freeze vale o draft. Ausente = testnet. */
+  private envOf(deal: Deal): 'mainnet' | 'testnet' {
+    return deal.terms?.netEnv ?? deal.draft?.netEnv ?? 'testnet';
+  }
   private commitment(deal: Deal): DealCommitment { const t = deal.terms as Terms; const h = deal.hash as NonNullable<Deal['hash']>; return { dealId: deal.id, revision: deal.revision, dealHash: h.dealHash, expiresAt: t.expiresAt, participants: t.participants, legs: t.legs, pricingHash: h.pricingHash, routeHash: h.routeHash, domainHash: h.domainHash, dealNonce: t.dealNonce, feeBps: t.pricing.platformFeeBps, treasury: this.d.config.treasury, htlcHash: t.route.htlcHash, terms: t }; }
   private async registerChain(deal: Deal, chain: Network): Promise<void> {
     if (deal.onChain[chain]?.registered && deal.onChain[chain]?.revision === deal.revision) return; // retry idempotente
     const c = this.commitment(deal);
+    const adapter = this.d.adapters.require(chain, this.envOf(deal));
+    // (O pré-pagamento de gás NÃO bloqueia mais o registro: o keeper adianta o gás do registro e o
+    //  lado-EVM pré-paga NO TURNO DELE, depois de Vendedor+PM assinarem — ver assertGasPrepaidForSigner.)
     try {
-      const tx = await this.d.adapters.require(chain).registerDeal(c);
+      const tx = await adapter.registerDeal(c);
       deal.onChain[chain] = { registered: true, revision: deal.revision, ...(tx.meta ? { meta: tx.meta } : {}) };
       // Escrow real tem janela fixa on-chain (40 min a partir do createTrade): o teto da Deal
       // é clampado a ela (menos a margem de execução) p/ que turnos + liquidação caibam dentro.
@@ -216,6 +255,86 @@ export class DealEngine {
   }
   private async registerOnChain(deal: Deal): Promise<void> {
     for (const chain of new Set((deal.terms as Terms).legs.map(l => l.escrowChain))) await this.registerChain(deal, chain);
+  }
+
+  /* ---------- pré-pagamento de gás do keeper (lado-EVM banca registro + settle/refund) ---------- */
+  private isGasPrepayAdapter(a: unknown): a is GasPrepayAdapter {
+    const o = a as Partial<GasPrepayAdapter> | null;
+    return !!o && typeof o.gasPrepayEnforced === 'function' && typeof o.keeperAddress === 'function' && typeof o.currentGasPriceWei === 'function' && typeof o.verifyGasPrepay === 'function';
+  }
+  /**
+   * Bloqueia o registro da perna EVM enquanto o lado-EVM não pré-pagar o gás do keeper. Em deals
+   * não-EVM (ou adaptador simulado, sem as capacidades) é no-op — preserva todos os fluxos atuais.
+   * Calcula o depósito DINÂMICO (gasPrice atual × ciclo × margem), grava PENDENTE e lança 402.
+   */
+  /**
+   * Gate do pré-pagamento de gás NO TURNO do assinante: só dispara quando é a vez do PAGADOR lado-EVM
+   * (comprador em BTC↔ETH / mesma-rede) assinar — ou seja, depois de Vendedor+PM. Antes disso é no-op.
+   * Em dev/demo (keyring) ou deals não-EVM também é no-op. Lança GAS_PREPAY_REQUIRED (e grava PENDENTE).
+   */
+  private async assertGasPrepaidForSigner(deal: Deal, role: Role): Promise<void> {
+    if (deal.gasPrepay?.status === 'FUNDED') return;
+    const due = await this.ensureGasPrepayFlag(deal, role);
+    if (!due) return;
+    await this.persist(deal, 'gasPrepay.required', 'system', { payer: deal.gasPrepay!.payerRole, requiredWei: deal.gasPrepay!.requiredWei });
+    throw new DomainError('GAS_PREPAY_REQUIRED', `Pré-pagamento de gás pendente: o ${deal.gasPrepay!.payerRole} deve pré-pagar o gás do keeper antes de assinar`, { requiredWei: deal.gasPrepay!.requiredWei, payerRole: deal.gasPrepay!.payerRole });
+  }
+  /**
+   * Gate PÚBLICO para as rotas de passo on-chain (/onchain-tx): o pagador lado-EVM não pode executar
+   * o signV2 (que MOVE o pagamento dele para o escrow) antes de pré-pagar o gás — senão ele paga o
+   * escrow e só depois esbarra no gate da aprovação, deixando fundos no contrato com gás pendente.
+   * No-op para os demais papéis/estados; lança GAS_PREPAY_REQUIRED (e grava PENDENTE) para o pagador.
+   */
+  async requireGasPrepaid(dealId: string, role: Role): Promise<void> {
+    await this.withDeal(dealId, async deal => { await this.assertGasPrepaidForSigner(deal, role); return deal; });
+  }
+  /**
+   * Popula deal.gasPrepay=PENDING quando `role` é o pagador lado-EVM e o gás ainda não foi pré-pago.
+   * NÃO persiste nem lança — usado tanto pela VIEW (pop-up proativo quando a vez chega ao pagador)
+   * quanto pelo gate assertGasPrepaidForSigner. Retorna true se há pré-pagamento pendente para `role`.
+   */
+  private async ensureGasPrepayFlag(deal: Deal, role: Role): Promise<boolean> {
+    if (deal.gasPrepay?.status === 'FUNDED') return false;
+    const t = deal.terms; if (!t || !t.legs.some(l => l.escrowChain === 'ethereum')) return false; // sem perna EVM
+    const adapter = this.d.adapters.get('ethereum', this.envOf(deal));
+    if (!this.isGasPrepayAdapter(adapter) || !adapter.gasPrepayEnforced()) return false; // dev/demo auto-paga
+    const payer = evmGasPayer(this.commitment(deal));
+    if (payer.role !== role) return false; // só o PAGADOR (comprador em BTC↔ETH) pré-paga
+    if (!deal.gasPrepay) {
+      const requiredWei = estimateGasPrepayWei(await adapter.currentGasPriceWei());
+      deal.gasPrepay = { payerRole: payer.role, payerAddress: payer.address, keeperAddress: adapter.keeperAddress(), requiredWei: requiredWei.toString(), status: 'PENDING' };
+    }
+    return true;
+  }
+  /**
+   * Registra o depósito de gás: verifica a tx (do pagador → keeper, valor ≥ exigido) e, confirmado,
+   * retoma a abertura (registra on-chain + inicia turnos). Reabre com o CRIADOR como ator.
+   */
+  async recordGasPrepay(dealId: string, txHash: string): Promise<Deal> {
+    await this.withDeal(dealId, async deal => {
+      const gp = deal.gasPrepay;
+      if (!gp) throw new DomainError('INVALID_INPUT', 'esta mesa não requer pré-pagamento de gás');
+      if (gp.status !== 'PENDING') return deal; // idempotente (já FUNDED)
+      const adapter = this.d.adapters.require('ethereum', this.envOf(deal));
+      if (!this.isGasPrepayAdapter(adapter)) throw new DomainError('SETTLEMENT_NOT_ALLOWED', 'adaptador EVM sem suporte a pré-pagamento');
+      const { valueWei } = await adapter.verifyGasPrepay(txHash, gp.payerAddress, BigInt(gp.requiredWei));
+      deal.gasPrepay = { ...gp, status: 'FUNDED', txRef: txHash, receivedWei: valueWei.toString() };
+      // JANELA JUSTA (incidente mainnet 2026-11-01): pagar o gás consome boa parte dos 5 min da vez
+      // (carteira + confirmações EVM + verificação) — a op expirava NA ASSINATURA logo após o pagador
+      // ter pago. Pagar o gás é PROGRESSO verificável: reinicia a janela da vez dele para os 5 min
+      // cobrirem só o que falta (signV2 + aprovação). Não beneficia terceiros (só na vez do pagador).
+      if (deal.state === 'AWAITING_SIGNATURES' && deal.turnRole === gp.payerRole) this.startTurn(deal);
+      await this.persist(deal, 'gasPrepay.funded', 'system', { txRef: txHash, receivedWei: valueWei.toString(), turnExpiresAt: deal.turnExpiresAt });
+      return deal;
+    });
+    const deal = await this.get(dealId);
+    // Gás FUNDED. O pré-pagamento agora ocorre NO TURNO do pagador (depois de Vendedor+PM assinarem),
+    // então a mesa já está AWAITING_SIGNATURES — NÃO reabrir (open() é transição ilegal daqui). O
+    // pagador apenas reenvia a assinatura dele, que passa pelo gate assertGasPrepaidForSigner.
+    // Só reabrimos no fluxo legado (mesa ainda LIQUIDITY_VERIFIED).
+    if (deal.state !== 'LIQUIDITY_VERIFIED') return deal;
+    try { return await this.open(dealId, deal.createdBy); }
+    catch (e) { logger.warn({ dealId, err: (e as Error).message }, 'open pós-gas-prepay adiado (lock/registro pendente)'); return this.get(dealId); }
   }
 
   /* ---------- 7. abertura para assinaturas ---------- */
@@ -247,14 +366,46 @@ export class DealEngine {
   async startTurnsIfRegistered(dealId: string): Promise<Deal> {
     return this.withDeal(dealId, async deal => {
       if (deal.state !== 'AWAITING_SIGNATURES' || deal.turnRole !== null || deal.validSignatures >= deal.requiredSignatures) return deal;
+      const nowSec = Math.floor(this.now() / 1000);
       for (const chain of this.registerPendingChains(deal)) {
-        const st = await this.d.adapters.require(chain).getDealState(deal.id).catch(() => null);
-        if (!st || st.status === 'NONE') return deal; // registro ainda não confirmou — segue adiado
+        const st = await this.d.adapters.require(chain, this.envOf(deal)).getDealState(deal.id).catch(() => null);
+        if (!st || st.status === 'NONE') {
+          // Registro ainda não confirmou — segue adiado. MAS a janela de criação do escrow
+          // (CREATION_WINDOW) corre a partir do `createdAt` embutido no registerTx: se o criador
+          // (PM1) não minerou o createTradeV2 dentro dela, o contrato passa a REVERTER ("createdAt
+          // muito antigo"/TradeExpired) e o retry da UI reenvia o MESMO tx morto para sempre —
+          // operação presa em "Registro on-chain pendente: execution reverted". Quando a janela do
+          // tx atual já venceu (ele JAMAIS poderá ser criado), reconstruímos o registerTx com um
+          // `createdAt` fresco: o tradeId antigo nunca existirá, então trocá-lo não perde nada.
+          const meta = deal.onChain[chain]?.meta as Record<string, unknown> | undefined;
+          const createdAt = typeof meta?.onChainCreatedAt === 'number' ? meta.onChainCreatedAt : null;
+          if (meta?.registerPending && createdAt !== null && nowSec > createdAt + CREATION_WINDOW_SECONDS) {
+            await this.refreshPendingRegister(deal, chain);
+          }
+          return deal;
+        }
       }
       this.startTurn(deal);
       await this.persist(deal, 'turn.started', 'system', { turnRole: deal.turnRole, turnExpiresAt: deal.turnExpiresAt, reason: 'register-confirmed' });
       return deal;
     });
+  }
+  /**
+   * Reconstrói o registro on-chain PENDENTE (createTradeV2 da carteira real) quando a janela de
+   * criação do tx atual expirou sem ele ser minerado. Só é chamado com o estado on-chain em NONE
+   * (trade nunca criada) — re-chamar registerDeal regera `createdAt`/tradeId/atestados com um novo
+   * now, e re-clampa o teto da Deal à nova janela de 40 min. Sem off-chain signatures ainda (turnos
+   * adiados), então trocar o tradeId é seguro.
+   */
+  private async refreshPendingRegister(deal: Deal, chain: Network): Promise<void> {
+    const c = this.commitment(deal);
+    const tx = await this.d.adapters.require(chain, this.envOf(deal)).registerDeal(c); // estado NONE ⇒ reconstrói com createdAt fresco
+    deal.onChain[chain] = { registered: true, revision: deal.revision, ...(tx.meta ? { meta: tx.meta } : {}) };
+    const onChainExpiresAt = typeof tx.meta?.onChainExpiresAt === 'number' ? tx.meta.onChainExpiresAt : null;
+    // Ao RENOVAR a janela, o teto deve ESTENDER (não Math.min com o valor já vencido) — limitado só
+    // pelo prazo off-chain original dos termos.
+    if (onChainExpiresAt) deal.expiresAt = Math.min((deal.terms as Terms).expiresAt, onChainExpiresAt * 1000 - this.d.config.execMarginMs);
+    await this.persist(deal, 'chain.register.refreshed', 'keeper', { chain, tx: tx.ref, reason: 'creation-window-expired' });
   }
 
   /* ---------- 8. funding (dev: simulador; prod: indexer reporta) ---------- */
@@ -283,7 +434,7 @@ export class DealEngine {
   /** Detecção/execução do depósito de UMA perna (usada pelo fund e pelo gate do open). */
   private async fundLeg(deal: Deal, role: Role, actor: string): Promise<void> {
     const p = deal.participants.find(x => x.role === role) as Deal['participants'][number];
-    const leg = (deal.terms as Terms).legs[role === 'SELLER' ? 0 : 1] as Leg; const adapter = this.d.adapters.require(leg.escrowChain);
+    const leg = (deal.terms as Terms).legs[role === 'SELLER' ? 0 : 1] as Leg; const adapter = this.d.adapters.require(leg.escrowChain, this.envOf(deal));
     try { const tx = await adapter.deposit(deal.id, leg.index, p.address); const st = await adapter.waitFinal(tx.ref); p.funding = st.status === 'final' ? 'FINAL' : 'SEEN'; await this.persist(deal, 'funded', actor, { role, legIndex: leg.index, tx: tx.ref, status: st.status }); }
     catch (e) { metrics.adapterErrors.inc({ chain: leg.escrowChain, op: 'deposit' }); throw e; }
   }
@@ -302,6 +453,9 @@ export class DealEngine {
       const order = this.signingOrder(deal); const idx = order.indexOf(sig.role);
       const pending = order.slice(0, idx).filter(r => !this.hasSigned(deal, r));
       if (pending.length) { metrics.signaturesRejected.inc({ reason: 'out_of_order' }); throw new DomainError('SIGNATURE_OUT_OF_ORDER', `Aguardando assinatura de ${pending[0]} antes de ${sig.role}`); }
+      // GÁS: já é a vez deste papel (Vendedor+PM assinaram). Se ELE é o pagador lado-EVM e ainda não
+      // pré-pagou o gás do keeper, exige agora — antes de depositar/assinar. No-op p/ não-pagador.
+      await this.assertGasPrepaidForSigner(deal, sig.role);
       // JANELA POR ASSINANTE: se os 5 min da vez atual estouraram (antes do teto global), a Deal expira.
       // Quando o teto global já venceu, deixa a validação lançar DEAL_EXPIRED (semântica de deal expirada).
       if (this.now() < deal.expiresAt && this.turnExpired(deal)) { metrics.signaturesRejected.inc({ reason: 'turn_expired' }); await this.expireNow(deal, 'system'); throw new DomainError('SIGNATURE_EXPIRED', 'Prazo de 5 minutos desta assinatura expirou'); }
@@ -311,7 +465,7 @@ export class DealEngine {
       // assinatura mesa ser registrada: se a chain rejeitar, a assinatura mesa é abortada — mesa
       // e chain nunca divergem. O simulador não implementa recordApproval (no-op).
       for (const chain of new Set((deal.terms as Terms).legs.map(l => l.escrowChain))) {
-        const adapter = this.d.adapters.require(chain);
+        const adapter = this.d.adapters.require(chain, this.envOf(deal));
         if (adapter.recordApproval) {
           try { const tx = await adapter.recordApproval(deal.id, sig); if (tx) await this.persist(deal, 'chain.approval', actor, { chain, role: sig.role, tx: tx.ref }); }
           catch (e) { metrics.adapterErrors.inc({ chain, op: 'recordApproval' }); throw e; }
@@ -322,6 +476,10 @@ export class DealEngine {
       const rec = { id: newId('SG'), dealId: deal.id, revision: deal.revision, role: sig.role, signer: p.address, scheme: sig.scheme, envelopeHash: sha256Hex(envelope.message), signedHash: envelope.payload.dealHash, signature: sig.signature, nonce: sig.nonce, receivedAt: this.now(), status: 'valid' as const };
       await this.d.store.insertSignature(rec); deal.signatures.push(rec); deal.validSignatures = deal.signatures.filter(s => s.revision === deal.revision && s.status === 'valid').length; metrics.signaturesAccepted.inc();
       this.startTurn(deal); // avança a vez para o próximo papel e reinicia a janela de 5 min (null quando todos assinaram)
+      // PROATIVO: se a vez acabou de passar para o pagador lado-EVM, marca o gás como PENDENTE AGORA
+      // (sem lançar) — assim a view da mesa dele abre o pop-up de pré-pagamento ANTES de ele tentar
+      // assinar. O gate em assertGasPrepaidForSigner segue exigindo de fato quando ele assinar.
+      if (deal.turnRole) { try { await this.ensureGasPrepayFlag(deal, deal.turnRole); } catch (e) { logger.warn({ dealId: deal.id, err: (e as Error).message }, 'flag de gás proativa falhou (seguindo)'); } }
       await this.persist(deal, 'signature.accepted', actor, { role: sig.role, count: deal.validSignatures, required: deal.requiredSignatures, turnRole: deal.turnRole, turnExpiresAt: deal.turnExpiresAt });
       if (deal.validSignatures === deal.requiredSignatures && deal.participants.every(x => !x.fundingRequired || x.funding === 'FINAL')) { await this.transition(deal, 'FULLY_SIGNED', 'system'); await this.transition(deal, 'SETTLEMENT_VALIDATION', 'system'); this.events.emit('settle', deal.id); }
       return { deal, count: deal.validSignatures };
@@ -338,7 +496,7 @@ export class DealEngine {
   /** Nova revisão: assinaturas superseded, depósitos devolvidos, hash recalculado após reverificação. Também usado quando rota/preço mudam. */
   private async superseded(deal: Deal, actor: string, reason: string, patch: { discountBps?: number; commissionBps?: number; commissionSplitBps?: number[]; amountInBase?: string; expiresInSec?: number } = {}): Promise<Deal> {
     for (const s of deal.signatures.filter(x => x.revision === deal.revision && x.status === 'valid')) { await this.d.store.updateSignatureStatus(s.id, 'superseded'); s.status = 'superseded'; }
-    for (const chain of Object.keys(deal.onChain) as Network[]) { const a = this.d.adapters.require(chain); await a.supersede(deal.id, deal.revision); for (const leg of (deal.terms as Terms).legs.filter(l => l.escrowChain === chain)) { const st = await a.getDealState(deal.id); if (st.deposits[leg.index]) { const tx = await a.refund(deal.id, leg.index); const p = deal.participants.find(x => x.role === leg.from) as Deal['participants'][number]; p.funding = 'PENDING'; deal.refunds.push({ role: leg.from, legIndex: leg.index, status: 'REFUNDED', txRef: tx.ref }); } } }
+    for (const chain of Object.keys(deal.onChain) as Network[]) { const a = this.d.adapters.require(chain, this.envOf(deal)); await a.supersede(deal.id, deal.revision); for (const leg of (deal.terms as Terms).legs.filter(l => l.escrowChain === chain)) { const st = await a.getDealState(deal.id); if (st.deposits[leg.index]) { const tx = await a.refund(deal.id, leg.index); const p = deal.participants.find(x => x.role === leg.from) as Deal['participants'][number]; p.funding = 'PENDING'; deal.refunds.push({ role: leg.from, legIndex: leg.index, status: 'REFUNDED', txRef: tx.ref }); } } }
     deal.validSignatures = 0; deal.revision += 1; deal.onChain = {}; deal.terms = null; deal.hash = null; deal.turnRole = null; deal.turnExpiresAt = null;
     if (patch.discountBps !== undefined) deal.draft.discountBps = patch.discountBps;
     if (patch.commissionBps !== undefined) { const pm = deal.draft.participants.filter(p => p.role.startsWith('PAYMASTER')).length; const split = patch.commissionSplitBps ?? splitEqual(patch.commissionBps, pm); if (split.length !== pm || split.reduce((a, b) => a + b, 0) !== patch.commissionBps) throw new DomainError('INVALID_INPUT', 'Distribuição da comissão inválida'); deal.draft.commissionBps = patch.commissionBps; deal.draft.commissionSplitBps = split; }
@@ -353,7 +511,7 @@ export class DealEngine {
       if (!deal.participants.some(p => p.address.toLowerCase() === actor.toLowerCase())) throw new DomainError('FORBIDDEN', 'só participantes cancelam');
       if (!CANCELLABLE_STATES.has(deal.state)) throw new DomainError('ILLEGAL_TRANSITION', `Cancelamento não permitido em ${deal.state}`);
       const funded = deal.participants.some(p => p.funding === 'FINAL');
-      if (funded) { for (const chain of Object.keys(deal.onChain) as Network[]) await this.d.adapters.require(chain).supersede(deal.id, deal.revision); await this.transition(deal, 'CANCELLED', actor); await this.refundAll(deal, 'keeper', true); }
+      if (funded) { for (const chain of Object.keys(deal.onChain) as Network[]) await this.d.adapters.require(chain, this.envOf(deal)).supersede(deal.id, deal.revision); await this.transition(deal, 'CANCELLED', actor); await this.refundAll(deal, 'keeper', true); }
       else await this.transition(deal, 'CANCELLED', actor);
       return deal;
     });
@@ -363,7 +521,7 @@ export class DealEngine {
   private async blockInternal(deal: Deal, reason: string, rule: string, actor: string): Promise<Deal> {
     if (TERMINAL_STATES.has(deal.state) || deal.state === 'BLOCKED') return deal; deal.risk = { reason, rule, at: this.now() }; await this.transition(deal, 'BLOCKED', actor, { reason, rule });
     if (actor !== 'system') await this.d.risk.settlementIncident(deal.id, rule, { reason, actor });
-    if (deal.participants.some(p => p.funding === 'FINAL')) { for (const chain of Object.keys(deal.onChain) as Network[]) { try { await this.d.adapters.require(chain).supersede(deal.id, deal.revision); } catch { /* reembolso fica pendente */ } } await this.refundAll(deal, 'keeper', false); }
+    if (deal.participants.some(p => p.funding === 'FINAL')) { for (const chain of Object.keys(deal.onChain) as Network[]) { try { await this.d.adapters.require(chain, this.envOf(deal)).supersede(deal.id, deal.revision); } catch { /* reembolso fica pendente */ } } await this.refundAll(deal, 'keeper', false); }
     return deal;
   }
   /** Varredura de expiração (scheduler) + expiração síncrona. */
@@ -388,39 +546,80 @@ export class DealEngine {
    * Aqui lemos `getDealState` de cada leg e marcamos `FINAL` o que já está depositado on-chain.
    * Devolve se TODAS as legs que exigem funding estão depositadas (→ pode completar) e se ALGUMA está.
    */
-  private async reconcileFundingFromChain(deal: Deal, actor: string): Promise<{ allFunded: boolean; anyFunded: boolean }> {
-    const t = deal.terms; if (!t) return { allFunded: false, anyFunded: false };
+  private async reconcileFundingFromChain(deal: Deal, actor: string): Promise<{ allFunded: boolean; anyFunded: boolean; partialBtc: number[] }> {
+    const t = deal.terms; if (!t) return { allFunded: false, anyFunded: false, partialBtc: [] };
     const stateByChain = new Map<Network, OnChainDealState | null>();
     const stateOf = async (chain: Network): Promise<OnChainDealState | null> => {
-      if (!stateByChain.has(chain)) stateByChain.set(chain, await this.d.adapters.require(chain).getDealState(deal.id).catch(() => null));
+      if (!stateByChain.has(chain)) stateByChain.set(chain, await this.d.adapters.require(chain, this.envOf(deal)).getDealState(deal.id).catch(() => null));
       return stateByChain.get(chain) ?? null;
     };
-    let allFunded = true, anyFunded = false;
+    let allFunded = true, anyFunded = false; const partialBtc: number[] = [];
     for (const leg of t.legs) {
       const p = deal.participants.find(x => x.role === leg.from); if (!p?.fundingRequired) continue;
       const st = await stateOf(leg.escrowChain);
       if (st?.deposits[leg.index]) { anyFunded = true; if (p.funding !== 'FINAL') { p.funding = 'FINAL'; await this.persist(deal, 'funding.reconciled', actor, { role: leg.from, legIndex: leg.index, chain: leg.escrowChain }); } }
-      else allFunded = false;
+      else { allFunded = false;
+        // Cofre BTC com saldo PARCIAL (seenBase > 0 mas abaixo do exigido → não virou FINAL): candidato
+        // a varredura de recuperação. Vazio (seenBase ausente/0) NÃO entra — preserva o "no-op se nunca financiada".
+        if (leg.mode === 'HTLC' && leg.escrowChain === 'bitcoin' && st?.seenBase && BigInt(st.seenBase) > 0n) partialBtc.push(leg.index);
+      }
     }
-    return { allFunded, anyFunded };
+    return { allFunded, anyFunded, partialBtc };
   }
 
   /** Reembolso permissionless: o keeper relaya; o depositante pode chamar o contrato diretamente (RL-021). */
   private async refundAll(deal: Deal, actor: string, cancelled: boolean): Promise<void> {
     const t = deal.terms; if (!t) return; let allDone = true;
-    for (const leg of t.legs) { const p = deal.participants.find(x => x.role === leg.from) as Deal['participants'][number]; if (p.funding !== 'FINAL') continue;
+    for (const leg of t.legs) { const p = deal.participants.find(x => x.role === leg.from) as Deal['participants'][number];
+      // Varre pernas FINAL (reconciliadas) E pernas BTC HTLC SUBFINANCIADAS (saldo parcial que nunca
+      // virou FINAL) — senão um depósito abaixo do exigido ficava preso. Demais não-FINAL seguem puladas.
+      const isPartialBtc = p.funding !== 'FINAL' && leg.mode === 'HTLC' && leg.escrowChain === 'bitcoin';
+      if (p.funding !== 'FINAL' && !isPartialBtc) continue;
       // GUARD de reexecução (auditoria 2026-10-19): leg já reembolsada nesta vida da deal nunca
       // re-executa o adapter — mesmo que uma detecção tardia de depósito re-marque FINAL. A defesa
       // final continua on-chain (EVM máquina de estados; BTC UTXO de gasto único), isto é o cinto.
       if (deal.refunds.some(r => r.legIndex === leg.index && r.status === 'REFUNDED')) { p.funding = 'PENDING'; continue; }
-      try { const a = this.d.adapters.require(leg.escrowChain); const tx = await a.refund(deal.id, leg.index); p.funding = 'PENDING'; deal.refunds.push({ role: leg.from, legIndex: leg.index, status: 'REFUNDED', txRef: tx.ref }); await this.persist(deal, 'refunded', actor, { role: leg.from, legIndex: leg.index, tx: tx.ref }); }
-      catch (e) { allDone = false; metrics.adapterErrors.inc({ chain: leg.escrowChain, op: 'refund' }); deal.refunds.push({ role: leg.from, legIndex: leg.index, status: 'PENDING', txRef: null }); await this.persist(deal, 'refund.pending', actor, { role: leg.from, error: (e as Error).message }); }
+      try { const a = this.d.adapters.require(leg.escrowChain, this.envOf(deal)); const tx = await a.refund(deal.id, leg.index); p.funding = 'PENDING'; deal.refunds.push({ role: leg.from, legIndex: leg.index, status: 'REFUNDED', txRef: tx.ref }); await this.persist(deal, 'refunded', actor, { role: leg.from, legIndex: leg.index, tx: tx.ref }); }
+      catch (e) { const msg = String((e as Error).message ?? e);
+        // Cofre BTC parcial VAZIO (nada depositado): nada a devolver — não vira pendência (evita retry eterno).
+        if (isPartialBtc && /nada depositado|não financiado|sem fundos|sem UTXO/i.test(msg)) continue;
+        allDone = false; metrics.adapterErrors.inc({ chain: leg.escrowChain, op: 'refund' }); deal.refunds.push({ role: leg.from, legIndex: leg.index, status: 'PENDING', txRef: null, error: msg.slice(0, 300) }); await this.persist(deal, 'refund.pending', actor, { role: leg.from, error: msg }); }
     }
     if (allDone && deal.state === 'REFUNDING') await this.transition(deal, 'REFUNDED', 'system');
     if (allDone && cancelled) logger.info({ dealId: deal.id }, 'depósitos devolvidos após cancelamento');
   }
   /** Reprocessa reembolsos pendentes (recuperação após falha de RPC). */
-  async retryRefunds(dealId: string): Promise<Deal> { return this.withDeal(dealId, async deal => { if (deal.state !== 'REFUNDING') return deal; deal.refunds = deal.refunds.filter(r => r.status !== 'PENDING'); await this.refundAll(deal, 'keeper', false); return deal; }); }
+  async retryRefunds(dealId: string): Promise<Deal> { return this.withDeal(dealId, async deal => {
+    // BLOCKED com reembolso PENDENTE (incidente mainnet op 3, 2026-11-02): a validação da liquidação
+    // falhou (ex.: expirada no meio), refundAll marcou PENDING, mas a deal ficou em BLOCKED — fora
+    // dos filtros do cron (REFUNDING no retry, EXPIRED na recuperação) e o reembolso nunca engatava
+    // (ETH do Comprador preso no escrow). BLOCKED→REFUNDING é transição legal: destrava e segue.
+    if (deal.state === 'BLOCKED' && deal.refunds.some(r => r.status === 'PENDING')) await this.transition(deal, 'REFUNDING', 'system');
+    if (deal.state !== 'REFUNDING') return deal; deal.refunds = deal.refunds.filter(r => r.status !== 'PENDING'); await this.refundAll(deal, 'keeper', false); return deal; }); }
+
+  /**
+   * CURA de fundos presos (incidente refund BTC 2026-10-22): a reconciliação de `expireNow` é
+   * ONE-SHOT e exige `confirmations` confirmações, mas a janela de turno (~5 min) vence muito antes
+   * do lock BTC confirmar (signet ~30 min p/ 3 confs). Um depósito que confirma DEPOIS da expiração
+   * nunca era reconciliado: a deal parava em EXPIRED, jamais ia a REFUNDING e o loop de retry
+   * (condicionado a REFUNDING) nunca engatava — fundos presos no HTLC sem caminho de volta. Aqui
+   * relemos o on-chain de uma deal EXPIRED e, se o funding apareceu, abrimos o reembolso
+   * (EXPIRED→REFUNDING é transição legal). NÃO liquida nada: devolve fundos de uma deal MORTA, sem
+   * ferir a invariante N/N. O refund BTC ainda respeita o timelock CSV — se imaturo, fica PENDING e
+   * o retry periódico o completa quando o CSV vencer. */
+  async recoverExpiredFunding(dealId: string): Promise<Deal> {
+    return this.withDeal(dealId, async deal => {
+      if (deal.state !== 'EXPIRED') return deal;
+      const { anyFunded, partialBtc } = await this.reconcileFundingFromChain(deal, 'system');
+      // Recupera se há perna FINAL (reconciliada) OU cofre BTC PARCIAL (subfinanciado com saldo): sem
+      // o segundo, um depósito abaixo do exigido ficava preso pra sempre (refundAll só cobria FINAL).
+      const sweepable = partialBtc.filter(i => !deal.refunds.some(r => r.legIndex === i && r.status === 'REFUNDED'));
+      if (!anyFunded && !sweepable.length) return deal;
+      await this.transition(deal, 'REFUNDING', 'system');
+      await this.refundAll(deal, 'keeper', false);
+      return deal;
+    });
+  }
 
   /** Fachada estreita para o Settlement Engine (não expõe criação/assinatura). */
   mutator(): DealMutator { return { withDeal: (id, fn) => this.withDeal(id, fn), transition: (d, to, a, p) => this.transition(d, to, a, p), persist: (d, t, a, p) => this.persist(d, t, a, p), refundAll: (d, a) => this.refundAll(d, a, false) }; }
@@ -433,8 +632,12 @@ export class DealEngine {
   view(deal: Deal, actor: string | null, operator = false): Record<string, unknown> {
     const me = deal.participants.find(p => actor && p.address.toLowerCase() === actor.toLowerCase());
     if (!me && !operator) throw new DomainError('FORBIDDEN', 'não é participante');
-    const { htlcPreimage, ...rest } = deal as Deal & { htlcPreimage?: string };
-    return { ...rest, signatures: deal.signatures.map(s => ({ role: s.role, signer: s.signer, status: s.status, receivedAt: s.receivedAt, revision: s.revision })), myRole: me?.role ?? null, ...(me?.role === 'SELLER' && htlcPreimage ? { htlcPreimage } : {}) };
+    const { htlcPreimage, gasPrepay, ...rest } = deal as Deal & { htlcPreimage?: string };
+    // gasPrepay carrega o endereço do keeper (= carteira de fee). Só o PAGADOR (que precisa depositar
+    // o gás) e o OPERADOR veem os detalhes; demais participantes e links de visualização pública veem
+    // apenas o status — a carteira de fee/keeper não vaza pra contraparte nem pra quem tem o link.
+    const gp = gasPrepay ? ((operator || me?.role === gasPrepay.payerRole) ? gasPrepay : { status: gasPrepay.status }) : undefined;
+    return { ...rest, ...(gp ? { gasPrepay: gp } : {}), signatures: deal.signatures.map(s => ({ role: s.role, signer: s.signer, status: s.status, receivedAt: s.receivedAt, revision: s.revision })), myRole: me?.role ?? null, ...(me?.role === 'SELLER' && htlcPreimage ? { htlcPreimage } : {}) };
   }
   static assetLabel(a: CanonicalAsset): string { return `${a.code}@${a.network}`; }
 }

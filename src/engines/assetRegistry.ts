@@ -22,9 +22,10 @@ export class AssetRegistry {
     return a;
   }
   resolveByAssetId(assetId: string): CanonicalAsset { const a = this.list().find(x => x.assetId === assetId); if (!a || a.status !== 'active') throw new DomainError('ASSET_NOT_CANONICAL', 'assetId desconhecido', { assetId }); return a; }
-  /** Verificação em tempo de Deal (RA-020..022): compara o registro com o observado on-chain. */
-  async verifyOnChain(asset: CanonicalAsset, adapters: AdapterRegistry): Promise<AssetVerification> {
-    const adapter = adapters.get(asset.network); if (!adapter) throw new DomainError('ADAPTER_UNAVAILABLE', `Sem adaptador para ${asset.network}`);
+  /** Verificação em tempo de Deal (RA-020..022): compara o registro com o observado on-chain.
+   *  `env='mainnet'` (mesa mainnet) verifica contra o adapter MAINNET da rede. */
+  async verifyOnChain(asset: CanonicalAsset, adapters: AdapterRegistry, env: 'mainnet' | 'testnet' = 'testnet'): Promise<AssetVerification> {
+    const adapter = adapters.get(asset.network, env); if (!adapter) throw new DomainError('ADAPTER_UNAVAILABLE', env === 'mainnet' ? `Sem adaptador MAINNET para ${asset.network}` : `Sem adaptador para ${asset.network}`);
     const v = await adapter.verifyAsset(asset);
     if (!v.ok) throw new DomainError('ASSET_VERIFICATION_FAILED', `Ativo ${asset.code} em ${asset.network} falhou na verificação: ${v.reasons.join('; ')}`, { reasons: v.reasons, observed: v.observed });
     return v;

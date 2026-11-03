@@ -14,5 +14,11 @@
       "source": "/(.*)",
       "destination": "/api"
     }
+  ],
+  "crons": [
+    {
+      "path": "/ops/cron/sweep",
+      "schedule": "*/2 * * * *"
+    }
   ]
 }

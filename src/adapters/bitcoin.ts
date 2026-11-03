@@ -71,13 +71,31 @@ export function scriptNum(n: number): Uint8Array {
 
 const OP = { IF: 0x63, ELSE: 0x67, ENDIF: 0x68, DROP: 0x75, DUP: 0x76, EQUAL: 0x87, EQUALVERIFY: 0x88, SHA256: 0xa8, HASH160: 0xa9, CHECKSIG: 0xac, CSV: 0xb2, ZERO: 0x00 } as const;
 
+/** Push MINIMAL de um número de script: 1..16 DEVEM ser OP_1..OP_16 (0x51..0x60) — um push de dado
+ *  (ex.: `0x01 0x08`) viola a política MINIMALDATA e NENHUM nó aceita o GASTO do script
+ *  ("mempool-script-verify-flag-failed: Data push larger than necessary") — incidente 2026-10-28:
+ *  cofres com CSV ≤ 16 ficavam com refund/claim impossíveis de transmitir. */
+export function minimalScriptNumPush(n: number): Uint8Array {
+  if (n >= 1 && n <= 16) return Uint8Array.of(0x50 + n); // OP_1..OP_16
+  return pushData(scriptNum(n));
+}
+
+/** Detecta o script LEGADO com CSV ≤ 16 gravado como push de dado (`0x01 0x01..0x10` após o
+ *  OP_ELSE) — o encoding que viola MINIMALDATA e torna o ramo de refund intransmissível. */
+export function hasNonMinimalCsvPush(witnessScript: Uint8Array): boolean {
+  const i = witnessScript.indexOf(OP.ELSE);
+  if (i < 0 || i + 2 >= witnessScript.length) return false;
+  const len = witnessScript[i + 1] as number; const v = witnessScript[i + 2] as number;
+  return len === 0x01 && v >= 0x01 && v <= 0x10;
+}
+
 /** Witness script do HTLC — exatamente o layout do ADR-v4 §2. */
 export function htlcWitnessScript(htlcHashHex: string, claimPub: Uint8Array, refundPub: Uint8Array, csvBlocks: number): Uint8Array {
   if (!/^[0-9a-f]{64}$/.test(htlcHashHex)) throw new DomainError('INVALID_INPUT', 'htlcHash inválido (sha256 hex de 32 bytes)');
   if (claimPub.length !== 33 || refundPub.length !== 33) throw new DomainError('INVALID_INPUT', 'pubkeys do HTLC devem ser comprimidas (33 bytes)');
   return concatBytes(
     Uint8Array.of(OP.IF, OP.SHA256), pushData(hexToBytes(htlcHashHex)), Uint8Array.of(OP.EQUALVERIFY), pushData(claimPub), Uint8Array.of(OP.CHECKSIG),
-    Uint8Array.of(OP.ELSE), pushData(scriptNum(csvBlocks)), Uint8Array.of(OP.CSV, OP.DROP), pushData(refundPub), Uint8Array.of(OP.CHECKSIG),
+    Uint8Array.of(OP.ELSE), minimalScriptNumPush(csvBlocks), Uint8Array.of(OP.CSV, OP.DROP), pushData(refundPub), Uint8Array.of(OP.CHECKSIG),
     Uint8Array.of(OP.ENDIF),
   );
 }
@@ -228,7 +246,7 @@ export class EsploraClient {
 
 /* ---------------- o adapter ---------------- */
 
-interface HtlcEssentials { htlcHash: string; address: string; witnessScript: Uint8Array; leg: Leg; participants: Participant[]; expiresAt: number; revision: number; dealHash?: string }
+interface HtlcEssentials { htlcHash: string; address: string; witnessScript: Uint8Array; csvBlocks: number; leg: Leg; participants: Participant[]; expiresAt: number; revision: number; dealHash?: string }
 export interface BitcoinAdapterDeps {
   getDeal: (id: string) => Promise<Deal | null>;
   /**
@@ -291,12 +309,13 @@ export class BitcoinChainAdapter implements SettlementAdapter {
 
   /* ---- ciclo de vida do HTLC ---- */
 
-  private essentialsFrom(htlcHash: string, legs: Leg[], participants: Participant[], expiresAt: number, revision: number, dealHash?: string): HtlcEssentials {
+  private essentialsFrom(htlcHash: string, legs: Leg[], participants: Participant[], expiresAt: number, revision: number, dealHash?: string, csvOverride?: number): HtlcEssentials {
     const leg = legs.find(l => l.escrowChain === 'bitcoin');
     if (!leg) throw new DomainError('SETTLEMENT_FAILED', 'deal sem leg Bitcoin');
     if (!/^[0-9a-f]{64}$/.test(htlcHash)) throw new DomainError('SETTLEMENT_FAILED', 'deal Bitcoin sem htlcHash — rota HTLC é obrigatória');
-    const witnessScript = htlcWitnessScript(htlcHash, this.claimPub, this.refundPub, this.cfg.csvBlocks);
-    return { htlcHash, address: p2wshAddress(witnessScript, this.cfg.network), witnessScript, leg, participants, expiresAt, revision, dealHash };
+    const csvBlocks = csvOverride ?? this.cfg.csvBlocks;
+    const witnessScript = htlcWitnessScript(htlcHash, this.claimPub, this.refundPub, csvBlocks);
+    return { htlcHash, address: p2wshAddress(witnessScript, this.cfg.network), witnessScript, csvBlocks, leg, participants, expiresAt, revision, dealHash };
   }
   private async hydrate(dealId: string): Promise<HtlcEssentials> {
     const hit = this.cache.get(dealId);
@@ -304,7 +323,19 @@ export class BitcoinChainAdapter implements SettlementAdapter {
     const deal = await this.deps?.getDeal(dealId);
     const t = deal?.terms as Terms | undefined;
     if (!deal || !t?.route.htlcHash) throw new DomainError('SETTLEMENT_FAILED', 'deal não registrada no adaptador Bitcoin');
-    const e = this.essentialsFrom(t.route.htlcHash, t.legs, t.participants, t.expiresAt, deal.revision, deal.hash?.dealHash);
+    // O CSV do cofre é o que foi GRAVADO NO SCRIPT no registro (meta persistida) — nunca o env
+    // atual: mudar BITCOIN_CSV_BLOCKS no deploy fazia o adapter re-derivar OUTRO endereço para
+    // deals antigas ("nada depositado no HTLC") e o refund nunca saía (incidente 2026-10-27).
+    const meta = (deal.onChain as Record<string, { meta?: Record<string, unknown> } | undefined> | undefined)?.bitcoin?.meta;
+    const metaCsv = typeof meta?.csvBlocks === 'number' ? meta.csvBlocks : undefined;
+    const e = this.essentialsFrom(t.route.htlcHash, t.legs, t.participants, t.expiresAt, deal.revision, deal.hash?.dealHash, metaCsv);
+    // Cinto: se o meta tem o witnessScript persistido e ele diverge do derivado, o PERSISTIDO manda
+    // (é o script do cofre REAL on-chain — ex.: chave claim/refund trocada no env depois do lock).
+    if (typeof meta?.witnessScript === 'string' && /^[0-9a-f]+$/i.test(meta.witnessScript) && meta.witnessScript.toLowerCase() !== bytesToHex(e.witnessScript)) {
+      const ws = hexToBytes(meta.witnessScript as string);
+      this.cache.set(dealId, { ...e, witnessScript: ws, address: typeof meta.htlcAddress === 'string' ? meta.htlcAddress : p2wshAddress(ws, this.cfg.network) });
+      return this.cache.get(dealId) as HtlcEssentials;
+    }
     this.cache.set(dealId, e);
     return e;
   }
@@ -327,7 +358,7 @@ export class BitcoinChainAdapter implements SettlementAdapter {
     this.cache.set(c.dealId, e);
     // Nenhuma transação é emitida aqui: o "registro" BTC é a derivação determinística do cofre
     // P2WSH; o funding (lock) é do lado vendedor via Verum Wallet. Meta persiste em deal.onChain.
-    return { chain: 'bitcoin', ref: `htlc:${e.address}`, submittedAt: this.now(), meta: { htlcAddress: e.address, htlcHash: e.htlcHash, csvBlocks: this.cfg.csvBlocks, witnessScript: bytesToHex(e.witnessScript), network: this.cfg.network } };
+    return { chain: 'bitcoin', ref: `htlc:${e.address}`, submittedAt: this.now(), meta: { htlcAddress: e.address, htlcHash: e.htlcHash, csvBlocks: e.csvBlocks, witnessScript: bytesToHex(e.witnessScript), network: this.cfg.network } };
   }
 
   /** O lock é feito pela carteira do vendedor; aqui DETECTAMOS o funding on-chain (idempotente). */
@@ -363,7 +394,7 @@ export class BitcoinChainAdapter implements SettlementAdapter {
     const utxos = await this.htlcUtxos(e);
     if (!utxos.length) throw new DomainError('SETTLEMENT_NOT_ALLOWED', 'HTLC sem fundos para claim');
     const payout = await this.payoutOf(dealId, e, e.leg.to);
-    const built = buildHtlcSpend({ utxos, witnessScript: e.witnessScript, payoutScript: outputScriptOf(payout, this.cfg.network), satPerVb: await this.satPerVb(), path: 'claim', preimage, keyPriv: this.claimPriv, csvBlocks: this.cfg.csvBlocks });
+    const built = buildHtlcSpend({ utxos, witnessScript: e.witnessScript, payoutScript: outputScriptOf(payout, this.cfg.network), satPerVb: await this.satPerVb(), path: 'claim', preimage, keyPriv: this.claimPriv, csvBlocks: e.csvBlocks });
     const txid = await this.esplora.broadcast(built.hex);
     return { chain: 'bitcoin', ref: txid, submittedAt: this.now() };
   }
@@ -379,12 +410,45 @@ export class BitcoinChainAdapter implements SettlementAdapter {
     }
     const utxos = (await this.htlcUtxos(e)).filter(u => u.valueSat > 0n);
     if (!utxos.length) throw new DomainError('SETTLEMENT_NOT_ALLOWED', 'nada depositado no HTLC');
-    const immature = utxos.filter(u => u.confirmations < this.cfg.csvBlocks);
-    if (immature.length) throw new DomainError('SETTLEMENT_NOT_ALLOWED', `timelock ainda não venceu: faltam ${this.cfg.csvBlocks - Math.min(...immature.map(u => u.confirmations))} blocos`, { csvBlocks: this.cfg.csvBlocks });
+    const immature = utxos.filter(u => u.confirmations < e.csvBlocks);
+    if (immature.length) throw new DomainError('SETTLEMENT_NOT_ALLOWED', `timelock ainda não venceu: faltam ${e.csvBlocks - Math.min(...immature.map(u => u.confirmations))} blocos`, { csvBlocks: e.csvBlocks });
     const payout = await this.payoutOf(dealId, e, e.leg.from);
-    const built = buildHtlcSpend({ utxos, witnessScript: e.witnessScript, payoutScript: outputScriptOf(payout, this.cfg.network), satPerVb: await this.satPerVb(), path: 'refund', keyPriv: this.refundPriv, csvBlocks: this.cfg.csvBlocks });
-    const txid = await this.esplora.broadcast(built.hex);
-    return { chain: 'bitcoin', ref: txid, submittedAt: this.now() };
+    const payoutScript = outputScriptOf(payout, this.cfg.network);
+    const satPerVb = await this.satPerVb();
+    // RECUPERAÇÃO de cofres LEGADOS (ramo de refund não-padrão — ex.: CSV ≤ 16 gravado como push de
+    // dado): o ELSE executa o push não-minimal e NENHUM nó aceita ("Data push larger than
+    // necessary"). Mas a checagem MINIMALDATA só vale para o RAMO EXECUTADO: o caminho de CLAIM (IF)
+    // nem toca o ELSE e é padrão. A mesa conhece a preimage (deal.htlcPreimage) e a chave de claim é
+    // do keeper → gastamos pelo IF PAGANDO O VENDEDOR (semântica de refund preservada; a deal está
+    // morta/expirada, revelar a preimage não destrava mais nada na perna de contrato).
+    const recoverViaClaim = async (): Promise<TxRef | null> => {
+      const deal = await this.deps?.getDeal(dealId);
+      const preimage = (deal as (Deal & { htlcPreimage?: string }) | null | undefined)?.htlcPreimage?.toLowerCase();
+      if (!preimage || !/^[0-9a-f]{64}$/.test(preimage) || bytesToHex(sha256(hexToBytes(preimage))) !== e.htlcHash.toLowerCase()) return null;
+      const rec = buildHtlcSpend({ utxos, witnessScript: e.witnessScript, payoutScript, satPerVb, path: 'claim', preimage, keyPriv: this.claimPriv, csvBlocks: e.csvBlocks });
+      const txid = await this.esplora.broadcast(rec.hex);
+      return { chain: 'bitcoin', ref: txid, submittedAt: this.now() };
+    };
+    // Detector conhecido (CSV ≤ 16): vai direto pela recuperação, sem gastar um broadcast fadado.
+    if (hasNonMinimalCsvPush(e.witnessScript)) {
+      const r = await recoverViaClaim();
+      if (r) return r;
+      throw new DomainError('SETTLEMENT_FAILED', 'cofre legado (ramo de refund não-padrão) sem preimage conhecida — refund impossível');
+    }
+    const built = buildHtlcSpend({ utxos, witnessScript: e.witnessScript, payoutScript, satPerVb, path: 'refund', keyPriv: this.refundPriv, csvBlocks: e.csvBlocks });
+    try {
+      const txid = await this.esplora.broadcast(built.hex);
+      return { chain: 'bitcoin', ref: txid, submittedAt: this.now() };
+    } catch (err) {
+      // FALLBACK ROBUSTO: a rede rejeitou o refund por script não-padrão (MINIMALDATA/clean-stack/
+      // verify-flag) que o detector estático não previu. Tenta a recuperação pelo claim (paga o
+      // Vendedor) — se houver preimage. Qualquer outro erro (fee/dust/rede) propaga intacto.
+      if (/verify-flag|Data push|non-mandatory|mandatory-script|cleanstack|minimal/i.test(String((err as Error).message))) {
+        const r = await recoverViaClaim();
+        if (r) return r;
+      }
+      throw err;
+    }
   }
 
   async supersede(_dealId: string, _revision: number): Promise<TxRef | null> { return null; } // nada on-chain a supersedir (o HTLC é por htlcHash)
@@ -396,8 +460,9 @@ export class BitcoinChainAdapter implements SettlementAdapter {
     if (spend?.preimage) return { status: 'SETTLED', revision: e.revision, deposits: { [e.leg.index]: e.leg.amountBase }, settledLegs: { [e.leg.index]: spend.txid }, settledTx: spend.txid, dealHash: e.dealHash, expiresAt: e.expiresAt };
     if (spend) return { status: 'REFUNDED', revision: e.revision, deposits: {}, settledLegs: {}, refundedTx: spend.txid, dealHash: e.dealHash, expiresAt: e.expiresAt };
     const utxos = await this.htlcUtxos(e);
-    const funded = utxos.filter(u => u.confirmations >= this.cfg.confirmations).reduce((s, u) => s + u.valueSat, 0n) >= BigInt(e.leg.amountBase);
-    return { status: funded ? 'FUNDED' : 'REGISTERED', revision: e.revision, deposits: funded ? { [e.leg.index]: e.leg.amountBase } : {}, settledLegs: {}, dealHash: e.dealHash, expiresAt: e.expiresAt };
+    const seen = utxos.filter(u => u.confirmations >= this.cfg.confirmations).reduce((s, u) => s + u.valueSat, 0n);
+    const funded = seen >= BigInt(e.leg.amountBase);
+    return { status: funded ? 'FUNDED' : 'REGISTERED', revision: e.revision, deposits: funded ? { [e.leg.index]: e.leg.amountBase } : {}, settledLegs: {}, dealHash: e.dealHash, expiresAt: e.expiresAt, ...(seen > 0n ? { seenBase: seen.toString() } : {}) };
   }
 
   async waitFinal(ref: string): Promise<TxStatus> {

@@ -69,7 +69,19 @@ export const TOKENS: Record<string, TokenDef[]> = {
 };
 
 export function tokensFor(chainKey: string): TokenDef[] {
-  return TOKENS[chainKey] ?? [];
+  const base = TOKENS[chainKey] ?? [];
+  // Tokens de TESTE configurados no ambiente entram na whitelist da leitura de saldo — sem isto,
+  // o USDT do faucet (Shasta) vinha na resposta da TronGrid mas era descartado e a cadeira
+  // mostrava 0 mesmo com a carteira cheia. Mesma regra para os mocks EVM (Sepolia).
+  const extra: TokenDef[] = [];
+  const add = (contract: string | undefined, symbol: string, decimals: number, coingeckoId: string) => {
+    if (contract && !base.some(t => t.contract.toLowerCase() === contract.toLowerCase()) && !extra.some(t => t.contract.toLowerCase() === contract.toLowerCase())) {
+      extra.push({ symbol, contract, decimals, coingeckoId });
+    }
+  };
+  if (chainKey === 'tron') { add(process.env.TRON_TUSDT, 'USDT', 6, 'tether'); add(process.env.TRON_TBTC, 'tBTC', 8, 'bitcoin'); }
+  if (chainKey === 'ethereum') { add(process.env.VERUM_EVM_TUSDT, 'USDT', 6, 'tether'); add(process.env.VERUM_EVM_TBTC, 'tBTC', 8, 'bitcoin'); }
+  return extra.length ? [...extra, ...base] : base;
 }
 
 /**

@@ -14,7 +14,7 @@ import type { MesaInviteRow, Store } from '../db/repository.js';
 import type { PortalService, WalletAddress, PayMaster } from '../portal/portal.js';
 import type { WalletAuth, Session } from '../wallet/auth.js';
 import type { AuditLog } from '../audit/audit.js';
-import type { Deal } from '../domain/types.js';
+import type { Deal, Role } from '../domain/types.js';
 import { verifySolana, verifyTron, verifyBitcoin } from '../engines/signature.js';
 import { getChain } from '../chains/registry.js';
 import { deriveMesaStatus } from './status.js';
@@ -66,11 +66,13 @@ export interface MesaServiceDeps {
   nativeWrapOf?: (network: string, counterpartyNetwork: string | null) => { contractOrMint: string; decimals: number } | null;
   /** true quando a perna Bitcoin roda no SIMULADOR (preview/dev) — a UI exibe "BTC simulado". */
   btcSimulated?: () => boolean;
+  /** true quando o escrow Tron configurado tem perna HTLC (V2) — libera o par BTC nativo ↔ Tron. */
+  tronHashlock?: () => boolean;
 }
 
 export interface CreateMesaChairInput { role: MesaChairRole; expectedAsset: ChairAsset; label?: string }
 /** `network` é opcional (v4): quando ausente, deriva da cadeira do VENDEDOR — quem manda nas pernas são as redes de cada lado. */
-export interface CreateMesaInput { label?: string; network?: string; chairs: CreateMesaChairInput[] }
+export interface CreateMesaInput { label?: string; network?: string; environment?: 'mainnet' | 'testnet'; chairs: CreateMesaChairInput[] }
 
 export class MesaService {
   private readonly now: () => number;
@@ -84,6 +86,32 @@ export class MesaService {
   }
 
   /* ---------- criação e leitura (admin) ---------- */
+
+  /** Par NÃO suportado: BTC NATIVO ↔ Tron. O swap de BTC usa HTLC e exige que a OUTRA perna revele o
+   *  segredo (hashlock) na liquidação; o contrato da Tron não tem hashlock. (BTC funciona com Ethereum
+   *  ou Solana.) Bloqueia na criação e na troca de ativo — não só na aprovação. */
+  private assertSwappablePair(chairs: { role: MesaChairRole; expectedAsset: ChairAsset }[], environment?: 'mainnet' | 'testnet'): void {
+    const seller = chairs.find(c => c.role === 'SELLER')?.expectedAsset;
+    const buyer = chairs.find(c => c.role === 'BUYER')?.expectedAsset;
+    if (!seller || !buyer) return;
+    const isBtcNative = (a: ChairAsset) => a.network === 'bitcoin' && a.contractOrMint == null;
+    const isTron = (a: ChairAsset) => a.network === 'tron';
+    // MAINNET (fundos reais): recorte inicial — o ÚNICO par suportado é BTC nativo ↔ Ethereum
+    // (ETH nativo/WETH ou stablecoin real). Qualquer outra rede/combinação é bloqueada na criação
+    // e na troca de ativo, com motivo nominal.
+    if (environment === 'mainnet') {
+      const isEthSide = (a: ChairAsset) => a.network === 'ethereum';
+      const ok = (isBtcNative(seller) && isEthSide(buyer)) || (isEthSide(seller) && isBtcNative(buyer));
+      if (!ok) throw new DomainError('INVALID_INPUT', 'Em MAINNET o único par suportado por enquanto é BTC nativo ↔ Ethereum (ETH ou stablecoin real). Ajuste as cadeiras ou use o ambiente Testnet.');
+      return; // par válido em mainnet — a regra Tron abaixo não se aplica
+    }
+    // Escrow Tron V2 (hashlock) configurado libera o par: o settleV2 revela a preimage que
+    // destrava o HTLC do BTC — mesma atomicidade do BTC↔Ethereum.
+    if (this.d.tronHashlock?.()) return;
+    if ((isBtcNative(seller) && isTron(buyer)) || (isTron(seller) && isBtcNative(buyer))) {
+      throw new DomainError('INVALID_INPUT', 'BTC nativo não pode ser trocado com a rede Tron: o swap de BTC usa HTLC e exige que a outra perna revele o segredo (hashlock), que o contrato da Tron não tem. Use BTC com Ethereum ou Solana — ou troque a rede de uma das pernas.');
+    }
+  }
 
   createMesa(portalToken: string | undefined, input: CreateMesaInput): MesaRecord {
     const pm = this.d.portal.requirePayMaster(portalToken);
@@ -114,7 +142,11 @@ export class MesaService {
       if (c.role === 'PAYMASTER_1' && pm.wallet) { chair.wallet = pm.wallet; chair.firstName = pm.name.split(/\s+/)[0]; chair.connectedAt = t; }
       return chair;
     });
-    const mesa: MesaRecord = { mesaId: 'mesa_' + randomUUID(), payMasterId: pm.id, code: this.d.portal.newMesaCode(), operationCode: `OP-${newInviteCode()}`, label: input.label?.trim() || undefined, network, chairs, approvals: {}, dealId: null, dealIds: [], createdAt: t, expiresAt: null };
+    const environment = input.environment === 'mainnet' ? 'mainnet' as const : undefined; // ausente = testnet
+    // Mesa MAINNET nunca nasce de conta demo (carteiras do keyring não existem em redes reais).
+    if (environment && pm.demo) throw new DomainError('FORBIDDEN', 'A conta demo não pode criar mesas em MAINNET');
+    this.assertSwappablePair(chairs, environment); // pares por ambiente (mainnet ⇒ só BTC↔Ethereum)
+    const mesa: MesaRecord = { mesaId: 'mesa_' + randomUUID(), payMasterId: pm.id, code: this.d.portal.newMesaCode(), operationCode: `OP-${newInviteCode()}`, label: input.label?.trim() || undefined, network, ...(environment ? { environment } : {}), chairs, approvals: {}, dealId: null, dealIds: [], createdAt: t, expiresAt: null };
     this.d.portal.mesas()[mesa.mesaId] = mesa;
     this.d.portal.persistMesas();
     void this.audit('mesa.criada', pm.id, { mesaId: mesa.mesaId, code: mesa.code, network: mesa.network, chairs: chairs.map(c => ({ chairId: c.chairId, role: c.role })) });
@@ -273,13 +305,34 @@ export class MesaService {
   }
 
   /** Resolve o convite para a página pública. `code` ausente → metadados mínimos (fallback de digitação). */
-  async resolveInvite(inviteId: string, code?: string): Promise<{ mesaCode: string; role: MesaChairRole; roleLabel: string; asset: string; network: string; networkLabel: string; status: 'PENDING' | 'USED' | 'REVOKED' | 'EXPIRED'; expiresAt: number; serverTime: number; codeValid: boolean }> {
+  async resolveInvite(inviteId: string, code?: string): Promise<{ mesaId: string; mesaCode: string; role: MesaChairRole; roleLabel: string; asset: string; network: string; networkLabel: string; status: 'PENDING' | 'USED' | 'REVOKED' | 'EXPIRED'; expiresAt: number; serverTime: number; codeValid: boolean }> {
     const { invite, mesa, chair } = await this.inviteOrThrow(inviteId);
     const now = this.now();
     const status = invite.status === 'PENDING' && (invite.expiresAt <= now || (mesa.expiresAt != null && now >= mesa.expiresAt) || mesa.cancelled) ? 'EXPIRED' : invite.status;
     const codeValid = !!code && hashesEqual(codeHashOf(inviteId, code), invite.codeHash);
     if (invite.status === 'PENDING' && status === 'PENDING') void this.audit('mesa.convite.validado', 'public', { mesaId: mesa.mesaId, inviteId, codePresent: !!code, codeValid });
-    return { mesaCode: mesa.code, role: chair.role, roleLabel: CHAIR_ROLE_LABEL[chair.role], asset: chair.expectedAsset.symbol, network: mesa.network, networkLabel: getChain(mesa.network)?.displayName ?? mesa.network, status, expiresAt: invite.expiresAt, serverTime: now, codeValid };
+    // mesaId: convite JÁ USADO deve levar de volta à mesa (/ver/<mesaId>), onde o pop-up de
+    // depósito/gás aparece — não um beco sem saída. O token de sessão (se existir no aparelho)
+    // é reusado lá; sem ele a pessoa vê a leitura pública e pode reconectar.
+    return { mesaId: mesa.mesaId, mesaCode: mesa.code, role: chair.role, roleLabel: CHAIR_ROLE_LABEL[chair.role], asset: chair.expectedAsset.symbol, network: mesa.network, networkLabel: getChain(mesa.network)?.displayName ?? mesa.network, status, expiresAt: invite.expiresAt, serverTime: now, codeValid };
+  }
+
+  /** Localiza um convite PENDING só pelo código XXXX-XXXX (página "Entrar com Código" do dashboard).
+   *  O banco guarda apenas hash + prefixo: filtra candidatos pelo prefixo e confirma pelo hash
+   *  (inviteId + código). Resposta de erro é GENÉRICA — não revela se o prefixo existe. */
+  async resolveInviteByCode(code: string): Promise<{ inviteId: string; code: string }> {
+    const norm = normalizeCode(code);
+    if (norm.length !== 8) throw new DomainError('INVALID_INPUT', 'Convite inválido ou expirado.');
+    const now = this.now();
+    for (const inv of await this.d.store.findPendingMesaInvitesByPrefix(norm.slice(0, 4))) {
+      if (inv.expiresAt <= now) continue;
+      if (!hashesEqual(codeHashOf(inv.inviteId, norm), inv.codeHash)) continue;
+      const mesa = this.d.portal.mesas()[inv.mesaId];
+      if (!mesa || mesa.cancelled || (mesa.expiresAt != null && now >= mesa.expiresAt)) continue;
+      void this.audit('mesa.convite.resolvido-por-codigo', 'public', { mesaId: inv.mesaId, inviteId: inv.inviteId });
+      return { inviteId: inv.inviteId, code: norm };
+    }
+    throw new DomainError('INVALID_INPUT', 'Convite inválido ou expirado.');
   }
 
   /** Challenge de entrada — texto exibido INTEGRALMENTE ao usuário e assinado pela Verum Wallet. */
@@ -499,7 +552,10 @@ export class MesaService {
     if (!chair) throw new DomainError('INVALID_INPUT', 'Cadeira não encontrada.');
     if (!asset || typeof asset.symbol !== 'string' || typeof asset.decimals !== 'number' || !asset.network) throw new DomainError('INVALID_INPUT', 'Ativo inválido.');
     const prevDecimals = chair.expectedAsset.decimals;
-    chair.expectedAsset = { network: asset.network, contractOrMint: asset.contractOrMint ?? null, decimals: asset.decimals, symbol: asset.symbol };
+    const nextAsset: ChairAsset = { network: asset.network, contractOrMint: asset.contractOrMint ?? null, decimals: asset.decimals, symbol: asset.symbol };
+    // Valida ANTES de mutar: BTC nativo ↔ Tron não é swappable (sem hashlock na Tron).
+    this.assertSwappablePair(mesa.chairs.map(c => c.chairId === chairId ? { role: c.role, expectedAsset: nextAsset } : { role: c.role, expectedAsset: c.expectedAsset }), mesa.environment);
+    chair.expectedAsset = nextAsset;
     // Rede da mesa (rótulo/fallback) deriva do lado VENDEDOR.
     if (chair.role === 'SELLER') mesa.network = asset.network;
     // Decimais mudaram → a quantidade daquele lado não faz mais sentido (base do ativo anterior).
@@ -644,7 +700,7 @@ export class MesaService {
     const status = deriveMesaStatus(mesa, invites, deal, now);
     return {
       mesaId: mesa.mesaId, code: mesa.code, operationCode: mesa.operationCode ?? null,
-      network: mesa.network, networkLabel: this.networksLabel(mesa), status,
+      network: mesa.network, networkLabel: this.networksLabel(mesa), environment: mesa.environment ?? 'testnet', status,
       createdAt: mesa.createdAt, expiresAt: mesa.expiresAt, serverTime: now,
       config: mesa.config ? { amountInBase: mesa.config.amountInBase ?? null, buyerAmountInBase: mesa.config.buyerAmountInBase ?? null, discountBps: mesa.config.discountBps, commissionBps: mesa.config.commissionBps, commissionPayer: mesa.config.commissionPayer ?? null } : null,
       chairs: mesa.chairs.map(c => ({
@@ -675,7 +731,7 @@ export class MesaService {
   }
 
   /** Resumo canônico de uma operação (deal) para a UI — mesma forma na mesa, na lista e no deep link. */
-  private dealSummary(deal: Deal | null): Record<string, unknown> | null {
+  private dealSummary(deal: Deal | null, viewerRole?: Role): Record<string, unknown> | null {
     if (!deal) return null;
     return {
       id: deal.id, state: deal.state, createdAt: deal.createdAt,
@@ -700,7 +756,13 @@ export class MesaService {
         const meta = deal.onChain?.bitcoin?.meta as Record<string, unknown> | undefined;
         // simulated: a UI marca "BTC SIMULADO" quando a perna roda no simulador (preview/dev) —
         // exigência da auditoria: nenhum ambiente de teste pode se passar por BTC real.
-        return typeof meta?.htlcAddress === 'string' ? { address: meta.htlcAddress, requiredSat: leg.amountBase, from: leg.from, legIndex: leg.index, simulated: this.d.btcSimulated?.() ?? false } : null;
+        if (typeof meta?.htlcAddress !== 'string') return null;
+        // DEPÓSITO CRAVADO (exigência do cliente 2026-11-02): o Vendedor envia EXATAMENTE o exigido —
+        // sem margem. Comprovado nas 3 ops mainnet que a Verum Wallet envia o valor pedido INTEIRO
+        // (taxa de rede paga POR FORA, troco de volta); a margem de 3.000 sats virava sobra presa no
+        // fluxo. Se alguma carteira descontar a taxa do envio, o cofre fica subfinanciado e a proteção
+        // existente cobre: top-up no MESMO endereço soma, e o reembolso automático varre cofre parcial.
+        return { address: meta.htlcAddress, requiredSat: leg.amountBase, depositSat: leg.amountBase, from: leg.from, legIndex: leg.index, simulated: this.d.btcSimulated?.() ?? false };
       })(),
       // REGISTRO on-chain pendente (createTradeV2 do PM1): o auto-envio do approve é one-shot e
       // se perde em recusa/reload — sem este campo no poll a mesa ficava SEM retry, presa em
@@ -711,23 +773,46 @@ export class MesaService {
         const meta = deal.onChain?.ethereum?.meta as Record<string, unknown> | undefined;
         return meta?.registerPending && typeof meta.registerTx === 'string' ? JSON.parse(meta.registerTx) as Record<string, unknown> : null;
       })(),
+      // PRÉ-PAGAMENTO DE GÁS pendente: aparece SÓ depois de Vendedor+PM assinarem (a vez chega ao
+      // pagador lado-EVM). A UI do pagador abre o pop-up e mostra quanto + para qual carteira (keeper)
+      // enviar. REDAÇÃO: keeperAddress/requiredWei só para o PRÓPRIO pagador — os demais (e o público)
+      // veem apenas papel+status, nunca o endereço do keeper (= carteira de fee).
+      gasPrepay: (() => {
+        const gp = deal.gasPrepay;
+        if (!gp) return null;
+        // payerAddress é o endereço DO PRÓPRIO pagador (a UI valida que a carteira conectada é a dele
+        // antes de enviar) — sem esse campo o opGasPrepay comparava com undefined e falhava sempre.
+        if (viewerRole && viewerRole === gp.payerRole) return { payerRole: gp.payerRole, payerAddress: gp.payerAddress, status: gp.status, requiredWei: gp.requiredWei, keeperAddress: gp.keeperAddress, txRef: gp.txRef ?? null, receivedWei: gp.receivedWei ?? null };
+        return { payerRole: gp.payerRole, status: gp.status };
+      })(),
+      // MOTIVO DA FALHA visível (incidente op 4 mainnet: a liquidação falhou e a mesa só mostrava
+      // "FAILED", sem nenhum porquê — nem para o PM). Expõe o bloqueio/risco e a falha de
+      // liquidação, truncados. Falha de operação NUNCA pode ser silenciosa para quem está na mesa.
+      blocked: deal.risk ? { reason: String(deal.risk.reason ?? '').slice(0, 300), rule: deal.risk.rule ?? null } : null,
+      settlementFailure: (() => {
+        const s = deal.settlement;
+        if (!s || s.status !== 'FAILED') return null;
+        return { reason: String(s.failureReason ?? '').slice(0, 300), legs: (s.legs ?? []).filter(l => l.error).map(l => ({ index: l.index, step: l.step, error: String(l.error).slice(0, 200) })) };
+      })(),
       // REEMBOLSOS por perna (REFUNDED/PENDING): a UI mostra "aguardando timelock" em vez de
       // sumir com o estado — exigência da auditoria (recuperação explicável por operação).
       // (?? []: dado antigo/fake persistido pode não ter o campo — a view nunca pode quebrar)
-      refunds: (deal.refunds ?? []).map(r => ({ role: r.role, legIndex: r.legIndex, status: r.status, txRef: r.txRef })),
+      refunds: (deal.refunds ?? []).map(r => ({ role: r.role, legIndex: r.legIndex, status: r.status, txRef: r.txRef, error: r.error ?? null })),
     };
   }
 
   /** Resumo de UMA operação específica da mesa (deep link /mesa?mesa=&op=). Verifica que a operação
    *  pertence à mesa; autoriza participante (sessão da própria mesa) ou admin (dono). Só dados públicos. */
-  async mesaDealSummary(mesaId: string, dealId: string, _viewer: { kind: 'admin' } | { kind: 'participant'; chairId: string }): Promise<{ deal: Record<string, unknown> | null; irreversible: boolean }> {
+  async mesaDealSummary(mesaId: string, dealId: string, viewer: { kind: 'admin' } | { kind: 'participant'; chairId: string }): Promise<{ deal: Record<string, unknown> | null; irreversible: boolean }> {
     const mesa = this.mesaById(mesaId);
     if (!mesa) throw new DomainError('INVALID_INPUT', 'Mesa não encontrada.');
     const belongs = mesa.dealId === dealId || (mesa.dealIds ?? []).includes(dealId);
     if (!belongs) throw new DomainError('INVALID_INPUT', 'Operação não pertence a esta mesa.');
     const deal = await this.d.getDeal(dealId);
     if (!deal) throw new DomainError('INVALID_INPUT', 'Operação não encontrada.');
-    return { deal: this.dealSummary(deal), irreversible: this.isIrreversible(deal) };
+    // Mesmo recorte do link da mesa: só o PAGADOR do gás vê keeperAddress/requiredWei (pop-up).
+    const viewerRole = viewer.kind === 'participant' ? mesa.chairs.find(c => c.chairId === viewer.chairId)?.role : undefined;
+    return { deal: this.dealSummary(deal, viewerRole), irreversible: this.isIrreversible(deal) };
   }
 
   async mesaViewFor(mesa: MesaRecord, viewer: { kind: 'admin' } | { kind: 'participant'; chairId: string }): Promise<Record<string, unknown>> {
@@ -738,6 +823,7 @@ export class MesaService {
     const base = {
       mesaId: mesa.mesaId, code: mesa.code, operationCode: mesa.operationCode ?? null, network: mesa.network, networkLabel: this.networksLabel(mesa),
       settlement: deriveSettlementPlan(mesa.chairs),
+      environment: mesa.environment ?? 'testnet',
       status, createdAt: mesa.createdAt, expiresAt: mesa.expiresAt, serverTime: now,
       approvedAt: mesa.approvedAt ?? null, termsHash: mesa.termsHash ?? null,
       // Trava de irrevogabilidade exposta ao frontend: canCancel=false → UI remove "Cancelar mesa".
@@ -766,6 +852,8 @@ export class MesaService {
     const me = mesa.chairs.find(c => c.chairId === viewer.chairId);
     return {
       ...base,
+      // deal REDACIONADO para ESTE participante: só o pagador do gás vê keeperAddress/requiredWei.
+      deal: this.dealSummary(deal, me?.role),
       viewer: me ? { chairId: me.chairId, role: me.role, roleLabel: CHAIR_ROLE_LABEL[me.role], firstName: me.firstName ?? null, wallet: me.wallet ? this.shortAddr(me.wallet.address) : null, asset: me.expectedAsset.symbol,
         // LIGHTNING_SWAP: o Comprador precisa informar a invoice antes do approve; a UI mostra o campo.
         lnInvoiceNeeded: me.role === 'BUYER' && deriveSettlementPlan(mesa.chairs)?.mode === 'LIGHTNING_SWAP' && !me.lightningInvoice,

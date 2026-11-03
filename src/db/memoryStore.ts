@@ -1,6 +1,7 @@
 import type { AuditEvent, Deal, DealEvent, RiskEvent, SettlementRecord, SignatureRecord } from '../domain/types.js';
 import { DomainError } from '../domain/errors.js';
 import type { MesaInviteRow, NonceRow, Store } from './repository.js';
+import type { IndexedPricingRecord } from '../indexing/types.js';
 
 const clone = <T>(v: T): T => structuredClone(v);
 
@@ -50,6 +51,7 @@ export class MemoryStore implements Store {
   }
   async getMesaInvite(inviteId: string): Promise<MesaInviteRow | null> { const r = this.mesaInvites.get(inviteId); return r ? { ...r } : null; }
   async listMesaInvites(mesaId: string): Promise<MesaInviteRow[]> { return [...this.mesaInvites.values()].filter(i => i.mesaId === mesaId).sort((a, b) => a.createdAt - b.createdAt).map(i => ({ ...i })); }
+  async findPendingMesaInvitesByPrefix(prefix: string): Promise<MesaInviteRow[]> { return [...this.mesaInvites.values()].filter(i => i.codePrefix === prefix && i.status === 'PENDING').sort((a, b) => a.createdAt - b.createdAt).map(i => ({ ...i })); }
   async consumeMesaInvite(inviteId: string, usedBy: { address: string; name: string }, at: number): Promise<boolean> {
     const r = this.mesaInvites.get(inviteId);
     if (!r || r.status !== 'PENDING' || r.expiresAt <= at) return false;
@@ -67,5 +69,16 @@ export class MemoryStore implements Store {
   async listAudit(limit = 1000): Promise<AuditEvent[]> { return this.audit.slice(-limit).map(clone); }
   async getIdempotent(key: string, actorId: string): Promise<{ requestHash: string; response: unknown } | null> { const v = this.idem.get(key + '|' + actorId); return v ? clone(v) : null; }
   async putIdempotent(key: string, actorId: string, requestHash: string, response: unknown, at: number): Promise<void> { this.idem.set(key + '|' + actorId, { requestHash, response: clone(response) }); this.idemAt.set(key + '|' + actorId, at); }
+  /* ---------- Operar Indexado ---------- */
+  private indexedPricing = new Map<string, IndexedPricingRecord[]>();
+  async getIndexedPricing(mesaId: string): Promise<IndexedPricingRecord | null> { const arr = this.indexedPricing.get(mesaId); if (!arr?.length) return null; const cur = arr.reduce((a, b) => (b.termsVersion > a.termsVersion ? b : a)); return clone(cur); }
+  async upsertIndexedPricing(rec: IndexedPricingRecord): Promise<void> {
+    const arr = this.indexedPricing.get(rec.mesaId) ?? [];
+    const prev = arr.find(r => r.termsVersion === rec.termsVersion);
+    if (prev && prev.status === 'LOCKED') throw new DomainError('VERSION_CONFLICT', 'mesa_indexed_pricing travado (LOCKED) é imutável');
+    const next = prev ? arr.map(r => (r.termsVersion === rec.termsVersion ? clone(rec) : r)) : [...arr, clone(rec)];
+    this.indexedPricing.set(rec.mesaId, next);
+  }
+  async deleteIndexedPricing(mesaId: string, termsVersion: number): Promise<void> { const arr = this.indexedPricing.get(mesaId); if (!arr) return; const row = arr.find(r => r.termsVersion === termsVersion); if (row?.status === 'LOCKED') throw new DomainError('VERSION_CONFLICT', 'mesa_indexed_pricing travado (LOCKED) é imutável'); this.indexedPricing.set(mesaId, arr.filter(r => r.termsVersion !== termsVersion)); }
   async close(): Promise<void> { /* nada */ }
 }

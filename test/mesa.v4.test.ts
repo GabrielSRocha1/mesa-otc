@@ -85,7 +85,7 @@ describe('API — cadeiras dinâmicas e 403 anti-scam no approve', () => {
 
     const bi = await mk([
       { role: 'SELLER', expectedAsset: { network: 'bitcoin', contractOrMint: null, decimals: 8, symbol: 'BTC' } },
-      { role: 'BUYER', expectedAsset: { network: 'tron', contractOrMint: 'TR7NHqjeKQxGTCi8q8ZY4pL8otSzgjLj6t', decimals: 6, symbol: 'USDT' } },
+      { role: 'BUYER', expectedAsset: { network: 'ethereum', contractOrMint: '0xdAC17F958D2ee523a2206206994597C13D831ec7', decimals: 6, symbol: 'USDT' } },
     ]);
     expect(bi.statusCode, bi.body).toBe(201);
     const view = bi.json<{ settlement: { mode: string; htlc?: { btcSide: string } } }>();

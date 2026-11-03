@@ -311,6 +311,20 @@
         case 'VERUM_PAYMENT_REJECTED':
           settle(d.id, null, d.reason || 'USER_REJECTED');
           break;
+        case 'VERUM_TRON_SIGN_TYPED_RESPONSE':
+          // Typed data TIP-712 (perna Tron do escrow V2): { signature 0x…65B, address T… }.
+          settle(d.id, { signature: d.signature, address: d.address }, null);
+          break;
+        case 'VERUM_TRON_SIGN_TYPED_REJECTED':
+          settle(d.id, null, d.reason || 'USER_REJECTED');
+          break;
+        case 'VERUM_TRON_CALL_RESPONSE':
+          // Contract call Tron (approve/signV2): resolve { txHash } após o broadcast.
+          settle(d.id, { txHash: d.txHash }, null);
+          break;
+        case 'VERUM_TRON_CALL_REJECTED':
+          settle(d.id, null, d.reason || 'USER_REJECTED');
+          break;
         case 'VERUM_ADDRESSES_RESPONSE':
           settle(d.id, { addresses: Array.isArray(d.addresses) ? d.addresses : [] }, null);
           break;
@@ -695,6 +709,76 @@
       });
     },
 
+    // ── Tron dApp (perna Tron do escrow Verum V2) ────────────────────────────
+    // tronSignTypedData: assina TYPED DATA (TIP-712 — digest EIP-712 com a chave
+    // Tron). Resolve { signature, address }. tronSendContractCall: contract call
+    // genérico { contract, functionSelector, parameters:[{type,value}],
+    // callValueSun?, feeLimitSun? } — a carteira codifica, verifica, assina e
+    // transmite; resolve { txHash } só após o broadcast ser aceito.
+    tronSignTypedData: function (typedData) {
+      if (!window.verum.connected) return Promise.reject(new WalletError('NOT_CONNECTED'));
+      if (!typedData || typeof typedData !== 'object' || !typedData.domain || !typedData.types || !typedData.message) {
+        return Promise.reject(new WalletError('INVALID_PAYLOAD'));
+      }
+      log('SIGNATURE', 'tronSignTypedData()', String(typedData.primaryType || '?'));
+      return new Promise(function (resolve, reject) {
+        var id = enqueue(resolve, reject, 'tronSignTyped');
+        send({
+          type: 'VERUM_TRON_SIGN_TYPED_REQUEST',
+          id: id,
+          typedData: {
+            domain: typedData.domain,
+            types: typedData.types,
+            primaryType: typedData.primaryType,
+            message: typedData.message,
+          },
+          address: typeof typedData.address === 'string' ? typedData.address : null,
+          origin: window.location.origin,
+        });
+      }).catch(function (err) {
+        if (err && err.code === 'USER_REJECTED') {
+          var e = new Error('User rejected the signature request.');
+          e.name = 'WalletError';
+          e.code = 4001;
+          throw e;
+        }
+        throw err;
+      });
+    },
+    tronSendContractCall: function (request) {
+      if (!window.verum.connected) return Promise.reject(new WalletError('NOT_CONNECTED'));
+      if (!request || typeof request !== 'object' || typeof request.contract !== 'string'
+        || typeof request.functionSelector !== 'string' || !Array.isArray(request.parameters)) {
+        return Promise.reject(new WalletError('INVALID_PAYLOAD'));
+      }
+      log('SIGNATURE', 'tronSendContractCall()', String(request.functionSelector));
+      return new Promise(function (resolve, reject) {
+        var id = enqueue(resolve, reject, 'tronCall');
+        send({
+          type: 'VERUM_TRON_CALL_REQUEST',
+          id: id,
+          call: {
+            contract: request.contract,
+            functionSelector: request.functionSelector,
+            parameters: request.parameters.map(function (p) {
+              return { type: p && p.type, value: p && String(p.value) };
+            }),
+            callValueSun: request.callValueSun != null ? String(request.callValueSun) : '0',
+            feeLimitSun: request.feeLimitSun != null ? String(request.feeLimitSun) : null,
+          },
+          origin: window.location.origin,
+        });
+      }).catch(function (err) {
+        if (err && err.code === 'USER_REJECTED') {
+          var e = new Error('User rejected the transaction request.');
+          e.name = 'WalletError';
+          e.code = 4001;
+          throw e;
+        }
+        throw err;
+      });
+    },
+
     // ── getAddresses (Protocolo de Endereços Multi-rede × Portal de Câmbio) ──
     // Pede à carteira a lista de endereços públicos do usuário por rede. Resolve
     // { addresses: [{ network, address }, ...] } — só as redes com endereço já
@@ -738,6 +822,8 @@
         case 'transfer': return window.verum.transfer(req.params && req.params.intent ? req.params.intent : req.params);
         case 'multiTransfer': return window.verum.multiTransfer(req.params && req.params.intent ? req.params.intent : req.params);
         case 'signAndSendPayment': return window.verum.signAndSendPayment(req.params && req.params.request ? req.params.request : req.params);
+        case 'tronSignTypedData': return window.verum.tronSignTypedData(req.params && req.params.typedData ? req.params.typedData : req.params);
+        case 'tronSendContractCall': return window.verum.tronSendContractCall(req.params && req.params.request ? req.params.request : req.params);
         case 'getAddresses': return window.verum.getAddresses();
         case 'getBalance': return window.verum.getBalance(req.params && req.params.chainKey, req.params && req.params.asset);
         default: return Promise.reject(new WalletError('METHOD_NOT_SUPPORTED'));

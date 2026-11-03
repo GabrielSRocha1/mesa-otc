@@ -195,6 +195,10 @@ window.addEventListener('unhandledrejection',function(e){try{console.warn('[veru
   var q=new URLSearchParams(location.search);
   var mv=location.pathname.match(/\/ver\/([^/?#]+)/);
   var MESA_ID=(mv&&decodeURIComponent(mv[1]))||q.get('mesa')||'';
+  // Token de SESSÃO da mesa (gravado pelo convite ao conectar a carteira): permite buscar a visão
+  // AUTENTICADA (papel do participante + depósito/gás pendente só dele) para abrir o pop-up de
+  // depósito na PRÓPRIA página de visualização — o participante age na carteira pela mesa.
+  function mesaTok(){ if(!MESA_ID) return ''; try{ return sessionStorage.getItem('verum_mesa_pt_'+MESA_ID)||localStorage.getItem('verum_mesa_pt_'+MESA_ID)||''; }catch(e){ return ''; } }
   var m=location.pathname.match(/\/op\/([^/?#]+)/);
   var ID=(m&&decodeURIComponent(m[1]))||q.get('id')||q.get('op')||'';
   var ROLE={SELLER:'Vendedor',BUYER:'Comprador',PAYMASTER_1:'Pay Master 1',PAYMASTER_2:'Pay Master 2'};
@@ -299,8 +303,19 @@ window.addEventListener('unhandledrejection',function(e){try{console.warn('[veru
     var pct=reqS?Math.round(valS/reqS*100):0;
 
     var head='<div class="op-head"><div class="titw"><h1>Negociação OTC</h1><p>Mesa '+esc(mesa.code||'')+' · acompanhe os detalhes da operação (somente leitura).</p></div>'
-      +'<div class="op-status">'+statusPill(mesa.status)
+      +'<div class="op-status">'+(mesa.environment==='mainnet'?'<span class="op-badge" style="background:rgba(239,68,68,.15);color:#ef4444;border:1px solid #ef4444;font-weight:700">MAINNET — FUNDOS REAIS</span>':'')+statusPill(mesa.status)
       +(mesa.expiresAt?'<span class="op-exp">Expira em <b style="color:var(--ink-2)">'+esc(fmtDate(mesa.expiresAt))+'</b></span>':'')+'</div></div>';
+    // MOTIVO DA FALHA (nunca silenciosa): bloqueio/risco e erro da liquidação + estado dos reembolsos.
+    if(deal&&(deal.blocked||deal.settlementFailure)){
+      var why=[];
+      if(deal.settlementFailure){ if(deal.settlementFailure.reason) why.push(esc(deal.settlementFailure.reason)); (deal.settlementFailure.legs||[]).forEach(function(l){ why.push('Perna '+l.index+': '+esc(l.error||l.step)); }); }
+      if(deal.blocked&&deal.blocked.reason&&why.indexOf(esc(deal.blocked.reason))<0) why.push(esc(deal.blocked.reason));
+      var refHtml=(deal.refunds||[]).map(function(r){ return '<div style="font-size:12px;color:var(--ink-2)">↩ Reembolso '+(r.role==='SELLER'?'do Vendedor':'do Comprador')+': '+(r.status==='REFUNDED'?'<b style="color:#22c55e">devolvido ✓</b>':('pendente'+(r.error?' — '+esc(r.error):'')))+'</div>'; }).join('');
+      head+='<section class="card" style="border-color:#ef4444;margin-bottom:12px"><div style="font-weight:800;color:#ef4444;margin-bottom:6px">Por que a operação falhou</div>'
+        +(why.length?('<div style="font-size:12.5px;color:var(--ink-2);word-break:break-word">'+why.join('<br>')+'</div>'):'<div style="font-size:12.5px;color:var(--ink-3)">Motivo não registrado.</div>')
+        +(refHtml?('<div style="margin-top:8px;border-top:1px solid var(--line);padding-top:8px">'+refHtml+'<div style="font-size:11.5px;color:var(--ink-3);margin-top:4px">Devoluções são automáticas: ETH após a janela do contrato (~40 min), BTC após a trava de tempo do cofre (~8 h).</div></div>'):'')
+        +'</section>';
+    }
 
     var partsHtml=chairs.length?chairs.map(function(c){return partCard(c,bal[c.role]);}).join(''):'';
     var parts='<div class="op-parts" style="grid-template-columns:repeat('+Math.max(1,Math.min(4,chairs.length))+',1fr)">'+partsHtml+'</div>';
@@ -416,9 +431,73 @@ window.addEventListener('unhandledrejection',function(e){try{console.warn('[veru
       var sub=(lastSigned?('✅ '+lastSigned+' assinou · '):'')
         +'Assinaturas '+(d.validSignatures||0)+'/'+(d.requiredSignatures||0)
         +' — a janela é de 5 minutos por vez. Se essa cadeira é sua, use "Entrar para assinar".';
-      if(first||changed) turnPopup('Vez de assinar: '+roleName(mesa,d.turnRole),sub,'#eab308');
+      // Não duplicar: se EU sou o assinante da vez, o pop-up ACIONÁVEL (maybeDepositPopup) cobre; aqui
+      // é só o aviso genérico para os DEMAIS espectadores.
+      if((first||changed)&&myRoleCache!==d.turnRole) turnPopup('Vez de assinar: '+roleName(mesa,d.turnRole),sub,'#eab308');
     } else if(changed&&d.state==='SETTLED'){ turnPopup('Operação liquidada ✓','Todas as assinaturas foram coletadas e o contrato executou a troca.','#22c55e'); }
     else if(changed&&(d.state==='SETTLING'||d.state==='SETTLEMENT_VALIDATION')){ turnPopup('Todas assinaram — liquidando…','O contrato está executando a liquidação atômica.','#22c55e'); }
+  }
+  // ── POP-UP de DEPÓSITO do PARTICIPANTE conectado (BTC no cofre / gás ao keeper) ──
+  // Dispara 1x por operação no dispositivo de quem está conectado com a carteira do papel que precisa
+  // depositar. O envio em si acontece na carteira, pela mesa: o botão abre /mesa?mesa=... (visão
+  // autenticada, dentro da Verum Wallet, onde o signAndSendPayment roda). Aqui é só o AVISO visível.
+  var depPopKey=null, signPopKey=null, myRoleCache=null;
+  function satsToBtc(s){ try{ var v=String(BigInt(s)).padStart(9,'0'); var i=v.slice(0,-8)||'0'; var f=v.slice(-8).replace(/0+$/,''); return f?i+'.'+f:i; }catch(e){ return String(s); } }
+  function weiToEth(w){ try{ var v=String(BigInt(w)).padStart(19,'0'); var i=v.slice(0,-18)||'0'; var f=v.slice(-18).replace(/0+$/,'').slice(0,8); return f?i+'.'+f:i; }catch(e){ return String(w); } }
+  function depositPopup(title,html,btnLabel,accent){
+    var old=document.getElementById('depPop'); if(old) old.remove();
+    var el=document.createElement('div'); el.id='depPop';
+    el.style.cssText='position:fixed;inset:0;background:rgba(2,6,16,.78);z-index:95;display:grid;place-items:center;padding:16px';
+    var mesaUrl='/mesa?mesa='+encodeURIComponent(MESA_ID);
+    el.innerHTML='<div style="background:var(--card,#0d1526);border:1px solid '+(accent||'#eab308')+';border-radius:16px;max-width:440px;width:100%;padding:24px;text-align:left">'
+      +'<div style="font-family:var(--f-head);font-weight:800;font-size:18px;margin-bottom:10px">'+title+'</div>'
+      +'<div style="font-size:13.5px;color:var(--ink-2,#aab);line-height:1.5">'+html+'</div>'
+      +'<a href="'+mesaUrl+'" style="margin-top:18px;height:46px;display:flex;align-items:center;justify-content:center;border-radius:10px;background:#2563eb;color:#fff;font-weight:700;text-decoration:none">'+(btnLabel||'Abrir na carteira para enviar')+'</a>'
+      +'<button id="depPopClose" style="margin-top:8px;width:100%;height:40px;border-radius:10px;border:1px solid var(--line,#243);background:transparent;color:inherit;cursor:pointer">Fechar</button></div>';
+    document.body.appendChild(el);
+    var close=function(){ el.remove(); };
+    el.addEventListener('click',function(e){ if(e.target===el) close(); });
+    document.getElementById('depPopClose').addEventListener('click',close);
+  }
+  function maybeDepositPopup(av){
+    if(!av||!av.viewer||!av.deal) return;
+    var me=av.viewer, d=av.deal; var role=me.role;
+    var fund=(d.funding||[]).find(function(f){ return f.role===role&&f.status!=='FINAL'; });
+    var needsBtc=!!(fund&&d.htlcVault&&d.htlcVault.from===role&&(d.state==='AWAITING_SIGNATURES'||d.state==='LIQUIDITY_VERIFIED'));
+    var needsGas=!!(d.gasPrepay&&d.gasPrepay.status==='PENDING'&&role===d.gasPrepay.payerRole&&d.gasPrepay.keeperAddress);
+    // 3) É A SUA VEZ DE ASSINAR (sem depósito/gás pendente): só depois dos anteriores na ordem
+    // Vendedor→PM1→PM2→Comprador. Acionável: botão abre /mesa (lá a tela de revisão/assinatura
+    // abre sozinha). Dispara 1x por operação; some ao assinar (turnRole muda).
+    var myTurn=!needsBtc&&!needsGas&&d.state==='AWAITING_SIGNATURES'&&d.turnRole===role&&(d.signed||[]).indexOf(role)<0;
+    if(myTurn){
+      if(signPopKey===d.id) return; signPopKey=d.id;
+      depositPopup('É a sua vez de assinar',
+        'Chegou a sua vez de <b>autorizar</b> esta operação (ordem: Vendedor → Pay Masters → Comprador). Abra a mesa na sua Verum Wallet, <b>revise os termos</b> e assine — a janela é de <b>5 minutos</b>.'
+        +'<div style="margin-top:12px;padding:10px 12px;border:1px solid var(--line,#243);border-radius:10px">A assinatura apenas <b>prova que você autoriza</b> a troca. <b>Nada se move sem ela</b>, e você vê os valores exatos antes de confirmar.</div>',
+        'Abrir na carteira para assinar','#2563eb');
+      return;
+    }
+    if(!(needsBtc||needsGas)) return;
+    if(depPopKey===d.id) return; depPopKey=d.id;
+    if(needsBtc){
+      var sendSat=String(d.htlcVault.depositSat||d.htlcVault.requiredSat);
+      depositPopup('Depósito de BTC necessário',
+        'A operação foi aprovada. Para seguir, você precisa enviar <b class="mono">'+satsToBtc(sendSat)+' BTC</b> ('+sendSat+' sats — valor <b>exato</b>; a taxa de rede a carteira paga por fora) ao <b>cofre</b> desta operação.'
+        +'<div style="margin-top:12px;padding:10px 12px;border:1px solid #eab308;border-radius:10px;background:rgba(234,179,8,.08)">⏳ <b>Importante:</b> se a operação <b>não se completar</b>, o seu BTC <b>volta para a sua carteira com segurança</b> — mas só <b>após ~8 horas</b> (trava de tempo do cofre). Nesse período fica bloqueado, nunca perdido.</div>'
+        +'<div style="margin-top:10px">Toque abaixo para abrir a mesa na sua Verum Wallet e enviar com um toque.</div>');
+    } else {
+      depositPopup('Pré-pagamento de gás necessário',
+        'Chegou a sua vez de assinar. Antes, para o keeper <b>registrar e liquidar</b> esta operação na blockchain, envie um depósito de gás: <b class="mono">'+weiToEth(d.gasPrepay.requiredWei||'0')+' ETH</b>.'
+        +'<div style="margin-top:12px;padding:10px 12px;border:1px solid var(--line,#243);border-radius:10px">Esse valor cobre o gás das transações on-chain da operação (registro + liquidação).</div>'
+        +'<div style="margin-top:10px">Toque abaixo para abrir a mesa na sua Verum Wallet e pré-pagar com um toque.</div>');
+    }
+  }
+  function loadAuthDeposit(){
+    var tok=mesaTok(); if(!tok||!MESA_ID) return;
+    fetch(API+'/v1/mesas/'+encodeURIComponent(MESA_ID),{headers:{accept:'application/json','authorization':'Bearer '+tok}})
+      .then(function(r){ return r.ok?r.json():null; })
+      .then(function(av){ if(av){ if(av.viewer&&av.viewer.role) myRoleCache=av.viewer.role; maybeDepositPopup(av); } })
+      .catch(function(){});
   }
   function load(){
     if(MESA_ID){
@@ -430,6 +509,7 @@ window.addEventListener('unhandledrejection',function(e){try{console.warn('[veru
         var bal={}; var bc=(res[1]&&res[1].ok&&res[1].d&&res[1].d.chairs)||[]; bc.forEach(function(c){ bal[c.role]=c; });
         renderMesa(pv.d,bal);
         maybeTurnPopup(pv.d);
+        loadAuthDeposit();
       }).catch(function(){});
       return;
     }

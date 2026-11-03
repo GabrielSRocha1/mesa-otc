@@ -44,6 +44,12 @@ const Schema = z.object({
   VERUM_EVM_EXPLORER_BASE: z.string().optional(),
   // Escrow V2 (ADR-v4: cadeiras 2–4 + htlcHash). Definido → o adapter V2 SUBSTITUI o V1 na rede EVM.
   VERUM_EVM_V2_ESCROW_ADDRESS: z.string().regex(/^0x[0-9a-fA-F]{40}$/).optional(),
+  // ---- EVM Ethereum MAINNET (grupo paralelo — mesa.environment='mainnet'). chainId fixo 1. ----
+  VERUM_EVM_MAINNET_RPC_URL: z.string().optional(),
+  VERUM_EVM_MAINNET_ESCROW_V2_ADDRESS: z.string().regex(/^0x[0-9a-fA-F]{40}$/).optional(),
+  VERUM_EVM_MAINNET_KEEPER_KEY: z.string().regex(/^0x[0-9a-fA-F]{64}$/).optional(),
+  VERUM_EVM_MAINNET_ATTESTOR_KEY: z.string().regex(/^0x[0-9a-fA-F]{64}$/).optional(),
+  VERUM_EVM_MAINNET_CONFIRMATIONS: z.coerce.number().int().min(1).max(64).default(2),
   // Solana (programa verum_otc em devnet/localnet). Keypairs = JSON array de 64 bytes.
   SOLANA_RPC_URL: z.string().optional(),
   SOLANA_CHAIN_ID: z.enum(['101', '102', '103']).optional(),
@@ -57,6 +63,8 @@ const Schema = z.object({
   TRON_FULL_HOST: z.string().optional(),
   TRON_CHAIN_ID: z.string().optional(),
   TRON_ESCROW_ADDRESS: z.string().regex(/^T[1-9A-HJ-NP-Za-km-z]{33}$/).optional(),
+  /** Escrow V2 Tron (ADR-v4: cadeiras 2–4 + HTLC + TRX nativo) — quando definido, SUBSTITUI o V1. */
+  TRON_ESCROW_V2_ADDRESS: z.string().regex(/^T[1-9A-HJ-NP-Za-km-z]{33}$/).optional(),
   TRON_EXECUTOR_KEY: z.string().regex(/^(0x)?[0-9a-fA-F]{64}$/).optional(),
   TRON_ATTESTOR_KEY: z.string().regex(/^(0x)?[0-9a-fA-F]{64}$/).optional(),
   TRON_TUSDT: z.string().regex(/^T[1-9A-HJ-NP-Za-km-z]{33}$/).optional(),
@@ -71,8 +79,19 @@ const Schema = z.object({
   BITCOIN_CLAIM_KEY: z.string().regex(/^(0x)?[0-9a-fA-F]{64}$/).optional(),
   BITCOIN_REFUND_KEY: z.string().regex(/^(0x)?[0-9a-fA-F]{64}$/).optional(),
   BITCOIN_CONFIRMATIONS: z.coerce.number().int().min(1).max(12).default(3),
-  BITCOIN_CSV_BLOCKS: z.coerce.number().int().min(6).max(1000).default(144),
+  // Timelock CSV do refund BTC. SEM valor explícito, o default é DERIVADO DA REDE (ver bitcoinConfig):
+  // mainnet 48 (~8h), signet/testnet 36 (~6h), regtest 144 (local). Definir aqui SOBRESCREVE o default.
+  // Trade-off: o CSV precisa ficar acima da janela do token (40 min) + claim + variância/reorg —
+  // encurtar demais arrisca a atomicidade do swap (contraparte honesta perde a janela de claim).
+  BITCOIN_CSV_BLOCKS: z.coerce.number().int().min(6).max(1000).optional(),
   BITCOIN_FEE_FLOOR_SAT_VB: z.coerce.number().int().min(1).max(500).default(2),
+  // ---- Bitcoin MAINNET (grupo paralelo — mesa.environment='mainnet'). network fixa 'mainnet',
+  // CSV default 48 blocos (~8h) — NUNCA herdar o CSV curto da signet. Chaves NOVAS (não reusar signet).
+  BITCOIN_MAINNET_ESPLORA_URL: z.string().optional(),
+  BITCOIN_MAINNET_CLAIM_KEY: z.string().regex(/^(0x)?[0-9a-fA-F]{64}$/).optional(),
+  BITCOIN_MAINNET_REFUND_KEY: z.string().regex(/^(0x)?[0-9a-fA-F]{64}$/).optional(),
+  BITCOIN_MAINNET_CONFIRMATIONS: z.coerce.number().int().min(1).max(12).default(3),
+  BITCOIN_MAINNET_CSV_BLOCKS: z.coerce.number().int().min(24).max(1000).default(48),
   // Lightning Network (rota LIGHTNING_SWAP — perna BTC via LND REST). Grupo all-or-nothing:
   // LND_REST_URL + LND_MACAROON (hex, escopo mínimo invoice+offchain+readonly) + LND_TLS_CERT (PEM
   // ou base64). Ausente = rota Lightning desligada (o HTLC on-chain segue como único caminho BTC).
@@ -89,6 +108,19 @@ const Schema = z.object({
   // Demo: adia o financiamento do escrow para a 1ª assinatura (em vez de financiar ao criar o deal).
   // Assim a mesa aprovada fica "não irreversível" e o botão "Reabrir para editar" aparece no demo.
   DEMO_DEFER_FUNDING: z.coerce.boolean().default(false),
+  // ---- Operar Indexado (preço indexado ao Verum Swap) — grupo all-or-nothing ----
+  // Endpoint SERVER-SIDE do motor de swap da Verum (POST {URL}/api/swap/quote) + chave. Ausente em prod
+  // ⇒ modo indexado DESLIGADO (fail-closed, nunca simula preço em produção). Em dev/testnet sem URL, um
+  // MockIndexProvider in-process é usado (preço de dev; nunca em prod).
+  VERUM_SWAP_ENGINE_URL: z.string().optional(),
+  VERUM_SWAP_ENGINE_KEY: z.string().optional(),
+  VERUM_SWAP_TIMEOUT_MS: z.coerce.number().int().min(500).max(15_000).default(3_000),
+  VERUM_SWAP_MIN_PROVIDERS: z.coerce.number().int().min(1).max(20).default(2),
+  VERUM_SWAP_MAX_DISPERSION_BPS: z.coerce.number().int().min(1).max(5_000).default(100),
+  VERUM_SWAP_SPREAD_BPS_MIN: z.coerce.number().int().min(-5_000).max(0).default(-500),
+  VERUM_SWAP_SPREAD_BPS_MAX: z.coerce.number().int().min(0).max(5_000).default(500),
+  VERUM_SWAP_MAX_MOVE_BPS: z.coerce.number().int().min(1).max(5_000).default(100),
+  VERUM_SWAP_FIXING_TTL_SEC: z.coerce.number().int().min(60).max(3_600).default(600),
   // Web Push (notificação "é sua vez de assinar"). Sem as chaves → push simplesmente desligado
   // (degradação graciosa). Gere com `npx web-push generate-vapid-keys`.
   VAPID_PUBLIC_KEY: z.string().optional(),
@@ -118,6 +150,9 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
     ['TRON', [c.TRON_FULL_HOST, c.TRON_CHAIN_ID, c.TRON_ESCROW_ADDRESS, c.TRON_EXECUTOR_KEY, c.TRON_ATTESTOR_KEY, c.TRON_TUSDT, c.TRON_TBTC]],
     ['BITCOIN', [c.BITCOIN_ESPLORA_URL, c.BITCOIN_NETWORK, c.BITCOIN_CLAIM_KEY, c.BITCOIN_REFUND_KEY]],
     ['LND', [c.LND_REST_URL, c.LND_MACAROON, c.LND_TLS_CERT]],
+    ['VERUM_SWAP_ENGINE', [c.VERUM_SWAP_ENGINE_URL, c.VERUM_SWAP_ENGINE_KEY]],
+    ['VERUM_EVM_MAINNET', [c.VERUM_EVM_MAINNET_RPC_URL, c.VERUM_EVM_MAINNET_ESCROW_V2_ADDRESS, c.VERUM_EVM_MAINNET_KEEPER_KEY, c.VERUM_EVM_MAINNET_ATTESTOR_KEY]],
+    ['BITCOIN_MAINNET', [c.BITCOIN_MAINNET_ESPLORA_URL, c.BITCOIN_MAINNET_CLAIM_KEY, c.BITCOIN_MAINNET_REFUND_KEY]],
   ];
   for (const [name, keys] of groups) {
     const set = keys.filter(Boolean).length;
@@ -131,6 +166,49 @@ export interface VerumEvmSettings { rpcUrl: string; chainId: number; escrow: `0x
 export function verumEvmConfig(c: Config): VerumEvmSettings | null {
   if (!c.VERUM_EVM_RPC_URL || !c.VERUM_EVM_CHAIN_ID || !c.VERUM_EVM_ESCROW_ADDRESS || !c.VERUM_EVM_KEEPER_KEY || !c.VERUM_EVM_ATTESTOR_KEY || !c.VERUM_EVM_TBTC || !c.VERUM_EVM_TUSDT) return null;
   return { rpcUrl: c.VERUM_EVM_RPC_URL, chainId: Number(c.VERUM_EVM_CHAIN_ID), escrow: c.VERUM_EVM_ESCROW_ADDRESS as `0x${string}`, escrowV2: (c.VERUM_EVM_V2_ESCROW_ADDRESS as `0x${string}` | undefined) ?? null, keeperKey: c.VERUM_EVM_KEEPER_KEY as `0x${string}`, attestorKey: c.VERUM_EVM_ATTESTOR_KEY as `0x${string}`, tbtc: c.VERUM_EVM_TBTC as `0x${string}`, tusdt: c.VERUM_EVM_TUSDT as `0x${string}`, confirmations: c.VERUM_EVM_CONFIRMATIONS, explorerBase: c.VERUM_EVM_EXPLORER_BASE?.replace(/\/$/, '') ?? null };
+}
+
+/**
+ * Carteiras de TREASURY (recebem a platform fee) por família de rede — fonte única.
+ * Usadas no DEPLOY (constroem o contrato com essa treasury) e nas ops de owner (proposeConfig).
+ * No V2 a fee real vai para a treasury ARMAZENADA no contrato: trocar em contrato já implantado
+ * exige proposeConfig+applyConfig (timelock 24h), não basta editar aqui.
+ */
+export const PLATFORM_TREASURY = {
+  evm: '0x897672Cb00Fbf7aB2E8d3Dc959C342d0885Add12' as `0x${string}`,
+  solana: '98K7MqNYH7xVP8PWFj5JP9fU9AyT1E1KLVPH3oeXLfyD',
+  tron: 'TQz5rtuesY8sRTtsMpJiU4Z6xWCREAwL68',
+} as const;
+
+/** Stablecoins/majors REAIS da Ethereum mainnet (constantes — menos superfície de env). */
+export const ETH_MAINNET_TOKENS = {
+  USDT: { address: '0xdAC17F958D2ee523a2206206994597C13D831ec7' as `0x${string}`, decimals: 6 },
+  USDC: { address: '0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48' as `0x${string}`, decimals: 6 },
+  WBTC: { address: '0x2260FAC5E5542a773Aa44fBCfeDf7C193bc2C599' as `0x${string}`, decimals: 8 },
+  WETH: { address: '0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2' as `0x${string}`, decimals: 18 },
+} as const;
+
+/** EVM Ethereum MAINNET (mesa.environment='mainnet'). null = grupo ausente (mainnet desligada).
+ *  chainId fixo 1; V1 não existe na mainnet — escrow aponta para o próprio V2 (o V2 substitui o V1). */
+export function verumEvmMainnetConfig(c: Config): VerumEvmSettings | null {
+  if (!c.VERUM_EVM_MAINNET_RPC_URL || !c.VERUM_EVM_MAINNET_ESCROW_V2_ADDRESS || !c.VERUM_EVM_MAINNET_KEEPER_KEY || !c.VERUM_EVM_MAINNET_ATTESTOR_KEY) return null;
+  const escrowV2 = c.VERUM_EVM_MAINNET_ESCROW_V2_ADDRESS as `0x${string}`;
+  return {
+    rpcUrl: c.VERUM_EVM_MAINNET_RPC_URL, chainId: 1, escrow: escrowV2, escrowV2,
+    keeperKey: c.VERUM_EVM_MAINNET_KEEPER_KEY as `0x${string}`, attestorKey: c.VERUM_EVM_MAINNET_ATTESTOR_KEY as `0x${string}`,
+    tbtc: ETH_MAINNET_TOKENS.WBTC.address, tusdt: ETH_MAINNET_TOKENS.USDT.address,
+    confirmations: c.VERUM_EVM_MAINNET_CONFIRMATIONS, explorerBase: 'https://etherscan.io',
+  };
+}
+
+/** Bitcoin MAINNET (mesa.environment='mainnet'). null = grupo ausente. CSV mínimo 24 blocos (~4h). */
+export function bitcoinMainnetConfig(c: Config): BitcoinSettingsCfg | null {
+  if (!c.BITCOIN_MAINNET_ESPLORA_URL || !c.BITCOIN_MAINNET_CLAIM_KEY || !c.BITCOIN_MAINNET_REFUND_KEY) return null;
+  return {
+    esploraUrl: c.BITCOIN_MAINNET_ESPLORA_URL, network: 'mainnet',
+    claimKey: c.BITCOIN_MAINNET_CLAIM_KEY, refundKey: c.BITCOIN_MAINNET_REFUND_KEY,
+    confirmations: c.BITCOIN_MAINNET_CONFIRMATIONS, csvBlocks: c.BITCOIN_MAINNET_CSV_BLOCKS, feeFloorSatVb: c.BITCOIN_FEE_FLOOR_SAT_VB,
+  };
 }
 
 /** Escrow canônico Verum — Solana (programa verum_otc). null = grupo ausente. */
@@ -153,14 +231,25 @@ export interface BitcoinSettingsCfg { esploraUrl: string; network: 'mainnet' | '
 export function bitcoinConfig(c: Config): BitcoinSettingsCfg | null {
   if (c.BITCOIN_SIMULATE === '1') return null;
   if (!c.BITCOIN_ESPLORA_URL || !c.BITCOIN_NETWORK || !c.BITCOIN_CLAIM_KEY || !c.BITCOIN_REFUND_KEY) return null;
-  return { esploraUrl: c.BITCOIN_ESPLORA_URL, network: c.BITCOIN_NETWORK, claimKey: c.BITCOIN_CLAIM_KEY, refundKey: c.BITCOIN_REFUND_KEY, confirmations: c.BITCOIN_CONFIRMATIONS, csvBlocks: c.BITCOIN_CSV_BLOCKS, feeFloorSatVb: c.BITCOIN_FEE_FLOOR_SAT_VB };
+  // Default do CSV por rede (quando BITCOIN_CSV_BLOCKS não é definido): mainnet ~8h, signet/testnet ~6h.
+  // regtest fica em 144 (blocos minerados na hora nos testes locais; não é deploy real).
+  const csvDefaultByNetwork: Record<typeof c.BITCOIN_NETWORK & string, number> = { mainnet: 48, signet: 36, testnet: 36, regtest: 144 };
+  const csvBlocks = c.BITCOIN_CSV_BLOCKS ?? csvDefaultByNetwork[c.BITCOIN_NETWORK];
+  return { esploraUrl: c.BITCOIN_ESPLORA_URL, network: c.BITCOIN_NETWORK, claimKey: c.BITCOIN_CLAIM_KEY, refundKey: c.BITCOIN_REFUND_KEY, confirmations: c.BITCOIN_CONFIRMATIONS, csvBlocks, feeFloorSatVb: c.BITCOIN_FEE_FLOOR_SAT_VB };
+}
+
+/** Operar Indexado — motor de swap da Verum. null = grupo ausente (modo indexado desligado / mock em dev). */
+export interface VerumSwapSettings { baseUrl: string; apiKey: string; timeoutMs: number; minProviders: number; maxDispersionBps: number }
+export function verumSwapEngineConfig(c: Config): VerumSwapSettings | null {
+  if (!c.VERUM_SWAP_ENGINE_URL || !c.VERUM_SWAP_ENGINE_KEY) return null;
+  return { baseUrl: c.VERUM_SWAP_ENGINE_URL.replace(/\/$/, ''), apiKey: c.VERUM_SWAP_ENGINE_KEY, timeoutMs: c.VERUM_SWAP_TIMEOUT_MS, minProviders: c.VERUM_SWAP_MIN_PROVIDERS, maxDispersionBps: c.VERUM_SWAP_MAX_DISPERSION_BPS };
 }
 
 /** Escrow canônico Verum — Tron (Nile). null = grupo ausente. */
-export interface TronSettings { fullHost: string; chainId: number; escrow: string; executorKey: string; attestorKey: `0x${string}`; tusdt: string; tbtc: string; confirmations: number }
+export interface TronSettings { fullHost: string; chainId: number; escrow: string; escrowV2?: string; executorKey: string; attestorKey: `0x${string}`; tusdt: string; tbtc: string; confirmations: number }
 export function tronConfig(c: Config): TronSettings | null {
   if (!c.TRON_FULL_HOST || !c.TRON_CHAIN_ID || !c.TRON_ESCROW_ADDRESS || !c.TRON_EXECUTOR_KEY || !c.TRON_ATTESTOR_KEY || !c.TRON_TUSDT || !c.TRON_TBTC) return null;
   const hex = (k: string) => (k.startsWith('0x') ? k : '0x' + k) as `0x${string}`;
-  return { fullHost: c.TRON_FULL_HOST, chainId: Number(c.TRON_CHAIN_ID), escrow: c.TRON_ESCROW_ADDRESS, executorKey: c.TRON_EXECUTOR_KEY.replace(/^0x/, ''), attestorKey: hex(c.TRON_ATTESTOR_KEY), tusdt: c.TRON_TUSDT, tbtc: c.TRON_TBTC, confirmations: c.TRON_CONFIRMATIONS };
+  return { fullHost: c.TRON_FULL_HOST, chainId: Number(c.TRON_CHAIN_ID), escrow: c.TRON_ESCROW_ADDRESS, escrowV2: c.TRON_ESCROW_V2_ADDRESS, executorKey: c.TRON_EXECUTOR_KEY.replace(/^0x/, ''), attestorKey: hex(c.TRON_ATTESTOR_KEY), tusdt: c.TRON_TUSDT, tbtc: c.TRON_TBTC, confirmations: c.TRON_CONFIRMATIONS };
 }
 

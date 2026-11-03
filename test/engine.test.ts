@@ -11,7 +11,7 @@ describe('Deal Engine — criação e verificações', () => {
   it('cria Deal com ID, participantes, ativos, quantias, preço, deságio, fees, rota, expiração, nonce, status e dealHash', async () => {
     const { app } = await makeApp(); const parts = solParts(); const d = await prepareDeal(app, parts);
     expect(d.state).toBe('LIQUIDITY_VERIFIED'); expect(d.terms).not.toBeNull(); expect(d.hash!.dealHash).toHaveLength(64);
-    const t = d.terms!; expect(t.dealId).toBe(d.id); expect(t.participants).toHaveLength(3); expect(t.requiredSignatures).toBe(3); expect(t.legs[0]!.amountBase).toBe('246250000000'); expect(BigInt(t.legs[1]!.amountBase)).toBeGreaterThan(0n); // perna do vendedor já com o deságio (250e9 × (1 − 150bps))
+    const t = d.terms!; expect(t.dealId).toBe(d.id); expect(t.participants).toHaveLength(3); expect(t.requiredSignatures).toBe(3); expect(t.legs[0]!.amountBase).toBe('250000000000'); expect(BigInt(t.legs[1]!.amountBase)).toBeGreaterThan(0n); // vendedor entrega o valor CHEIO escrito (deságio sai do PREÇO do comprador, 2026-11-02)
     expect(t.pricing.discountBps).toBe(150); expect(t.pricing.platformFeeBps).toBe(3); expect(t.route.routeId).toMatch(/^RT-ESCROW_NN/); expect(t.expiresAt).toBe(d.expiresAt); expect(t.dealNonce).toHaveLength(32);
     expect(d.onChain.solana?.registered).toBeUndefined(); // registro on-chain só no OPEN (janela de 40 min do escrow)
     const opened = await app.deals.open(d.id, parts.SELLER.address);
@@ -86,6 +86,38 @@ describe('Turnos adiados (registro on-chain pendente)', () => {
     const after = await app.deals.startTurnsIfRegistered(d.id);
     expect(after.turnRole).toBe('SELLER');
     expect(after.turnExpiresAt).not.toBeNull();
+    await app.close();
+  }, 30_000);
+
+  it('janela de criação expirada: reconstrói o registerTx com createdAt fresco (não reenvia tx morta) e mantém turnos adiados', async () => {
+    const { app, clock } = await makeApp({ autoSettle: false });
+    const parts: Parts = { SELLER: solWallet(), BUYER: solWallet(), PAYMASTER_1: solWallet() };
+    const d = await prepareDeal(app, parts);
+    // Simula o adapter de carteira real: registro PENDENTE (meta.registerPending) e trade nunca
+    // criada on-chain (getDealState=NONE). No 1º registro (no open) o createdAt já sai FORA da janela
+    // de 5 min — mas com expiresAt no futuro, para o open adiar os turnos sem expirar a Deal.
+    const sol = app.local!.solana as unknown as { getDealState: unknown; registerDeal: unknown };
+    sol.getDealState = async () => ({ status: 'NONE', revision: 0, deposits: {}, settledLegs: {} });
+    let regCalls = 0; let staleCreatedAt = true;
+    sol.registerDeal = async () => {
+      regCalls += 1; const t = Math.floor(clock.now() / 1000);
+      const createdAt = staleCreatedAt ? t - (5 * 60 + 120) : t; // open: tx morta; rebuild: fresca
+      return { chain: 'solana', ref: 'sim', submittedAt: clock.now(), meta: { registerPending: 1, onChainCreatedAt: createdAt, onChainExpiresAt: t + 2400 } };
+    };
+    await app.deals.open(d.id, parts.SELLER.address); // registerDeal #1 (createdAt velho) → turnos adiados
+    expect((await app.deals.get(d.id)).turnRole).toBeNull();
+
+    staleCreatedAt = false; regCalls = 0; // o rebuild deve regenerar com createdAt fresco
+    const after = await app.deals.startTurnsIfRegistered(d.id);
+    expect(regCalls).toBe(1);                 // reconstruiu 1x (não reenviou a tx morta)
+    expect(after.turnRole).toBeNull();        // registro ainda NONE → segue adiado
+    const meta = (after.onChain.solana as { meta?: Record<string, number> }).meta!;
+    expect(meta.onChainCreatedAt).toBeGreaterThan(Math.floor(clock.now() / 1000) - 60); // createdAt fresco
+
+    // createdAt dentro da janela agora: a próxima passada NÃO reconstrói de novo.
+    const before = regCalls;
+    await app.deals.startTurnsIfRegistered(d.id);
+    expect(regCalls).toBe(before);
     await app.close();
   }, 30_000);
 });
@@ -264,7 +296,7 @@ describe('Multichain: EVM (EIP-712) e Bitcoin (HTLC)', () => {
   it('Deal ETH → USDC em Ethereum com 3 carteiras EVM assinando EIP-712 liquida', async () => {
     const { app } = await makeApp({ autoSettle: false }); const parts: Parts = { SELLER: evmWallet(), BUYER: evmWallet(), PAYMASTER_1: evmWallet() };
     const d = await prepareDeal(app, parts, { assetIn: ASSETS.ETH, assetOut: ASSETS.USDC_ETH, amountInBase: '12000000000000000000' }); expect(d.terms!.route.routeId).toBe('RT-ESCROW_NN-ETHEREUM-ETHEREUM');
-    await fullySign(app, d.id, parts); expect((await app.settlement.settle(d.id)).status).toBe('DONE'); expect(app.local!.evm.balanceOf(parts.BUYER.address, null)).toBe(11820000000000000000n); await app.close(); // comprador recebe a perna do vendedor já com o deságio (12 ETH × (1 − 150bps))
+    await fullySign(app, d.id, parts); expect((await app.settlement.settle(d.id)).status).toBe('DONE'); expect(app.local!.evm.balanceOf(parts.BUYER.address, null)).toBe(12000000000000000000n); await app.close(); // comprador recebe o valor CHEIO escrito (deságio sai do PREÇO que ele paga, não da quantidade)
   });
   it('Deal BTC → USDC(Solana) por HTLC: depósitos em qualquer ordem (BTC pode trancar primeiro), preimage revelada no settle, claim BTC pelo comprador', async () => {
     const { app } = await makeApp({ autoSettle: false }); const parts: Parts = { SELLER: btcWallet(), BUYER: solWallet(), PAYMASTER_1: solWallet() };
@@ -275,6 +307,6 @@ describe('Multichain: EVM (EIP-712) e Bitcoin (HTLC)', () => {
     await app.deals.fund(d.id, 'SELLER', parts.SELLER.address); await app.deals.fund(d.id, 'BUYER', parts.BUYER.address);
     for (const role of SIGNING_ORDER) { const w = parts[role]; if (w) await signAs(app, d.id, role, w); }
     const rec = await app.settlement.settle(d.id); expect(rec.status).toBe('DONE'); expect((await app.deals.get(d.id)).state).toBe('SETTLED');
-    expect(await app.local!.solana.revealedPreimage(d.id)).toBeTruthy(); expect(app.local!.bitcoin.balanceOf(parts.BUYER.address, null)).toBe(73875000n); await app.close(); // comprador reclama o BTC do vendedor já com o deságio (0,75 BTC × (1 − 150bps))
+    expect(await app.local!.solana.revealedPreimage(d.id)).toBeTruthy(); expect(app.local!.bitcoin.balanceOf(parts.BUYER.address, null)).toBe(75000000n); await app.close(); // comprador reclama o BTC CHEIO escrito (deságio sai do PREÇO que ele paga, não da quantidade)
   });
 });

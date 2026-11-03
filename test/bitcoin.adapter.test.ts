@@ -203,3 +203,45 @@ describe('adapter com Esplora mockado — monitoramento do gasto e extração da
     expect(r.meta?.witnessScript).toBe(bytesToHex(witnessScript));
   });
 });
+
+// Regressão 2026-10-28: CSV ≤ 16 no script precisa ser OP_N (minimal) — push de dado tornava o
+// GASTO do cofre não-padrão ("Data push larger than necessary") e refund/claim nunca transmitiam.
+import { htlcWitnessScript as hws, minimalScriptNumPush } from '../src/adapters/bitcoin.js';
+describe('htlcWitnessScript — minimal push do CSV', () => {
+  const hash = 'ab'.repeat(32); const pub = new Uint8Array(33).fill(2);
+  it('CSV 1..16 vira OP_N; >16 segue como push de dado minimal', () => {
+    expect([...minimalScriptNumPush(8)]).toEqual([0x58]);           // OP_8
+    expect([...minimalScriptNumPush(16)]).toEqual([0x60]);          // OP_16
+    expect([...minimalScriptNumPush(17)]).toEqual([0x01, 0x11]);    // push 1 byte
+    expect([...minimalScriptNumPush(144)]).toEqual([0x02, 0x90, 0x00]); // push 2 bytes (high bit)
+    const s8 = hws(hash, pub, pub, 8);
+    expect([...s8]).toContain(0x58);
+    // nunca a sequência 0x01 0x08 logo após o OP_ELSE (0x67)
+    const i = [...s8].indexOf(0x67);
+    expect(s8[i + 1]).toBe(0x58);
+    const s144 = hws(hash, pub, pub, 144);
+    const j = [...s144].indexOf(0x67);
+    expect([s144[j + 1], s144[j + 2], s144[j + 3]]).toEqual([0x02, 0x90, 0x00]);
+  });
+});
+
+// Recuperação de cofres legados (CSV ≤16 como push de dado): detector do encoding defeituoso.
+import { hasNonMinimalCsvPush } from '../src/adapters/bitcoin.js';
+describe('hasNonMinimalCsvPush — detecção do cofre legado', () => {
+  const hash = 'cd'.repeat(32); const pub = new Uint8Array(33).fill(3);
+  it('detecta o script antigo (0x01 0x08 após OP_ELSE) e NÃO acusa o novo (OP_8) nem CSV>16', () => {
+    // Reconstrói o encoding ANTIGO: push de dado para o CSV, como era antes do fix.
+    const legacy = (csv: number) => {
+      const base = hws(hash, pub, pub, 30); // layout correto com CSV 30 (push de dado 0x01 0x1e)
+      const out = Uint8Array.from(base);
+      const i = out.indexOf(0x67); // OP_ELSE
+      out[i + 2] = csv; // troca o valor do push (mantém o encoding de dado)
+      return out;
+    };
+    expect(hasNonMinimalCsvPush(legacy(8))).toBe(true);
+    expect(hasNonMinimalCsvPush(legacy(16))).toBe(true);
+    expect(hasNonMinimalCsvPush(hws(hash, pub, pub, 8))).toBe(false);   // novo: OP_8
+    expect(hasNonMinimalCsvPush(hws(hash, pub, pub, 30))).toBe(false);  // CSV>16: push de dado é minimal
+    expect(hasNonMinimalCsvPush(hws(hash, pub, pub, 144))).toBe(false);
+  });
+});

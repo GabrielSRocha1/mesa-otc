@@ -20,4 +20,22 @@ describe('Database — SqlStore sobre PGlite (PostgreSQL)', () => {
     await expect(client.query('DELETE FROM deal_events WHERE deal_id = $1', [d.id])).rejects.toThrow(/append-only/);
     await app.close();
   }, 120_000);
+
+  it('Operar Indexado: mesa_indexed_pricing roundtrip + trigger de imutabilidade pós-LOCK', async () => {
+    const client = await createPgliteClient(); const store = new SqlStore(client); await store.init();
+    const base = { mesaId: 'MESA-IX', termsVersion: 1, mode: 'INDEXED_VERUM_SWAP' as const, indexSource: 'VERUM_SWAP' as const, spreadBps: 100, maxMoveBps: 100, fixingTtlSec: 600, status: 'FIXED' as const, baseAmount: '100000000', fixingPriceE18: '1000000000000000000', fixingSources: [{ provider: 'mm-a', priceE18: '1000000000000000000' }], fixingDispersionBps: '10', quoteAmount: '101000000', roundingResidual: '0', fixingHash: 'a'.repeat(64), fixedAt: 1000, fixingExpiresAt: 601000, createdBy: 'pm-1', createdAt: 1000, updatedAt: 1000 };
+    await store.upsertIndexedPricing(base);
+    const got = await store.getIndexedPricing('MESA-IX');
+    expect(got?.quoteAmount).toBe('101000000'); expect(got?.fixingSources?.[0]?.priceE18).toBe('1000000000000000000');
+    // transição FIXED→LOCKED é permitida (OLD ainda não é LOCKED)…
+    await store.upsertIndexedPricing({ ...base, status: 'LOCKED', updatedAt: 2000 });
+    expect((await store.getIndexedPricing('MESA-IX'))?.status).toBe('LOCKED');
+    // …depois de LOCKED, UPDATE/DELETE são rejeitados pelo trigger.
+    await expect(store.upsertIndexedPricing({ ...base, status: 'LOCKED', spreadBps: 999, updatedAt: 3000 })).rejects.toThrow(/LOCKED|imut/i);
+    await expect(store.deleteIndexedPricing('MESA-IX', 1)).rejects.toThrow(/LOCKED|imut/i);
+    // refixar = NOVA versão (insert, não update) → permitido.
+    await store.upsertIndexedPricing({ ...base, termsVersion: 2, status: 'FIXED', updatedAt: 4000 });
+    expect((await store.getIndexedPricing('MESA-IX'))?.termsVersion).toBe(2);
+    await client.close?.();
+  }, 120_000);
 });

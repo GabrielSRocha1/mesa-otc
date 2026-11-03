@@ -108,9 +108,10 @@ async function readTronTokens(endpoint: string, address: string): Promise<TokenB
   return out;
 }
 
-/** Lê os tokens de um endereço na rede indicada (chainKey/alias). */
-export async function readTokenBalances(network: string, address: string): Promise<TokenBalance[]> {
-  const c = getChain(network);
+/** Lê os tokens de um endereço na rede indicada (chainKey/alias).
+ *  `env='mainnet'` força o endpoint público MAINNET (ignora CHAIN_ENDPOINT_* — mesa mainnet). */
+export async function readTokenBalances(network: string, address: string, env?: 'mainnet' | 'testnet'): Promise<TokenBalance[]> {
+  const c = getChain(network, env);
   if (!c || !address) return [];
   try {
     let toks: TokenBalance[] = [];

@@ -152,3 +152,61 @@ describe('Perna BTC — refund pós-timelock (CSV) e guard de dupla execução',
     expect((await app.deals.get(d.id)).state).toBe('REFUNDED');
   }, 120_000);
 });
+
+describe('Perna BTC — fundos presos: lock confirma DEPOIS da expiração (incidente 2026-10-22)', () => {
+  const esplora = new EsploraRegtest();
+  let closeApp: (() => Promise<void>) | null = null;
+  afterAll(async () => { await closeApp?.(); await esplora.stop(); });
+
+  it('deal expira com o lock BTC ainda sem confirmações suficientes → EXPIRED (não REFUNDING); a confirmação tardia é curada por recoverExpiredFunding → REFUNDING → refund', async () => {
+    const url = await esplora.start();
+    // confirmations=3: reproduz o incidente real — a janela de turno (~5 min) vence antes das 3
+    // confirmações do lock BTC (signet ~30 min). O regtest in-process confirma ao transmitir (1 conf).
+    const { app, clock } = await makeApp({ autoSettle: false, env: btcEnv(url, '3'), btcAddressOf: async (_d, role) => (role === 'BUYER' ? buyerBtcAddr : null) });
+    closeApp = () => app.close();
+    const u = esplora.faucet(sellerAddr, 200_000_000);
+    const parts: Parts = { SELLER: sellerWallet(), BUYER: solWallet(), PAYMASTER_1: solWallet() };
+    const d = await prepareDeal(app, parts, { assetIn: ASSETS.BTC, assetOut: ASSETS.USDC_SOL, amountInBase: SATS.toString(), expiresInSec: 900 });
+    const script = htlcWitnessScript(d.terms!.route.htlcHash as string, claimPub, refundPub, 144);
+    const vault = p2wshAddress(script, 'regtest');
+
+    // O vendedor transmite o lock (1 confirmação), MAS a operação expira antes das 3 confirmações exigidas.
+    await (await fetch(`${url}/tx`, { method: 'POST', body: buildLockTx(u, sha256(script), SATS) })).text();
+
+    clock.advance(901_000);                                                 // estoura o prazo da operação
+    await app.deals.expireDue();
+    let now = await app.deals.get(d.id);
+    expect(now.state).toBe('EXPIRED');                                      // o bug: expirou SEM virar REFUNDING (1 < 3 confs)
+    expect(now.refunds).toHaveLength(0);                                    // nenhum reembolso foi aberto
+    expect(now.participants.find(p => p.role === 'SELLER')!.funding).not.toBe('FINAL');
+
+    esplora.mine(2);                                                        // o lock atinge 3 confirmações — tarde demais p/ o fluxo normal
+
+    // Antes do fix, nada reconciliava uma deal EXPIRED: o BTC ficaria preso no cofre para sempre.
+    now = await app.deals.recoverExpiredFunding(d.id);
+    expect(now.state).toBe('REFUNDING');                                    // cura: EXPIRED → REFUNDING
+    expect(now.refunds.find(r => r.role === 'SELLER')?.status).toBe('PENDING'); // CSV ainda imaturo (3 < 144)
+    expect(esplora.utxosOf(vault).reduce((s, x) => s + x.value, 0)).toBe(Number(SATS)); // BTC segue no cofre
+
+    esplora.mine(200);                                                      // timelock CSV vence (≥ 144)
+    now = await app.deals.retryRefunds(d.id);                              // o retry periódico completa
+    expect(now.state).toBe('REFUNDED');
+    expect(esplora.utxosOf(vault)).toHaveLength(0);                         // cofre esvaziado pelo refund
+    const back = esplora.utxosOf(sellerAddr).filter(x => x.txid !== u.txid).reduce((s, x) => s + x.value, 0);
+    expect(back).toBeGreaterThan(Number(SATS) - 100_000);                   // o BTC voltou ao vendedor (menos fees)
+  }, 120_000);
+
+  it('recoverExpiredFunding é no-op quando a deal EXPIRED nunca foi financiada (nada on-chain)', async () => {
+    const url = await esplora.start();
+    const { app, clock } = await makeApp({ autoSettle: false, env: btcEnv(url, '3'), btcAddressOf: async (_d, role) => (role === 'BUYER' ? buyerBtcAddr : null) });
+    closeApp = () => app.close();
+    const parts: Parts = { SELLER: sellerWallet(), BUYER: solWallet(), PAYMASTER_1: solWallet() };
+    const d = await prepareDeal(app, parts, { assetIn: ASSETS.BTC, assetOut: ASSETS.USDC_SOL, amountInBase: SATS.toString(), expiresInSec: 900 });
+    clock.advance(901_000);
+    await app.deals.expireDue();
+    expect((await app.deals.get(d.id)).state).toBe('EXPIRED');
+    const after = await app.deals.recoverExpiredFunding(d.id);             // sem funding on-chain: fica EXPIRED
+    expect(after.state).toBe('EXPIRED');
+    expect(after.refunds).toHaveLength(0);
+  }, 120_000);
+});

@@ -388,6 +388,40 @@ window.addEventListener('unhandledrejection',function(e){try{console.warn('[veru
     $('#btnDemo').addEventListener('click',demoConfirm);
   }
 
+  /* Sem token e sem inviteId na URL: página pública "Entrar com Código" (destino do botão
+     Mesa OTC da Verum Wallet). Resolve o código via /v1/mesa-invites/resolve-code e redireciona
+     para o fluxo normal do convite; quem é Pay Master tem o atalho de criar conta/entrar. */
+  function renderCodeEntry(){
+    document.title='VERUM OTC — Entrar com código';
+    $('#body').innerHTML=
+      '<span class="eyebrow"><svg viewBox="0 0 24 24"><rect x="5" y="11" width="14" height="9" rx="2"/><path d="M8 11V8a4 4 0 018 0v3"/></svg>Convite para mesa</span>'
+      +'<h1>Entrar em uma mesa</h1>'
+      +'<p class="sub">Recebeu um convite? Digite o <b>código</b> (XXXX-XXXX) ou cole o <b>link</b> completo do convite.</p>'
+      +'<div style="margin-bottom:14px"><input id="ceCode" placeholder="XXXX-XXXX ou link do convite" autocomplete="off" spellcheck="false" style="width:100%;height:48px;background:var(--bg-2);border:1px solid var(--line);border-radius:12px;color:var(--ink);font-family:var(--f-mono);font-size:15px;text-align:center;padding:0 14px"></div>'
+      +'<button class="btn btn-primary" id="ceGo">Entrar na mesa</button>'
+      +'<div id="ceMsg" style="margin-top:10px;font-size:13px;color:var(--ink-3);text-align:center"></div>'
+      +'<a class="btn" href="/cadastro" style="margin-top:12px;text-decoration:none">Criar conta ou entrar agora</a>'
+      +'<div class="note"><svg viewBox="0 0 24 24"><path d="M12 3l7 3v5c0 5-3 8-7 10-4-2-7-5-7-10V6z"/><path d="M9 12l2 2 4-4"/></svg><span>O código é de uso único e foi enviado pelo Pay Master junto com o convite. Entrar na mesa não movimenta fundos.</span></div>';
+    const inp=$('#ceCode'), btn=$('#ceGo'), msg=$('#ceMsg');
+    function setMsg(t,err){ msg.textContent=t||''; msg.style.color=err?'var(--red)':'var(--ink-3)'; }
+    async function go(){
+      const v=(inp.value||'').trim();
+      if(!v){ setMsg('Digite o código ou cole o link do convite.',true); return; }
+      // Link completo colado: extrai inviteId (já URL-encoded) e o código do ?c=.
+      const m=v.match(/\/otc\/convite\/([^/?#]+)/);
+      if(m){ let c=''; try{ const qi=v.indexOf('?'); if(qi>=0) c=(new URLSearchParams(v.slice(qi))).get('c')||''; }catch(e){}
+        setMsg('Abrindo convite…'); window.location.href='/otc/convite/'+m[1]+(c?'?c='+encodeURIComponent(c):''); return; }
+      btn.disabled=true; setMsg('Verificando código…');
+      try{
+        const r=await api('/v1/mesa-invites/resolve-code',{method:'POST',body:{code:v}});
+        setMsg('Convite encontrado. Abrindo…');
+        window.location.href='/otc/convite/'+encodeURIComponent(r.inviteId)+'?c='+encodeURIComponent(r.code||v);
+      }catch(ex){ setMsg(ex.message||'Código inválido ou expirado.',true); btn.disabled=false; }
+    }
+    btn.addEventListener('click',go);
+    inp.addEventListener('keydown',e=>{ if(e.key==='Enter'){ e.preventDefault(); go(); } });
+  }
+
   function renderState(kind,title,msg,extra){
     const ic = kind==='ok'?'<path d="M5 13l4 4L19 7"/>':kind==='err'?'<circle cx="12" cy="12" r="9"/><path d="M15 9l-6 6M9 9l6 6"/>':'<circle cx="12" cy="12" r="9"/><path d="M12 8v4l2 2"/>';
     $('#body').innerHTML='<div class="state"><div class="ic '+kind+'"><svg viewBox="0 0 24 24">'+ic+'</svg></div><h1 style="text-align:center">'+esc(title)+'</h1><p class="sub" style="text-align:center;margin-top:8px">'+esc(msg)+'</p>'+(extra||'')+'</div>';
@@ -472,7 +506,13 @@ window.addEventListener('unhandledrejection',function(e){try{console.warn('[veru
     const i=v3Info;
     if(i.status==='EXPIRED'){ return renderState('err','Convite expirado','Peça ao Pay Master um novo convite.'); }
     if(i.status==='REVOKED'){ return renderState('err','Convite revogado','Peça ao Pay Master um novo convite.'); }
-    if(i.status==='USED'){ return renderState('err','Convite já utilizado','Este convite já foi usado. Se foi você, abra a mesa pelo link que recebeu após conectar.'); }
+    if(i.status==='USED'){
+      // NÃO é beco sem saída: o convite de uso único já foi consumido por quem conectou esta cadeira
+      // (a pessoa pretendida). Reabrir o link leva de volta à mesa (/ver/<mesaId>), onde o pop-up de
+      // depósito/gás aparece. Se o token de sessão ainda estiver no aparelho, ela age pela carteira.
+      if(i.mesaId){ renderState('ok','Abrindo a mesa…','Sua cadeira já está conectada. Levando você para a mesa.'); window.location.replace('/ver/'+encodeURIComponent(i.mesaId)); return; }
+      return renderState('err','Convite já utilizado','Este convite já foi usado. Se foi você, abra a mesa pelo link que recebeu após conectar.');
+    }
     const tick=v3Countdown(i.expiresAt);
     const r=ROLE[i.role]||{label:i.roleLabel||i.role,cls:'',ico:''};
     const needCode=!i.codeValid;
@@ -562,7 +602,7 @@ window.addEventListener('unhandledrejection',function(e){try{console.warn('[veru
       v3Render();
       return;
     }
-    if(!token){ render(); return; }
+    if(!token){ renderCodeEntry(); return; } // /convite sem token = página pública de código
     try{ invite=await api('/v1/portal/mesa/invites/'+encodeURIComponent(token)); render(); }
     catch(ex){ renderState('err','Convite não encontrado',ex.message||'Este convite não existe ou expirou.'); }
   })();

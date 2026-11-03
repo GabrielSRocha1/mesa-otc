@@ -28,6 +28,8 @@ import { MANIFEST_JSON, SW_JS, ICON_SVG, ICON_MASKABLE_SVG, OFFLINE_HTML, inject
 import type { Store } from '../db/repository.js';
 import { AuditLog } from '../audit/audit.js';
 import { hasParticipantSteps, type AdapterRegistry } from '../adapters/types.js';
+import { LocalChainAdapter } from '../adapters/local.js';
+import { VerumTronV2Adapter } from '../adapters/verum/tronV2.js';
 import { registry as metricsRegistry, logger, metrics } from '../monitoring/metrics.js';
 import { createHash, randomUUID } from 'node:crypto';
 import { allChains, getChain, chainIconId } from '../chains/registry.js';
@@ -37,6 +39,7 @@ import { readTokenBalances } from '../chains/tokenBalances.js';
 import { stablecoinNetworks } from '../chains/tokens.js';
 import { getIconMap } from '../chains/icons.js';
 import type { MesaService, AuthNetwork } from '../mesa/mesaService.js';
+import type { IndexedPricingService } from '../indexing/service.js';
 import { validateChairBalances, defaultBalanceReaders, addressOn, type BalanceReaders } from '../mesa/balances.js';
 import { deriveSettlementPlan } from '../mesa/settlementPlan.js';
 import type { MesaChair, MesaChairRole, MesaRecord } from '../mesa/types.js';
@@ -53,7 +56,7 @@ export interface DevDemo { keyring: import('../portal/demo.js').DemoMesaKeyring;
 /** Modo EVM dev: contrato real (Sepolia/anvil), keyring de EOAs dev e mint dos tokens mock. */
 export interface DevEvmKeyring { addressFor(owner: string): string; accountByAddress(address: string): import('viem/accounts').PrivateKeyAccount | null }
 export interface DevEvm { chainId: string; escrow: string; tbtc: `0x${string}`; tusdt: `0x${string}`; explorerBase: string | null; keyring: DevEvmKeyring; mintToken: (token: `0x${string}`, to: string, amount: bigint) => Promise<void> }
-export interface ApiDeps { deals: DealEngine; settlement: SettlementEngine; price: PriceEngine; liquidity: LiquidityEngine; router: RouterEngine; registry: AssetRegistry; adapters?: AdapterRegistry; platformFeeBps: number; networkCostUsd: (n: Network) => Promise<string>; auth: WalletAuth; portal: PortalService; identity: IdentityService; identityDev?: { email: FakeEmailChannel; sms: FakeSmsChannel }; rooms: RoomService; proposals: ProposalService; mesa: MesaService; lightning?: import('../adapters/lightning/types.js').LightningService; push?: PushService; escrowAddToken?: (token: `0x${string}`, decimals: number, symbol: string) => Promise<{ txHash: string }>; balanceReaders?: BalanceReaders; store: Store; audit: AuditLog; mesaHtmlPath?: string; portalHtmlPath?: string; conviteHtmlPath?: string; operacaoHtmlPath?: string; env: string; rateLimit?: { windowMs: number; max: number }; dev?: DevMint; demoDeferFunding?: boolean }
+export interface ApiDeps { deals: DealEngine; settlement: SettlementEngine; price: PriceEngine; liquidity: LiquidityEngine; router: RouterEngine; registry: AssetRegistry; adapters?: AdapterRegistry; platformFeeBps: number; networkCostUsd: (n: Network) => Promise<string>; auth: WalletAuth; portal: PortalService; identity: IdentityService; identityDev?: { email: FakeEmailChannel; sms: FakeSmsChannel }; rooms: RoomService; proposals: ProposalService; mesa: MesaService; indexedPricing: IndexedPricingService; lightning?: import('../adapters/lightning/types.js').LightningService; push?: PushService; escrowAddToken?: (token: `0x${string}`, decimals: number, symbol: string) => Promise<{ txHash: string }>; balanceReaders?: BalanceReaders; store: Store; audit: AuditLog; mesaHtmlPath?: string; portalHtmlPath?: string; conviteHtmlPath?: string; operacaoHtmlPath?: string; env: string; rateLimit?: { windowMs: number; max: number }; dev?: DevMint; demoDeferFunding?: boolean }
 declare module 'fastify' { interface FastifyRequest { session: Session | null } }
 
 const NetworkZ = z.enum(['bitcoin', 'ethereum', 'solana', 'zcash', 'tron']); const RoleZ = z.enum(['SELLER', 'BUYER', 'PAYMASTER_1', 'PAYMASTER_2']);
@@ -153,9 +156,11 @@ export async function buildApi(deps: ApiDeps): Promise<FastifyInstance> {
         verumEvmV2: count(['VERUM_EVM_V2_ESCROW_ADDRESS']),
         solana: `${count(['SOLANA_RPC_URL', 'SOLANA_CHAIN_ID', 'SOLANA_PROGRAM_ID', 'SOLANA_EXECUTOR_KEYPAIR', 'SOLANA_ATTESTOR_KEYPAIR', 'SOLANA_TUSDT_MINT', 'SOLANA_TBTC_MINT'])}/7`,
         tron: `${count(['TRON_FULL_HOST', 'TRON_CHAIN_ID', 'TRON_ESCROW_ADDRESS', 'TRON_EXECUTOR_KEY', 'TRON_ATTESTOR_KEY', 'TRON_TUSDT', 'TRON_TBTC'])}/7`,
+        tronV2: count(['TRON_ESCROW_V2_ADDRESS']),
         bitcoin: `${count(['BITCOIN_ESPLORA_URL', 'BITCOIN_NETWORK', 'BITCOIN_CLAIM_KEY', 'BITCOIN_REFUND_KEY'])}/4`,
         bitcoinSimulate: process.env.BITCOIN_SIMULATE ?? null,
         chainEndpoints: Object.keys(process.env).filter(k => k.startsWith('CHAIN_ENDPOINT_')).length,
+        mainnet: deps.adapters?.mainnetNetworks() ?? [],
         database: process.env.DATABASE_MODE ?? null,
         sessionSecret: !!process.env.SESSION_SECRET,
       } };
@@ -271,6 +276,9 @@ export async function buildApi(deps: ApiDeps): Promise<FastifyInstance> {
   // + cadeiras + status; funciona logo após criar (antes de aprovar). Sem sessão; recorte do participante.
   app.get('/v1/mesas/:mesaId/public-view', async req => {
     const { mesaId } = req.params as { mesaId: string };
+    // CURA também no poll PÚBLICO (/ver): sem tela logada, expiração/reembolso dependiam só do
+    // cron — o acompanhamento público agora mantém a operação viva (expira/reembolsa/retoma turnos).
+    await healMesaDeal(deps.mesa.mesaById(mesaId)?.dealId).catch(() => undefined);
     const view = await deps.mesa.mesaPublicView(mesaId) as { chairs?: { asset: string; network: string; icon?: string | null }[] };
     // Logo REAL de cada ativo da cadeira (stablecoins por símbolo; nativos pelo id do logo da rede).
     const icons = await getIconMap().catch(() => ({} as Record<string, string>));
@@ -286,6 +294,10 @@ export async function buildApi(deps: ApiDeps): Promise<FastifyInstance> {
   app.post('/v1/deals/:id/participants/:role/bind', async (req, reply) => { const s = requireSession(req); const { id, role } = req.params as { id: string; role: Role }; return idempotent(req, reply, async () => deps.deals.view(await deps.deals.connectWallet(id, parse(RoleZ, role), s.address, s.address), s.address)); });
   app.post('/v1/deals/:id/verify', async (req, reply) => { const s = requireSession(req); const { id } = req.params as { id: string }; return idempotent(req, reply, async () => deps.deals.view(await deps.deals.verify(id, s.address), s.address)); });
   app.post('/v1/deals/:id/open', async (req, reply) => { const s = requireSession(req); const { id } = req.params as { id: string }; return idempotent(req, reply, async () => deps.deals.view(await deps.deals.open(id, s.address), s.address)); });
+  // Pré-pagamento de gás do keeper (lado-EVM): o pagador envia ETH ao keeper e informa o txHash; o
+  // backend verifica on-chain e, confirmado, registra a mesa e inicia os turnos. A abertura de uma
+  // mesa EVM responde 402 GAS_PREPAY_REQUIRED (detalhes em deal.gasPrepay) até este passo concluir.
+  app.post('/v1/deals/:id/gas-prepay', async (req, reply) => { const s = requireSession(req); const { id } = req.params as { id: string }; const { txHash } = parse(z.object({ txHash: z.string().regex(/^0x[0-9a-fA-F]{64}$/) }), req.body); return idempotent(req, reply, async () => deps.deals.view(await deps.deals.recordGasPrepay(id, txHash), s.address)); });
   /* ---------- pré-visualização (somente leitura; o backend recalcula tudo na verificação da Deal) ---------- */
   app.get('/v1/quote', async req => { requireSession(req); const q = parse(z.object({ assetIn: z.string(), assetOut: z.string(), amountInBase: z.string().regex(/^[1-9][0-9]*$/), discountBps: z.coerce.number().int().min(0).max(2000).default(0), commissionBps: z.coerce.number().int().min(0).max(5000).default(0), maxSlippageBps: z.coerce.number().int().min(1).max(1000).default(50) }), req.query);
     const assetIn = deps.registry.resolveByAssetId(q.assetIn), assetOut = deps.registry.resolveByAssetId(q.assetOut); const snapshot = await deps.price.quote([assetIn.assetId, assetOut.assetId]);
@@ -361,21 +373,29 @@ export async function buildApi(deps: ApiDeps): Promise<FastifyInstance> {
   /** Adapter do passo on-chain: a primeira leg cuja rede expõe participant-steps (na rota HTLC a
    *  legs[0] é a BTC externa — o passo do participante vive na leg de CONTRATO). */
   const stepAdapterOf = (d: Deal, role?: Role) => {
+    const env = d.terms?.netEnv ?? 'testnet'; // deal MAINNET só resolve adapters mainnet
     // O papel que FINANCIA uma perna HTLC age NAQUELA rede (lock) — ex.: comprador da direção
     // inversa tranca na Solana enquanto o contrato vive na EVM. Para os demais, vale a primeira
     // perna com participant-steps (a de contrato).
     if (role) {
       const htlcLeg = d.terms?.legs.find(l => l.mode === 'HTLC' && l.from === role);
-      if (htlcLeg) { const a = deps.adapters?.get(htlcLeg.escrowChain); if (a && hasParticipantSteps(a)) return a; }
+      if (htlcLeg) { const a = deps.adapters?.get(htlcLeg.escrowChain, env); if (a && hasParticipantSteps(a)) return a; }
     }
-    for (const leg of d.terms?.legs ?? []) { const a = deps.adapters?.get(leg.escrowChain); if (a && hasParticipantSteps(a)) return a; }
+    for (const leg of d.terms?.legs ?? []) { const a = deps.adapters?.get(leg.escrowChain, env); if (a && hasParticipantSteps(a)) return a; }
     throw new DomainError('SETTLEMENT_NOT_ALLOWED', 'rede em modo simulado — o passo on-chain é automático');
   };
   app.get('/v1/deals/:id/onchain-tx', async req => {
     const s = requireSession(req); const { id } = req.params as { id: string };
-    const d = await deps.deals.get(id);
+    let d = await deps.deals.get(id);
     const me = requireParticipant(d, s);
     if (!d.terms?.legs.length) throw new DomainError('SETTLEMENT_NOT_ALLOWED', 'termos não congelados');
+    // REGISTRO PENDENTE SEMPRE FRESCO (incidente 'execution reverted' recorrente): o createTradeV2
+    // entregue à carteira do PM1 carrega um `createdAt` assado no open(); passados 5 min (CREATION_
+    // WINDOW) o contrato reverte 'createdAt muito antigo' e buildParticipantStep seguia servindo o
+    // MESMO tx morto. O refresh só vinha pelo poll — que pode nem rodar (mesa excluída/serverless),
+    // prendendo o registro. Aqui, no próprio fetch da carteira, reusamos a lógica testada que
+    // reconstrói o registerTx vencido quando o trade ainda é NONE on-chain, antes de entregá-lo.
+    if (d.state === 'AWAITING_SIGNATURES' && d.turnRole === null) { try { await deps.deals.startTurnsIfRegistered(id); d = await deps.deals.get(id); } catch { /* serve o atual */ } }
     return stepAdapterOf(d, me.role).buildParticipantStep(id, me.role, s.address);
   });
   app.post('/v1/deals/:id/onchain-tx', async (req, reply) => {
@@ -384,6 +404,9 @@ export async function buildApi(deps: ApiDeps): Promise<FastifyInstance> {
     const d = await deps.deals.get(id);
     const me = requireParticipant(d, s);
     if (!d.terms?.legs.length) throw new DomainError('SETTLEMENT_NOT_ALLOWED', 'termos não congelados');
+    // GATE DO GÁS ANTES DE MOVER DINHEIRO: o pagador lado-EVM não executa o signV2 (que deposita o
+    // pagamento dele no escrow) sem o gás pré-pago — senão ele paga o escrow e trava na aprovação.
+    await deps.deals.requireGasPrepaid(id, me.role);
     const a = stepAdapterOf(d, me.role);
     return idempotent(req, reply, async () => {
       const r = await a.submitParticipantStep(id, me.role, s.address, b as Record<string, unknown>);
@@ -425,12 +448,63 @@ export async function buildApi(deps: ApiDeps): Promise<FastifyInstance> {
   /* ---------- backoffice ---------- */
   app.get('/ops/deals', async req => { requireOperator(req); return (await deps.store.listDeals()).map(short); });
   app.post('/ops/deals/:id/block', async (req, reply) => { const s = requireOperator(req); const { id } = req.params as { id: string }; const b = parse(z.object({ reason: z.string().min(5).max(500) }), req.body); return idempotent(req, reply, async () => deps.deals.view(await deps.deals.block(id, b.reason, 'OPS · manual', `op:${s.sub}`), null, true)); });
-  app.post('/ops/deals/:id/refund', async (req, reply) => { const s = requireOperator(req); const { id } = req.params as { id: string }; return idempotent(req, reply, async () => { await deps.audit.append({ actorType: 'operator', actorId: s.sub, category: 'ops.refund.retry', dealId: id, payload: {} }); return deps.deals.view(await deps.deals.retryRefunds(id), null, true); }); });
+  app.post('/ops/deals/:id/refund', async (req, reply) => { const s = requireOperator(req); const { id } = req.params as { id: string }; return idempotent(req, reply, async () => { await deps.audit.append({ actorType: 'operator', actorId: s.sub, category: 'ops.refund.retry', dealId: id, payload: {} }); const cur = await deps.deals.get(id).catch(() => null); const d = cur?.state === 'EXPIRED' ? await deps.deals.recoverExpiredFunding(id) : await deps.deals.retryRefunds(id); return deps.deals.view(d, null, true); }); });
   app.get('/ops/price/breaker', async req => { requireOperator(req); return deps.price.breakerState(); });
   app.post('/ops/price/breaker/reset', async (req, reply) => { const s = requireOperator(req); return idempotent(req, reply, async () => { deps.price.resetBreaker(); await deps.audit.append({ actorType: 'operator', actorId: s.sub, category: 'ops.price.breaker.reset', dealId: null, payload: {} }); return deps.price.breakerState(); }); });
   app.get('/ops/risk/:id', async req => { requireOperator(req); const { id } = req.params as { id: string }; return deps.store.listRiskEvents(id); });
   app.get('/ops/audit/verify', async req => { requireOperator(req); const events = await deps.store.listAudit(100_000); return { ...AuditLog.verify(events), count: events.length }; });
   app.post('/ops/settlement/recover', async req => { requireOperator(req); return deps.settlement.recover(); });
+  // Cron serverless (Vercel não tem setInterval): varredura GLOBAL que substitui o scheduler — expira
+  // operações vencidas (→ reembolso), retenta reembolsos PENDENTES (ex.: BTC após o CSV), cura fundos
+  // presos de EXPIRED e auto-abre HTLC com lock confirmado. Assim o reembolso é automático mesmo com o
+  // painel fechado. Protegido por CRON_SECRET (a Vercel envia `Authorization: Bearer $CRON_SECRET`);
+  // sem o segredo definido, exige sessão de operador (nunca fica aberto). Idempotente — seguro repetir.
+  // Varredura PARALELA com teto de concorrência e TIMEOUT POR DEAL: uma leitura de Esplora/RPC
+  // travada (ou um volume grande de deals) não congela mais a varredura inteira — cada deal tem
+  // seu prazo e as demais seguem. Sem isso, com muitas ops ativas o /ops/cron/sweep estourava o
+  // tempo (curl HTTP 000) e nem chegava a abrir a operação com o lock já confirmado.
+  const SWEEP_PER_DEAL_MS = 15_000; // prazo por deal (leitura lenta → pula e retenta na próxima rodada)
+  const SWEEP_CONCURRENCY = 5;      // paralelismo limitado (não estourar rate-limit de Esplora/RPC)
+  // TETO DE TEMPO TOTAL por chamada: crons externos cortam cedo (cron-job.org free = 30s; curl
+  // --max-time). Acima disso a resposta "estoura" e o cron marca FALHA mesmo com o trabalho andando.
+  // Como a varredura é IDEMPOTENTE e roda a cada minuto, limitamos o relógio total e o resto é
+  // varrido nas próximas rodadas (sem perder nada). Override por env SWEEP_BUDGET_MS.
+  const SWEEP_BUDGET_MS = Number(process.env.SWEEP_BUDGET_MS ?? 22_000);
+  const sweepTimeout = <T>(p: Promise<T>, ms: number): Promise<T> => Promise.race([p, new Promise<T>((_, rej) => setTimeout(() => rej(new Error('sweep: prazo excedido')), ms))]);
+  const sweepPool = async <T>(items: T[], fn: (x: T) => Promise<void>, deadline: number): Promise<number> => {
+    let done = 0, idx = 0;
+    await Promise.all(Array.from({ length: Math.min(SWEEP_CONCURRENCY, items.length) }, async () => {
+      while (idx < items.length && Date.now() < deadline) {
+        const x = items[idx++]!; const budget = Math.min(SWEEP_PER_DEAL_MS, deadline - Date.now());
+        if (budget <= 0) break;
+        try { await sweepTimeout(fn(x), budget); done++; } catch { /* próxima rodada */ }
+      }
+    }));
+    return done;
+  };
+  const cronSweep = async (): Promise<{ ok: true; expired: number; refundRetried: number; recovered: number; opened: number; truncated: boolean }> => {
+    const deadline = Date.now() + SWEEP_BUDGET_MS;
+    const left = () => Math.max(0, deadline - Date.now());
+    // expireDue não pode consumir o orçamento todo — reserva tempo para as varreduras seguintes.
+    const expired = await sweepTimeout(deps.deals.expireDue(), Math.min(15_000, left())).catch(() => [] as string[]);
+    const [refunding, expiredDeals, liqVerified] = await Promise.all([
+      // BLOCKED também: deal bloqueada na validação da liquidação com reembolso PENDENTE caía num
+      // buraco entre os filtros (incidente op 3) — retryRefunds agora cura BLOCKED→REFUNDING.
+      deps.store.listDeals({ states: ['REFUNDING', 'BLOCKED'] }),
+      deps.store.listDeals({ states: ['EXPIRED'] }),
+      deps.store.listDeals({ states: ['LIQUIDITY_VERIFIED'] }),
+    ]);
+    const refundRetried = await sweepPool(refunding.filter(d => d.refunds.some(r => r.status === 'PENDING')), d => deps.deals.retryRefunds(d.id).then(() => {}), deadline);
+    const recovered = await sweepPool(expiredDeals.filter(d => !d.refunds.length && d.participants.some(p => p.fundingRequired)), d => deps.deals.recoverExpiredFunding(d.id).then(() => {}), deadline);
+    const opened = await sweepPool(liqVerified.filter(d => !!d.terms?.legs.some(l => l.mode === 'HTLC')), d => deps.deals.open(d.id, d.createdBy).then(() => {}), deadline);
+    return { ok: true, expired: expired.length, refundRetried, recovered, opened, truncated: Date.now() >= deadline };
+  };
+  app.get('/ops/cron/sweep', async req => {
+    const secret = process.env.CRON_SECRET?.trim();
+    if (secret) { const tok = (req.headers.authorization ?? '').replace(/^Bearer\s+/i, ''); if (tok !== secret) throw new DomainError('FORBIDDEN', 'cron secret inválido'); }
+    else requireOperator(req); // sem CRON_SECRET: só operador autenticado (o endpoint nunca fica público)
+    return cronSweep();
+  });
 
   /* ---------- Portal Pay Master (cadastro, carteira, código de mesa) ---------- */
   const portalToken = (req: FastifyRequest): string | undefined => (req.headers.authorization ?? '').replace(/^Bearer\s+/i, '') || undefined;
@@ -463,6 +537,8 @@ export async function buildApi(deps: ApiDeps): Promise<FastifyInstance> {
   // ---- Operação (Deal real) a partir da mesa: cria no DealEngine e expõe o estado vivo p/ a esteira ----
   // No modo EVM inclui o contrato de liquidação e as transferências (txids reais) p/ o painel do frontend.
   const refundRetryAt = new Map<string, number>(); // throttle do heal de refund no poll (por instância)
+  const openHealAt = new Map<string, number>();    // throttle do heal do open adiado (rota HTLC)
+  const expireHealAtRef = { at: 0 };               // throttle do expireDue disparado pelo poll
   let lastExpireSweepAt = 0; // throttle da varredura de expiração no poll (serverless sem scheduler)
   const mesaDealView = async (d: Deal) => {
     const ev = deps.dev?.evm ?? null;
@@ -493,8 +569,12 @@ export async function buildApi(deps: ApiDeps): Promise<FastifyInstance> {
     };
   };
   /** Corpo aceito na criação da operação da mesa (legada e v3). */
-  const MesaDealBodyZ = z.object({ amountInBase: z.string().regex(/^[1-9][0-9]*$/).optional(), discountBps: z.coerce.number().int().min(0).max(2000).default(300), commissionBps: z.coerce.number().int().min(0).max(5000).default(200), commissionSplitBps: z.array(z.number().int().min(0)).max(2).default([]), maxSlippageBps: z.coerce.number().int().min(1).max(1000).default(50), expiresInSec: z.coerce.number().int().min(900).max(10 * 86400).default(4 * 48 * 3600), twoFactorCode: z.string().max(12).optional() });
+  const MesaDealBodyZ = z.object({ amountInBase: z.string().regex(/^[1-9][0-9]*$/).optional(), discountBps: z.coerce.number().int().min(0).max(2000).default(300), commissionBps: z.coerce.number().int().min(0).max(5000).default(200), commissionSplitBps: z.array(z.number().int().min(0)).max(2).default([]), maxSlippageBps: z.coerce.number().int().min(1).max(1000).default(50), expiresInSec: z.coerce.number().int().min(900).max(10 * 86400).default(4 * 48 * 3600), twoFactorCode: z.string().max(12).optional(),
+    // Operar Indexado: hash do fixing + quoteAmount fixado — preenchidos pelo approve a partir do registro travado (nunca do cliente).
+    indexedFixingHash: z.string().regex(/^[0-9a-f]{64}$/i).optional(), fixedAmountOutBase: z.string().regex(/^[1-9][0-9]*$/).optional() });
   type MesaDealBody = z.infer<typeof MesaDealBodyZ>;
+  /** Operar Indexado: injeta o hash do fixing (quando presente) no input de criação do deal → terms.pricing → assinaturas. No-op em FIXED. */
+  const withFixing = <T extends object>(input: T, b: MesaDealBody): T => (b.indexedFixingHash ? { ...input, indexedFixingHash: b.indexedFixingHash, ...(b.fixedAmountOutBase ? { fixedAmountOutBase: b.fixedAmountOutBase } : {}) } : input);
   /** Criação da Deal a partir dos participantes da mesa (fatorada: usada pela mesa legada e pelo approve v3). */
   const createMesaDealForParts = async (parts: { role: Role; address: string }[], b: MesaDealBody, onCreated: (dealId: string) => void) => {
     if (!deps.dev) throw new DomainError('SETTLEMENT_NOT_ALLOWED', 'Criação de operação da mesa está disponível apenas em ambiente de desenvolvimento');
@@ -510,7 +590,7 @@ export async function buildApi(deps: ApiDeps): Promise<FastifyInstance> {
       await ev.mintToken(ev.tusdt, sellerEvm.address, BigInt(amountInBase) * 2n);      // tUSDT p/ o Vendedor depositar (verify checa saldo)
       if (buyerEvm) await ev.mintToken(ev.tbtc, buyerEvm.address, 10n ** 12n);         // 10.000 tBTC — folga p/ amountOut + comissão
       const input = { assetIn: { network: 'ethereum', chainId: ev.chainId, contractOrMint: ev.tusdt }, assetOut: { network: 'ethereum', chainId: ev.chainId, contractOrMint: ev.tbtc }, amountInBase, discountBps: b.discountBps, commissionBps: b.commissionBps, commissionSplitBps: b.commissionSplitBps, maxSlippageBps: b.maxSlippageBps, maxPriceDriftBps: 100, expiresInSec: b.expiresInSec, participants: evmParts };
-      const created = await deps.deals.create(input, sellerEvm.address);
+      const created = await deps.deals.create(withFixing(input, b), sellerEvm.address);
       for (const p of evmParts) await deps.deals.connectWallet(created.id, p.role, p.address, p.address); // último connect congela termos + register() on-chain
       await deps.deals.open(created.id, sellerEvm.address);
       try { await deps.deals.fund(created.id, 'SELLER', sellerEvm.address); if (buyerEvm) await deps.deals.fund(created.id, 'BUYER', buyerEvm.address); } catch (e) { logger.warn({ dealId: created.id, err: (e as Error).message }, 'auto-funding EVM dev falhou'); }
@@ -523,7 +603,7 @@ export async function buildApi(deps: ApiDeps): Promise<FastifyInstance> {
     const amountInBase = b.amountInBase ?? '100000000000'; // 100 SOL (demo dev)
     const input = { assetIn: { network: 'solana', chainId, contractOrMint: null }, assetOut: { network: 'solana', chainId, contractOrMint: usdc.contractOrMint }, amountInBase, discountBps: b.discountBps, commissionBps: b.commissionBps, commissionSplitBps: b.commissionSplitBps, maxSlippageBps: b.maxSlippageBps, maxPriceDriftBps: 100, expiresInSec: b.expiresInSec, participants: parts.map(p => ({ role: p.role, network: 'solana', chainId, address: p.address })) };
     const buyer = parts.find(p => p.role === 'BUYER');
-    const created = await deps.deals.create(input, seller.address);
+    const created = await deps.deals.create(withFixing(input, b), seller.address);
     deps.dev.mint(seller.address, null, BigInt(amountInBase) * 2n);            // SOL p/ o Vendedor depositar
     if (buyer) deps.dev.mint(buyer.address, usdc.contractOrMint, 10n ** 15n);  // USDC p/ o Comprador depositar
     for (const p of parts) await deps.deals.connectWallet(created.id, p.role, p.address, p.address); // último connect verifica e congela termos
@@ -563,38 +643,49 @@ export async function buildApi(deps: ApiDeps): Promise<FastifyInstance> {
     const tokenNet = tokenChair.expectedAsset.network;
     // Perna de contrato na SOLANA (escrow N-de-N com hashlock = settle_xchain): fluxo dedicado — o
     // escrow Solana revela a preimage no settle, ancorando as 4 assinaturas on-chain (ADR-v5).
+    const netEnv = mesa.environment === 'mainnet' ? 'mainnet' as const : 'testnet' as const;
+    // MAINNET: recorte inicial — a perna de contrato é SEMPRE Ethereum (regra já aplicada na
+    // criação da mesa; cinto-e-suspensório aqui porque o adapter mainnet de outra rede não existe).
+    if (netEnv === 'mainnet' && tokenNet !== 'ethereum') throw new DomainError('SETTLEMENT_NOT_ALLOWED', 'Em MAINNET o único par suportado é BTC ↔ Ethereum');
     if (tokenNet === 'solana') return createMesaBtcSolanaDeal(mesa, b, onCreated);
-    if (tokenNet !== 'ethereum') throw new DomainError('SETTLEMENT_NOT_ALLOWED', `Perna de contrato em ${tokenNet} ainda não é suportada no fluxo BTC da mesa: o lado NÃO-BTC precisa de um escrow que revele a preimage; hoje escrow V2 (Ethereum) e escrow N-de-N com hashlock (Solana) fazem isso (Tron não tem hashlock no contrato)`);
-    const btcAdapter = adapters.get('bitcoin'); const evmAdapter = adapters.get('ethereum');
-    if (!btcAdapter || !evmAdapter) throw new DomainError('SETTLEMENT_NOT_ALLOWED', 'Adaptadores bitcoin/ethereum ausentes');
+    if (tokenNet !== 'ethereum' && tokenNet !== 'tron') throw new DomainError('SETTLEMENT_NOT_ALLOWED', `Perna de contrato em ${tokenNet} ainda não é suportada no fluxo BTC da mesa: o lado NÃO-BTC precisa de um escrow que revele a preimage; hoje escrow V2 (Ethereum), escrow V2 Tron e escrow N-de-N com hashlock (Solana) fazem isso`);
+    const tokenNetLabel = tokenNet === 'tron' ? 'Tron' : 'Ethereum';
+    const btcAdapter = adapters.get('bitcoin', netEnv); const tokenAdapter = adapters.get(tokenNet, netEnv);
+    if (!btcAdapter || !tokenAdapter) throw new DomainError('SETTLEMENT_NOT_ALLOWED', netEnv === 'mainnet' ? `Adaptadores MAINNET bitcoin/${tokenNet} não configurados (grupos *_MAINNET_* ausentes)` : `Adaptadores bitcoin/${tokenNet} ausentes`);
+    // Perna Tron só com o escrow V2 (hashlock): o V1 não revela a preimage — sem ela o claim do
+    // BTC não destrava e a atomicidade do swap não existe.
+    if (tokenNet === 'tron' && !(tokenAdapter instanceof VerumTronV2Adapter) && !(tokenAdapter instanceof LocalChainAdapter)) {
+      throw new DomainError('SETTLEMENT_NOT_ALLOWED', 'Perna Tron no fluxo BTC exige o escrow V2 Tron (hashlock) — defina TRON_ESCROW_V2_ADDRESS');
+    }
     const btcLabel = btcBuyer ? 'Comprador' : 'Vendedor'; const tokenLabel = btcBuyer ? 'Vendedor' : 'Comprador';
     const motivos: string[] = [];
     const btcAddr = addressOn(btcChair, 'bitcoin'); if (!btcAddr || !btcAdapter.validateAddress(btcAddr)) motivos.push(`${btcLabel}: carteira sem endereço Bitcoin válido`);
-    const tokenEvm = addressOn(tokenChair, 'ethereum'); if (!tokenEvm || !evmAdapter.validateAddress(tokenEvm)) motivos.push(`${tokenLabel}: carteira sem endereço Ethereum válido`);
+    const tokenAddr = addressOn(tokenChair, tokenNet); if (!tokenAddr || !tokenAdapter.validateAddress(tokenAddr)) motivos.push(`${tokenLabel}: carteira sem endereço ${tokenNetLabel} válido`);
     // A contraparte do BTC (quem faz o claim do BTC com a preimage) precisa de endereço Bitcoin.
     const counterBtc = addressOn(tokenChair, 'bitcoin'); if (!counterBtc || !btcAdapter.validateAddress(counterBtc)) motivos.push(`${tokenLabel}: carteira sem endereço Bitcoin (recebe/reclama o BTC do HTLC)`);
-    const pm1Evm = addressOn(pm1Chair, 'ethereum'); if (!pm1Evm || !evmAdapter.validateAddress(pm1Evm)) motivos.push('Pay Master 1: carteira sem endereço Ethereum válido');
+    const pm1Addr = addressOn(pm1Chair, tokenNet); if (!pm1Addr || !tokenAdapter.validateAddress(pm1Addr)) motivos.push(`Pay Master 1: carteira sem endereço ${tokenNetLabel} válido`);
     if (!mesa.config?.amountInBase) motivos.push('Configuração: quantidade não definida');
     if (motivos.length) throw new DomainError('VERSION_CONFLICT', 'Não foi possível criar a operação HTLC', { motivos });
     const btcAsset = { network: 'bitcoin', chainId: btcAdapter.chain.chainId, contractOrMint: null };
-    const tokenAsset = { network: 'ethereum', chainId: evmAdapter.chain.chainId, contractOrMint: tokenChair.expectedAsset.contractOrMint };
+    const tokenAsset = { network: tokenNet, chainId: tokenAdapter.chain.chainId, contractOrMint: tokenChair.expectedAsset.contractOrMint };
     const input = {
       assetIn: btcBuyer ? tokenAsset : btcAsset,
       assetOut: btcBuyer ? btcAsset : tokenAsset,
       amountInBase: mesa.config!.amountInBase as string, discountBps: b.discountBps, commissionBps: b.commissionBps, commissionSplitBps: b.commissionSplitBps,
       maxSlippageBps: b.maxSlippageBps, maxPriceDriftBps: 500, expiresInSec: b.expiresInSec,
+      ...(netEnv === 'mainnet' ? { netEnv } : {}),
       participants: [
-        { role: 'SELLER', network: btcBuyer ? 'ethereum' : 'bitcoin', chainId: btcBuyer ? evmAdapter.chain.chainId : btcAdapter.chain.chainId, address: btcBuyer ? tokenEvm : btcAddr },
-        { role: 'PAYMASTER_1', network: 'ethereum', chainId: evmAdapter.chain.chainId, address: pm1Evm },
-        { role: 'BUYER', network: btcBuyer ? 'bitcoin' : 'ethereum', chainId: btcBuyer ? btcAdapter.chain.chainId : evmAdapter.chain.chainId, address: btcBuyer ? btcAddr : tokenEvm },
+        { role: 'SELLER', network: btcBuyer ? tokenNet : 'bitcoin', chainId: btcBuyer ? tokenAdapter.chain.chainId : btcAdapter.chain.chainId, address: btcBuyer ? tokenAddr : btcAddr },
+        { role: 'PAYMASTER_1', network: tokenNet, chainId: tokenAdapter.chain.chainId, address: pm1Addr },
+        { role: 'BUYER', network: btcBuyer ? 'bitcoin' : tokenNet, chainId: btcBuyer ? btcAdapter.chain.chainId : tokenAdapter.chain.chainId, address: btcBuyer ? btcAddr : tokenAddr },
       ],
     };
     // Pernas SIMULADAS (preview/dev com carteiras reais): o simulador nasce zerado — semeia o saldo
     // dos depositantes ANTES do create (o verify checa o saldo do Vendedor) . No-op nas redes reais.
     deps.dev?.seed?.('bitcoin', btcAddr as string, null, BigInt(mesa.config!.amountInBase as string) * 2n);
-    deps.dev?.seed?.('ethereum', tokenEvm as string, tokenAsset.contractOrMint, 10n ** 15n);
-    const creator = (btcBuyer ? tokenEvm : btcAddr) as string;
-    const created = await deps.deals.create(input, creator);
+    deps.dev?.seed?.(tokenNet, tokenAddr as string, tokenAsset.contractOrMint, 10n ** 15n);
+    const creator = (btcBuyer ? tokenAddr : btcAddr) as string;
+    const created = await deps.deals.create(withFixing(input, b), creator);
     // Linka a deal à mesa ANTES do open: o registro on-chain (dentro do open) resolve o endereço
     // EVM do vendedor-BTC pela carteira multichain da cadeira — a busca é por mesa.dealId(s).
     onCreated(created.id);
@@ -617,13 +708,15 @@ export async function buildApi(deps: ApiDeps): Promise<FastifyInstance> {
     catch (e) { const err = e as DomainError; if (err.code !== 'FUNDING_REQUIRED') throw e; if (!htlcFunding && err.details?.address) htlcFunding = { address: String(err.details.address), requiredSat: String(err.details.requiredSat ?? mesa.config!.amountInBase) }; }
     // Perna de TOKEN só deposita com a operação ABERTA (approve ERC-20 — melhor esforço; a
     // carteira real completa via /onchain-tx).
-    if (opened) { try { await deps.deals.fund(created.id, tokenRole, tokenEvm as string); } catch (e) { logger.warn({ dealId: created.id, err: (e as Error).message }, 'funding da perna de token pendente (carteira real completa via /onchain-tx)'); } }
+    if (opened) { try { await deps.deals.fund(created.id, tokenRole, tokenAddr as string); } catch (e) { logger.warn({ dealId: created.id, err: (e as Error).message }, 'funding da perna de token pendente (carteira real completa via /onchain-tx)'); } }
     await deps.audit.append({ actorType: 'user', actorId: mesa.payMasterId, category: 'portal.mesa.deal.created', dealId: created.id, payload: { mode: btcBuyer ? 'htlc-btc-comprador' : 'htlc-btc', vault: htlcFunding?.address ?? null } });
     // Carteira real: o registro on-chain (createTradeV2) é enviado pela carteira do PM1 — o
     // txRequest vem no meta do adapter e vai na resposta para o dashboard disparar a assinatura.
     const dealNow = await deps.deals.get(created.id);
-    const evmMeta = dealNow?.onChain?.ethereum?.meta as Record<string, unknown> | undefined;
-    const registerTx = evmMeta?.registerPending && typeof evmMeta.registerTx === 'string' ? JSON.parse(evmMeta.registerTx) as Record<string, unknown> : null;
+    // Perna Tron: o registro (createTradeV2) sai pela chave do ATTESTOR dentro do open — nunca há
+    // registerTx para a carteira do PM1 (registerPending não existe no meta do adapter Tron).
+    const tokenMeta = dealNow?.onChain?.[tokenNet]?.meta as Record<string, unknown> | undefined;
+    const registerTx = tokenMeta?.registerPending && typeof tokenMeta.registerTx === 'string' ? JSON.parse(tokenMeta.registerTx) as Record<string, unknown> : null;
     // O cofre P2WSH é DETERMINÍSTICO (meta do registro BTC) — não depende do fund, que no fluxo
     // ordenado responde "leg de contrato primeiro" sem o endereço.
     if (!htlcFunding) {
@@ -679,7 +772,7 @@ export async function buildApi(deps: ApiDeps): Promise<FastifyInstance> {
       ],
     };
     const sellerAddr = (inverse ? evmDep : htlcSol) as string;
-    const created = await deps.deals.create(input, sellerAddr);
+    const created = await deps.deals.create(withFixing(input, b), sellerAddr);
     onCreated(created.id); // linka ANTES do open: registro resolve endereços das contrapartes pela mesa
     for (const p of input.participants) if (p.role !== 'SELLER') await deps.deals.connectWallet(created.id, p.role as Role, p.address as string, p.address as string);
     await deps.deals.open(created.id, sellerAddr); // registra: createTradeV2 (EVM) + derivação do HTLC (Solana)
@@ -758,7 +851,7 @@ export async function buildApi(deps: ApiDeps): Promise<FastifyInstance> {
     deps.dev?.seed?.('bitcoin', (btcBuyer ? buyerSol : sellerSol) as string, null, BigInt(mesa.config!.amountInBase as string) * 2n);
     deps.dev?.seed?.('solana', (btcBuyer ? sellerSol : buyerSol) as string, solAsset.contractOrMint, 10n ** 15n);
     const creator = sellerSol as string;
-    const created = await deps.deals.create(input, creator);
+    const created = await deps.deals.create(withFixing(input, b), creator);
     onCreated(created.id); // linka ANTES do open: o registro resolve endereços BTC das contrapartes pela mesa
     for (const p of participants) if (p.role !== 'SELLER') await deps.deals.connectWallet(created.id, p.role as Role, p.address as string, p.address as string);
     // LOCK ANTES DO OPEN (auditoria 2026-10-19): mesma regra do fluxo EVM — o create_trade Solana
@@ -833,7 +926,7 @@ export async function buildApi(deps: ApiDeps): Promise<FastifyInstance> {
     // (o verify checa o saldo do Vendedor; o deposit debita do simulador). No-op nas redes reais.
     deps.dev?.seed?.(net, sellerAddr, input.assetIn.contractOrMint, BigInt(mesa.config!.amountInBase as string) * 2n);
     if (roleAddr['BUYER']) deps.dev?.seed?.(net, roleAddr['BUYER'] as string, input.assetOut.contractOrMint, 10n ** 15n);
-    const created = await deps.deals.create(input, sellerAddr);
+    const created = await deps.deals.create(withFixing(input, b), sellerAddr);
     onCreated(created.id);
     for (const p of input.participants) if (p.role !== 'SELLER') await deps.deals.connectWallet(created.id, p.role, p.address, p.address);
     await deps.deals.open(created.id, sellerAddr); // → AWAITING_SIGNATURES (vez do Vendedor) + register on-chain
@@ -883,7 +976,7 @@ export async function buildApi(deps: ApiDeps): Promise<FastifyInstance> {
     // Simulado (preview/dev): semeia o USDT do Comprador + semeia a preimage no nó simulado p/ a
     // liquidação revelar R (no real, o Comprador gera R na própria carteira LN).
     deps.dev?.seed?.('ethereum', buyerEvm as string, tusdt as string, 10n ** 15n);
-    const created = await deps.deals.create(input, sellerEvm as string);
+    const created = await deps.deals.create(withFixing(input, b), sellerEvm as string);
     onCreated(created.id);
     for (const p of input.participants) if (p.role !== 'SELLER') await deps.deals.connectWallet(created.id, p.role as Role, p.address, p.address);
     await deps.deals.open(created.id, sellerEvm as string);
@@ -923,9 +1016,18 @@ export async function buildApi(deps: ApiDeps): Promise<FastifyInstance> {
     // Serverless sem scheduler: o poll do admin também retenta reembolsos PENDENTES (ex.: refund
     // BTC aguardando o timelock CSV). Throttle por instância (90 s): cada tentativa consulta a
     // rede e gera evento de auditoria — o poll de segundos não pode virar spam.
-    if (d && d.state === 'REFUNDING' && d.refunds.some(r => r.status === 'PENDING') && Date.now() - (refundRetryAt.get(id) ?? 0) > 90_000) {
+    if (d && (d.state === 'REFUNDING' || d.state === 'BLOCKED') && d.refunds.some(r => r.status === 'PENDING') && Date.now() - (refundRetryAt.get(id) ?? 0) > 90_000) {
       refundRetryAt.set(id, Date.now());
       try { d = await deps.deals.retryRefunds(id); } catch { /* fica PENDING até a próxima */ }
+    }
+    // CURA DE FUNDOS PRESOS (incidente refund BTC 2026-10-22): deal que expirou ANTES do lock BTC
+    // confirmar nunca chegava a REFUNDING (reconciliação de expireNow é one-shot + exige confs), e o
+    // retry acima — condicionado a REFUNDING — nunca engatava. Aqui relemos o on-chain de uma EXPIRED
+    // com funding exigido e sem reembolso; se o depósito apareceu, abrimos o reembolso (o retry o
+    // completa quando o CSV vencer). Mesmo throttle por instância (90 s): cada tentativa toca a rede.
+    if (d && d.state === 'EXPIRED' && !d.refunds.length && d.participants.some(p => p.fundingRequired) && Date.now() - (refundRetryAt.get(id) ?? 0) > 90_000) {
+      refundRetryAt.set(id, Date.now());
+      try { d = await deps.deals.recoverExpiredFunding(id); } catch { /* próxima rodada */ }
     }
     return { deal: d ? await mesaDealView(d) : null };
   });
@@ -1027,6 +1129,10 @@ export async function buildApi(deps: ApiDeps): Promise<FastifyInstance> {
   const AuthNetZ = z.enum(['ethereum', 'solana', 'tron', 'bitcoin']);
   const ChairAssetZ = z.object({ network: z.string().min(2).max(40), contractOrMint: z.string().max(120).nullable().default(null), decimals: z.number().int().min(0).max(30), symbol: z.string().min(1).max(20) });
   const readers = deps.balanceReaders ?? defaultBalanceReaders();
+  // Leitores MAINNET (mesa.environment='mainnet'): endpoints públicos mainnet, ignorando os
+  // CHAIN_ENDPOINT_* de testnet do deploy. Testes com balanceReaders injetado usam o mesmo mock.
+  const readersMainnet = deps.balanceReaders ?? defaultBalanceReaders('mainnet');
+  const readersFor = (mesa: { environment?: string }) => (mesa.environment === 'mainnet' ? readersMainnet : readers);
   // Verificação de segurança de tokens: registro oficial + (opcional) API da Verum Wallet.
   // Em dev, os tokens de teste (tUSDT/tBTC Sepolia e mints locais da Solana) são canônicos.
   // Allowlist anti-golpe = TODOS os tokens do registro canônico da plataforma (deps.registry), que é
@@ -1063,13 +1169,27 @@ export async function buildApi(deps: ApiDeps): Promise<FastifyInstance> {
     if (isDemoMesa(mesa)) return { ok: true as const, checkedAt: deps.mesa.nowMs(), chairs: [], failures: [] as string[], demo: true };
     // Papel que JÁ assinou a operação ativa depositou no escrow — o saldo saiu da carteira dele
     // de propósito; manter a exigência viraria falso "insuficiente" logo após a assinatura.
-    const signed = new Set<string>();
+    const waived = new Set<string>();
+    const dealRequired = new Map<string, number>(); // exigência por papel vinda dos termos do deal
     if (mesa.dealId) {
       const d = await deps.deals.get(mesa.dealId).catch(() => null);
-      for (const s of d?.signatures ?? []) if (s.revision === d!.revision && s.status === 'valid') signed.add(s.role);
+      if (d) {
+        // Exigência AUTORITATIVA por papel a partir dos termos congelados (preço/câmbio já aplicados):
+        // cobre o valor que o COMPRADOR paga mesmo sem `buyerAmountInBase` configurado. Sem isto só o
+        // gás era checado do lado do pagamento e um comprador com gás mas sem ETH suficiente passava
+        // no gate e só falhava no depósito on-chain (signV2) — 'execution reverted' / saldo.
+        for (const leg of d.terms?.legs ?? []) dealRequired.set(leg.from, Number(BigInt(leg.amountBase)) / 10 ** leg.asset.decimals);
+        for (const s of d.signatures) if (s.revision === d.revision && s.status === 'valid') waived.add(s.role);
+        // LOCK ANTES DO OPEN (HTLC/BTC): o vendedor TRANCA o ativo no cofre ANTES de assinar — a
+        // janela de 40 min do escrow não pode esperar bloco. Depois do lock a carteira dele zera de
+        // propósito; exigir o saldo na carteira virava falso "saldo insuficiente" (vermelho) e
+        // podia travar a assinatura. Papel com a perna já FINAL (trancada) é dispensado como o que
+        // assinou — o ativo está comprovadamente no escrow, não mais na carteira.
+        for (const p of d.participants) if (p.fundingRequired && p.funding === 'FINAL') waived.add(p.role);
+      }
     }
     const req = requiredOfChair(mesa);
-    return validateChairBalances(mesa as Parameters<typeof validateChairBalances>[0], readers, deps.mesa.nowMs(), chair => signed.has(chair.role) ? null : req(chair));
+    return validateChairBalances(mesa as Parameters<typeof validateChairBalances>[0], readersFor(mesa as { environment?: string }), deps.mesa.nowMs(), chair => waived.has(chair.role) ? null : (dealRequired.get(chair.role) ?? req(chair)));
   };
   /**
    * balancePreCheck — gate ÚNICO antes de sacramentar a operação: todos na mesa veem os saldos das
@@ -1090,9 +1210,23 @@ export async function buildApi(deps: ApiDeps): Promise<FastifyInstance> {
   // Alimenta o dropdown do wizard: o usuário escolhe o token; contrato/mint e decimais vêm daqui.
   const TOKEN_CHAIN_BY_NETWORK: Record<string, number> = { ethereum: 1, bsc: 56, polygon: 137, arbitrum: 42161, solana: 101, tron: 728126428 };
   app.get('/v1/tokens', async req => {
-    const { network } = req.query as { network?: string };
+    const { network, env } = req.query as { network?: string; env?: string };
     const chainId = network ? TOKEN_CHAIN_BY_NETWORK[network] : undefined;
-    const tokens = registryData.tokens
+    // AMBIENTE MAINNET (mesa mainnet): catálogo = ativos com chainId mainnet do registro real
+    // (ETH/USDT/USDC/WBTC/WETH registrados no boot quando o grupo VERUM_EVM_MAINNET_* existe).
+    if (env === 'mainnet') {
+      const main = deps.registry.list()
+        .filter(a => a.status === 'active' && (!network || a.network === network) && (a.network !== 'ethereum' || a.chainId === '1') && a.contractOrMint)
+        .map(a => ({ symbol: a.code, contractOrMint: a.contractOrMint as string, decimals: a.decimals, representationOf: a.issuer ?? null }));
+      return { network: network ?? null, tokens: main };
+    }
+    // Tokens MAINNET só entram quando a rede de liquidação É a mainnet: com um adaptador REAL numa
+    // testnet (ex.: Tron Shasta, Sepolia), oferecer o USDT real no dropdown gera um "segundo USDT"
+    // que o verifyAsset reprova (contrato inexistente na testnet) — confunde sem servir p/ nada.
+    // Simulador local (dev) mantém o catálogo completo (conveniência dos fluxos de demonstração).
+    const live = network ? deps.adapters?.get(network as never) : undefined;
+    const mainnetOk = !live || live instanceof LocalChainAdapter || String(chainId ?? '') === String(live.chain.chainId);
+    const tokens = !mainnetOk ? [] : registryData.tokens
       .filter(t => t.status === 'ACTIVE' && (chainId === undefined || t.chainId === chainId))
       .map(t => ({ symbol: t.symbol, contractOrMint: t.address, decimals: t.decimals, representationOf: ('representationOf' in t ? (t as { representationOf?: string }).representationOf : undefined) ?? null }));
     // Tokens do REGISTRO REAL da plataforma (deps.registry) para a rede pedida — são os que o motor de
@@ -1101,7 +1235,8 @@ export async function buildApi(deps: ApiDeps): Promise<FastifyInstance> {
     // em mainnet, os reais). Sem isto, o wizard mostrava só mainnet e a escolha era reprovada.
     const seen = new Set<string>();
     const real = deps.registry.list()
-      .filter(a => a.status === 'active' && a.contractOrMint && (!network || a.network === network))
+      // ethereum chainId '1' é do AMBIENTE mainnet (mesa mainnet) — nunca entra no dropdown testnet.
+      .filter(a => a.status === 'active' && a.contractOrMint && (!network || a.network === network) && !(a.network === 'ethereum' && a.chainId === '1'))
       .map(a => ({ symbol: a.code, contractOrMint: a.contractOrMint as string, decimals: a.decimals, representationOf: a.issuer ?? null }))
       .filter(t => { const k = t.contractOrMint.toLowerCase(); if (seen.has(k)) return false; seen.add(k); return true; });
     // dedup: remove do catálogo mainnet os contratos já cobertos pelo registro real
@@ -1112,7 +1247,7 @@ export async function buildApi(deps: ApiDeps): Promise<FastifyInstance> {
   // --- admin (sessão do portal) ---
   app.post('/v1/portal/mesas', async (req, reply) => {
     // v4: `network` é opcional — derivada da cadeira do vendedor quando ausente (redes são por perna).
-    const b = parse(z.object({ label: z.string().max(120).optional(), network: z.string().min(2).max(40).optional(), chairs: z.array(z.object({ role: ChairRoleZ, expectedAsset: ChairAssetZ, label: z.string().max(120).optional() })).min(2).max(4) }), req.body);
+    const b = parse(z.object({ label: z.string().max(120).optional(), network: z.string().min(2).max(40).optional(), environment: z.enum(['mainnet', 'testnet']).optional(), chairs: z.array(z.object({ role: ChairRoleZ, expectedAsset: ChairAssetZ, label: z.string().max(120).optional() })).min(2).max(4) }), req.body);
     const mesa = deps.mesa.createMesa(portalToken(req), b);
     void reply.code(201);
     return deps.mesa.mesaViewFor(mesa, { kind: 'admin' });
@@ -1208,7 +1343,11 @@ export async function buildApi(deps: ApiDeps): Promise<FastifyInstance> {
       await deps.audit.append({ actorType: 'user', actorId: pm.id, category: 'mesa.aprovacao.bloqueada', dealId: null, payload: { mesaId, motivos } });
       throw new DomainError('VERSION_CONFLICT', 'Não foi possível aprovar a operação', { motivos });
     }
-    const body = { ...b, amountInBase: mesa.config?.amountInBase ?? b.amountInBase, discountBps: mesa.config?.discountBps ?? b.discountBps, commissionBps: mesa.config?.commissionBps ?? b.commissionBps };
+    // Operar Indexado: no momento de LIBERAR ASSINATURAS, revalida o fixing (dentro da validade, config
+    // == valores do fixing) e TRAVA o registro (imutável). Devolve o fixingHash que entra no deal
+    // (terms.pricing) e, portanto, no envelope assinado pelos 4. FIXED → null (nenhuma mudança no fluxo).
+    const indexedFixingHash = await deps.indexedPricing.lockForApproval(mesa, pm.id);
+    const body = { ...b, amountInBase: mesa.config?.amountInBase ?? b.amountInBase, discountBps: mesa.config?.discountBps ?? b.discountBps, commissionBps: mesa.config?.commissionBps ?? b.commissionBps, ...(indexedFixingHash ? { indexedFixingHash, ...(mesa.config?.buyerAmountInBase ? { fixedAmountOutBase: mesa.config.buyerAmountInBase } : {}) } : {}) };
     // Plano HTLC_BTC → deal REAL com os ativos das CADEIRAS (BTC nativo ↔ token no escrow V2).
     // Demais planos seguem o caminho legado (base dev) até o wiring ESCROW_DIRECT/CROSS_CHAIN.
     const plan = deriveSettlementPlan(mesa.chairs);
@@ -1237,20 +1376,40 @@ export async function buildApi(deps: ApiDeps): Promise<FastifyInstance> {
       try { const bal = await deps.lightning.getBalance(); if (bal.outboundSat < amountSat) throw new DomainError('LIQUIDITY_INSUFFICIENT', `O nó Lightning não tem liquidez suficiente (disponível ${bal.outboundSat} sats, necessário ${amountSat}). Use a rota HTLC on-chain ou reduza o valor.`); }
       catch (e) { if (e instanceof DomainError) throw e; logger.warn({ err: (e as Error).message }, 'precheck de liquidez Lightning falhou (nó indisponível)'); }
     }
+    // MAINNET: recorte inicial — só a rota HTLC_BTC (BTC↔Ethereum) existe; qualquer outro plano é
+    // inalcançável pela regra de par da criação, mas o guard fecha a porta de dados antigos/editados.
+    if (mesa.environment === 'mainnet' && plan?.mode !== 'HTLC_BTC') throw new DomainError('SETTLEMENT_NOT_ALLOWED', 'Em MAINNET o único fluxo suportado é BTC nativo ↔ Ethereum (rota HTLC)');
+    let createdDealId: string | null = null;
+    const attach = (id: string) => { createdDealId = id; deps.mesa.attachDeal(mesa, id); };
     const view = plan?.mode === 'LIGHTNING_SWAP'
-      ? await createMesaLightningDeal(mesa, body, id => deps.mesa.attachDeal(mesa, id))
+      ? await createMesaLightningDeal(mesa, body, attach)
       : plan?.mode === 'HTLC_BTC'
-      ? await createMesaHtlcDeal(mesa, body, id => deps.mesa.attachDeal(mesa, id))
+      ? await createMesaHtlcDeal(mesa, body, attach)
       : plan?.mode === 'CROSS_CHAIN' && plan.htlc
-      ? await createMesaXchainHtlcDeal(mesa, body, id => deps.mesa.attachDeal(mesa, id))
+      ? await createMesaXchainHtlcDeal(mesa, body, attach)
       : escrowDirectTokens
-      ? await createMesaEscrowDirectDeal(mesa, body, id => deps.mesa.attachDeal(mesa, id))
+      ? await createMesaEscrowDirectDeal(mesa, body, attach)
       : await createMesaDealForParts(mesa.chairs.filter(c => c.wallet).map(c => {
         const w = c.wallet!;
         const sol = (w.addresses ?? []).find(a => a.network === 'solana')?.address ?? (w.network === 'solana' ? w.address : null);
         return { role: c.role as Role, address: sol ?? w.address };
-      }), body, id => deps.mesa.attachDeal(mesa, id));
+      }), body, attach);
     deps.mesa.markApproved(mesa, pm.id);
+    // PERSISTÊNCIA VERIFICADA (incidente BTC↔Tron 2026-10-27): o portal é UM documento com guarda
+    // de versão (last-writer-wins) e o approve é a escrita mais LONGA do sistema — sessões/
+    // reentradas dos participantes escrevem o mesmo doc em paralelo e o save do approve pode ser
+    // descartado ("save ignorado — banco tem versão mais nova"): a UI mostrava "aprovada" e o banco
+    // seguia READY_FOR_APPROVAL, com a deal órfã. Aqui: flush → re-hidrata → confere → re-aplica
+    // (o rev re-bumpado passa a vencer) até confirmar que approvedAt/dealId SOBREVIVERAM no banco.
+    for (let i = 0; i < 3 && createdDealId; i++) {
+      await deps.portal.flush();
+      await deps.portal.hydrate();
+      const cur = deps.mesa.mesaById(mesaId);
+      if (!cur) break;
+      if (cur.approvedAt && (cur.dealId === createdDealId || (cur.dealIds ?? []).includes(createdDealId))) break;
+      deps.mesa.attachDeal(cur, createdDealId);
+      deps.mesa.markApproved(cur, pm.id);
+    }
     void reply.code(201);
     return { approved: true, termsHash: mesa.termsHash, deal: view };
   });
@@ -1322,6 +1481,13 @@ export async function buildApi(deps: ApiDeps): Promise<FastifyInstance> {
     const { d, pm1 } = await mesaDealOf(req, (req.params as { mesaId: string }).mesaId);
     return stepAdapterOf(d).submitParticipantStep(d.id, 'PAYMASTER_1', pm1.address, b as Record<string, unknown>);
   });
+  // Pré-pagamento de gás do keeper (lado-EVM) na mesa: o pagador envia ETH ao keeper e informa o
+  // txHash; confirmado, o backend registra e inicia os turnos. deal.gasPrepay traz keeperAddress/valor.
+  app.post('/v1/portal/mesas/:mesaId/deal/gas-prepay', async req => {
+    const b = parse(z.object({ txHash: z.string().regex(/^0x[0-9a-fA-F]{64}$/) }), req.body);
+    const { d, pm1 } = await mesaDealOf(req, (req.params as { mesaId: string }).mesaId);
+    return deps.deals.view(await deps.deals.recordGasPrepay(d.id, b.txHash), pm1.address);
+  });
   app.get('/v1/portal/mesas/:mesaId/deal/envelope', async req => {
     const { d, pm1 } = await mesaDealOf(req, (req.params as { mesaId: string }).mesaId);
     const env = await deps.deals.envelope(d.id, 'PAYMASTER_1', pm1.address);
@@ -1356,6 +1522,13 @@ export async function buildApi(deps: ApiDeps): Promise<FastifyInstance> {
     const { inviteId } = req.params as { inviteId: string };
     const q = parse(z.object({ c: z.string().max(20).optional() }), req.query ?? {});
     return deps.mesa.resolveInvite(inviteId, q.c);
+  });
+  // Página "Entrar com Código" do dashboard: localiza o convite só pelo código XXXX-XXXX
+  // (o link completo contém o inviteId; quem recebeu apenas o código entra por aqui).
+  app.post('/v1/mesa-invites/resolve-code', async (req, reply) => {
+    const b = parse(z.object({ code: z.string().min(4).max(20) }), req.body);
+    const r = await deps.mesa.resolveInviteByCode(b.code);
+    void reply.code(201); return r;
   });
   // Validação com LOG (warn): os campos reprovados aparecem no runtime log — era impossível
   // diagnosticar o "Entrada inválida" do convite sem acesso ao f12 do usuário.
@@ -1422,15 +1595,46 @@ export async function buildApi(deps: ApiDeps): Promise<FastifyInstance> {
     if (!dealId) return;
     const d = await deps.deals.get(dealId).catch(() => null);
     if (!d) return;
+    // EXPIRAÇÃO NO POLL (incidente BTC↔Tron 2026-10-27): deal vencida (prazo da operação OU turno
+    // de assinatura esgotado) só expirava no cron — que no plano Hobby quase não roda. Sem o
+    // expireNow, o reembolso automático nunca engatava (a reconciliação funding→refund nasce nele).
+    // expireDue é o MESMO passo do cron: o MOTOR decide com o relógio dele (nunca comparar
+    // Date.now() com tempos da deal — o clock é injetado nos testes). Throttle por instância.
+    if (['CREATED', 'WALLETS_CONNECTED', 'ASSETS_VERIFIED', 'LIQUIDITY_VERIFIED', 'AWAITING_SIGNATURES'].includes(d.state)
+      && Date.now() - (expireHealAtRef.at ?? 0) > 60_000) {
+      expireHealAtRef.at = Date.now();
+      try { await deps.deals.expireDue(); } catch { /* próxima rodada */ }
+      const cur = await deps.deals.get(dealId).catch(() => null);
+      if (!cur || cur.state !== d.state) return; // expirou agora — o próximo poll cura os refunds
+    }
     if (d.state === 'SETTLEMENT_VALIDATION' || d.state === 'SETTLING') {
       try { await deps.dev?.ensureOnChain?.(dealId); } catch { /* melhor esforço */ }
       try { if (d.state === 'SETTLEMENT_VALIDATION') await deps.settlement.settle(dealId, 'keeper'); else await deps.settlement.recover(); } catch { /* idempotente; falha vira BLOCKED */ }
       return;
     }
     if (d.state === 'AWAITING_SIGNATURES' && d.turnRole === null) { await healDeferredTurns(dealId); return; }
-    if (d.state === 'REFUNDING' && d.refunds.some(r => r.status === 'PENDING') && Date.now() - (refundRetryAt.get(dealId) ?? 0) > 90_000) {
+    // CURA DO OPEN ADIADO (rota HTLC, lock externo pendente — incidente BTC↔Tron 2026-10-27): o
+    // approve deixa a deal em LIQUIDITY_VERIFIED e o open — que DERIVA o cofre P2WSH e persiste o
+    // meta em onChain.bitcoin — rodava UMA vez; uma falha transitória ali (esplora/timeout) deixava
+    // o Vendedor sem o endereço do cofre na tela (htlcVault null) e a operação parecia morta.
+    // Re-tentar o open em todo poll é idempotente: FUNDING_REQUIRED é o estado normal até o lock
+    // confirmar; quando confirmar, o mesmo open registra a perna de contrato e abre as assinaturas.
+    if (d.state === 'LIQUIDITY_VERIFIED' && d.terms?.legs.some(l => l.mode === 'HTLC') && Date.now() - (openHealAt.get(dealId) ?? 0) > 30_000) {
+      openHealAt.set(dealId, Date.now());
+      try { await deps.deals.open(dealId, d.createdBy); } catch { /* FUNDING_REQUIRED até o lock confirmar — o registro do cofre já persistiu */ }
+      return;
+    }
+    if ((d.state === 'REFUNDING' || d.state === 'BLOCKED') && d.refunds.some(r => r.status === 'PENDING') && Date.now() - (refundRetryAt.get(dealId) ?? 0) > 90_000) {
       refundRetryAt.set(dealId, Date.now());
       try { await deps.deals.retryRefunds(dealId); } catch { /* fica PENDING até a próxima */ }
+    }
+    // CURA DE FUNDOS PRESOS (incidente refund BTC 2026-10-22): deal que expirou ANTES do lock BTC
+    // confirmar parava em EXPIRED e nunca ia a REFUNDING, então o retry acima nunca engatava.
+    // Relemos o on-chain e, se o depósito tardio apareceu, abrimos o reembolso (o retry o completa
+    // quando o CSV vencer). Mesmo throttle por instância (90 s).
+    if (d.state === 'EXPIRED' && !d.refunds.length && d.participants.some(p => p.fundingRequired) && Date.now() - (refundRetryAt.get(dealId) ?? 0) > 90_000) {
+      refundRetryAt.set(dealId, Date.now());
+      try { await deps.deals.recoverExpiredFunding(dealId); } catch { /* próxima rodada */ }
     }
   };
   app.get('/v1/mesas/:mesaId', async req => {
@@ -1562,6 +1766,41 @@ export async function buildApi(deps: ApiDeps): Promise<FastifyInstance> {
     const { mesa } = adminMesa(req, mesaId, false);
     return balancePreCheck(mesa);
   });
+  // RECIBO DE SALDOS pós-liquidação: quando o deal está SETTLED, devolve por papel que RECEBE ativo
+  // (Vendedor e Comprador) a moeda recebida, o valor recebido e o saldo ATUAL on-chain no endereço
+  // de recebimento (rede do ativo recebido). O frontend mostra "antes" = max(0, agora − recebido).
+  // Participante da própria mesa OU admin dono. Leitura on-chain reusa os balanceReaders (sticky).
+  app.get('/v1/mesas/:mesaId/receipt-balances', async req => {
+    const { mesaId } = req.params as { mesaId: string };
+    const mesaClaim = req.session?.mesa;
+    let mesa: ReturnType<typeof deps.mesa.mesaById>;
+    if (mesaClaim && mesaClaim.mesaId === mesaId) { mesa = deps.mesa.mesaById(mesaId); if (!mesa) throw new DomainError('INVALID_INPUT', 'Mesa não encontrada'); }
+    else mesa = adminMesa(req, mesaId, false).mesa;
+    const d = mesa.dealId ? await deps.deals.get(mesa.dealId).catch(() => null) : null;
+    if (!d || d.state !== 'SETTLED' || !d.terms) return { settled: false as const };
+    const balances: Array<Record<string, unknown>> = [];
+    for (const role of ['SELLER', 'BUYER'] as const) {
+      const leg = (d.terms.legs || []).find(l => l.to === role); // perna que PAGA a este papel = o que ele recebe
+      if (!leg) continue;
+      const asset = leg.asset; const net = asset.network;
+      const chair = (mesa.chairs || []).find(c => c.role === role);
+      const address = chair ? addressOn(chair, net) : null;
+      const received = Number(BigInt(leg.amountBase)) / 10 ** asset.decimals;
+      let current: number | null = null;
+      if (address) {
+        try {
+          const rdr = readersFor(mesa as { environment?: string });
+          if (asset.contractOrMint == null) { const n = await rdr.native(net, address); current = n ? n.amount : null; }
+          else {
+            current = (await rdr.tokenDirect?.(net, asset.contractOrMint, address, asset.decimals)) ?? null;
+            if (current == null) { const toks = await rdr.tokens(net, address); const hit = toks.find(t => (t.contract || '').toLowerCase() === (asset.contractOrMint || '').toLowerCase() || t.symbol === asset.code); current = hit ? hit.amount : null; }
+          }
+        } catch { current = null; }
+      }
+      balances.push({ role, network: net, symbol: asset.code, decimals: asset.decimals, address, received, current, before: current != null ? Math.max(0, current - received) : null });
+    }
+    return { settled: true as const, balances };
+  });
   // Operação ESPECÍFICA da mesa (deep link /mesa?mesa=&op=): resumo somente-leitura de um deal do
   // histórico/ativo. Participante da própria mesa OU admin dono. Verifica que o deal pertence à mesa.
   app.get('/v1/mesas/:mesaId/deal/:dealId', async req => {
@@ -1580,6 +1819,59 @@ export async function buildApi(deps: ApiDeps): Promise<FastifyInstance> {
     const { mesaId } = req.params as { mesaId: string };
     const b = parse(z.object({ amountInBase: z.string().regex(/^[1-9][0-9]*$/).optional(), discountBps: z.number().int().min(0).max(2000).optional(), commissionBps: z.number().int().min(0).max(5000).optional() }), req.body ?? {});
     return deps.mesa.updateConfig(portalToken(req), mesaId, b);
+  });
+
+  /* ---------- Operar Indexado (preço indexado ao Verum Swap) ---------- */
+  // Reabre a mesa para edição se já aprovada (refix/reconfig invalida assinaturas — reopenForEdit) e
+  // devolve o registro da mesa ATUALIZADO. Bloqueado se a operação já for irreversível (reopen lança).
+  const ensureEditableMesa = async (req: FastifyRequest, mesaId: string): Promise<MesaRecord> => {
+    const { mesa } = adminMesa(req, mesaId);
+    if (mesa.approvedAt) { await deps.mesa.reopenForEdit(portalToken(req), mesaId); return adminMesa(req, mesaId).mesa; }
+    return mesa;
+  };
+  // Leitura (os 4 participantes + admin): preço de referência, fontes, dispersão, spread, valores e timer.
+  app.get('/v1/mesas/:mesaId/indexed-pricing', async req => {
+    const { mesaId } = req.params as { mesaId: string };
+    const claim = req.session?.mesa;
+    if (!(claim && claim.mesaId === mesaId)) adminMesa(req, mesaId, false); // participante da mesa OU dono
+    const record = await deps.indexedPricing.get(mesaId);
+    return { enabled: deps.indexedPricing.enabled, limits: deps.indexedPricing.getLimits(), mode: record?.mode ?? 'FIXED', record: record ?? null };
+  });
+  // Configurar modo INDEXADO + spread (+ valor-base opcional). Só o Pay Master 1 (dono) escreve.
+  app.post('/v1/mesas/:mesaId/indexed-pricing', async (req, reply) => {
+    if (req.session?.mesa) throw new DomainError('FORBIDDEN', 'Somente o Pay Master 1 configura o preço indexado');
+    const { mesaId } = req.params as { mesaId: string };
+    const b = parse(z.object({ spreadBps: z.coerce.number().int(), baseAmount: z.string().regex(/^[1-9][0-9]*$/).optional() }), req.body ?? {});
+    const token = portalToken(req);
+    const { pm } = adminMesa(req, mesaId);
+    const mesa = await ensureEditableMesa(req, mesaId);
+    if (b.baseAmount) deps.mesa.updateConfig(token, mesaId, { amountInBase: b.baseAmount });
+    const record = await deps.indexedPricing.configure(mesa, { spreadBps: b.spreadBps, ...(b.baseAmount ? { baseAmount: b.baseAmount } : {}) }, pm.id);
+    void reply.code(201);
+    return { record };
+  });
+  // Fixar / refixar o preço agora: consulta o índice, aplica o spread, congela valores concretos.
+  app.post('/v1/mesas/:mesaId/indexed-pricing/fix', async (req, reply) => {
+    if (req.session?.mesa) throw new DomainError('FORBIDDEN', 'Somente o Pay Master 1 fixa o preço');
+    const { mesaId } = req.params as { mesaId: string };
+    const b = parse(z.object({ confirmMove: z.boolean().optional() }), req.body ?? {});
+    const token = portalToken(req);
+    const { pm } = adminMesa(req, mesaId);
+    const mesa = await ensureEditableMesa(req, mesaId);
+    const result = await deps.indexedPricing.fix(mesa, { ...(b.confirmMove ? { confirmMove: true } : {}) }, pm.id);
+    // Grava os valores concretos na config (perna base/quote) — o fluxo de aprovação os congela como hoje.
+    deps.mesa.updateConfig(token, mesaId, { amountInBase: result.baseAmount, buyerAmountInBase: result.quoteAmount });
+    void reply.code(201);
+    return { record: result.record, config: { amountInBase: result.baseAmount, buyerAmountInBase: result.quoteAmount } };
+  });
+  // Voltar a FIXED (remover o modo indexado) antes das assinaturas.
+  app.delete('/v1/mesas/:mesaId/indexed-pricing', async req => {
+    if (req.session?.mesa) throw new DomainError('FORBIDDEN', 'Somente o Pay Master 1 edita o preço');
+    const { mesaId } = req.params as { mesaId: string };
+    const { pm } = adminMesa(req, mesaId);
+    const mesa = await ensureEditableMesa(req, mesaId);
+    await deps.indexedPricing.remove(mesa, pm.id);
+    return { mode: 'FIXED' as const };
   });
 
   /* ---------- UI (HTML autocontido) ---------- */
@@ -1664,7 +1956,7 @@ export async function buildApi(deps: ApiDeps): Promise<FastifyInstance> {
   // Saldo nativo + tokens por endereço (valor USD/BRL + ícones). Atalho para carteiras DEMO (saldos
   // canned, sem tocar RPC/CoinGecko); a leitura real usa os RPCs PÚBLICOS (ex.: Solana). Reusado
   // pela rota pública /v1/chains/balances e pela visão pública da mesa (/v1/mesas/:id/balances).
-  const chainBalances = async (addresses: { network: string; address: string }[]) => {
+  const chainBalances = async (addresses: { network: string; address: string }[], env?: 'mainnet' | 'testnet') => {
     const demo = deps.dev?.demo;
     if (demo && addresses.some(a => demo.addresses.has(a.address))) {
       const { demoBalancesResponse } = await import('../portal/demo.js');
@@ -1682,8 +1974,8 @@ export async function buildApi(deps: ApiDeps): Promise<FastifyInstance> {
       if (!chain) return { network, address, supported: false as const };
       // Nativo + tokens em paralelo — a falha de um nunca derruba o outro.
       const [bal, toks] = await Promise.all([
-        readNativeBalance(network, address).catch(() => null),
-        readTokenBalances(network, address).catch(() => []),
+        readNativeBalance(network, address, env).catch(() => null),
+        readTokenBalances(network, address, env).catch(() => []),
       ]);
       const price = q(chain.coingeckoId);
       const amount = bal?.amount ?? null;
@@ -1732,8 +2024,10 @@ export async function buildApi(deps: ApiDeps): Promise<FastifyInstance> {
         network: z.string().min(2).max(40),
         address: z.string().min(8).max(120),
       })).min(1).max(30),
+      // Mesa MAINNET: a UI pede a leitura nos endpoints públicos mainnet (ignora CHAIN_ENDPOINT_*).
+      environment: z.enum(['mainnet', 'testnet']).optional(),
     }), req.body);
-    return chainBalances(body.addresses);
+    return chainBalances(body.addresses, body.environment);
   });
   // SALDOS (somente leitura, PÚBLICO — sem login) das cadeiras conectadas de uma mesa — base dos
   // saldos/ícones reais no link /ver/:mesaId. Resolve endereços internamente; NÃO expõe endereços.
@@ -1742,7 +2036,7 @@ export async function buildApi(deps: ApiDeps): Promise<FastifyInstance> {
     const { mesaId } = req.params as { mesaId: string };
     const wallets = deps.mesa.mesaConnectedWallets(mesaId);
     if (!wallets.length) return { chairs: [] };
-    const resp = await chainBalances(wallets.map(w => ({ network: w.network, address: w.address })));
+    const resp = await chainBalances(wallets.map(w => ({ network: w.network, address: w.address })), deps.mesa.mesaById(mesaId)?.environment);
     type BalItem = { address?: string; supported?: boolean; symbol?: string; icon?: string | null; amount?: number | null; valueUsd?: number | null; tokens?: { symbol: string; contract: string | null; icon: string | null; amount: number; valueUsd: number | null }[] };
     const byAddr = new Map<string, BalItem>();
     for (const it of resp.items as BalItem[]) if (it.address) byAddr.set(it.address, it);
@@ -1754,7 +2048,10 @@ export async function buildApi(deps: ApiDeps): Promise<FastifyInstance> {
       if (it && it.supported) {
         const tok = (it.tokens ?? []).find(t => t.symbol === exp.symbol || (!!exp.contractOrMint && t.contract === exp.contractOrMint));
         if (!isNative && tok) { icon = tok.icon; amount = tok.amount; valueUsd = tok.valueUsd; symbol = tok.symbol; }
-        else { icon = it.icon ?? null; amount = it.amount ?? null; valueUsd = it.valueUsd ?? null; symbol = it.symbol ?? exp.symbol; }
+        else if (isNative) { icon = it.icon ?? null; amount = it.amount ?? null; valueUsd = it.valueUsd ?? null; symbol = it.symbol ?? exp.symbol; }
+        // Cadeira de TOKEN sem o token na leitura: saldo é 0 DO TOKEN — nunca cair no saldo
+        // NATIVO (mostrava o TRX da carteira como se fosse USDT, um número sem sentido).
+        else { amount = 0; valueUsd = 0; }
       }
       return { role: w.role, roleLabel: w.roleLabel, symbol, icon, amount, valueUsd };
     });

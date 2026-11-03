@@ -9,15 +9,20 @@ import { AdapterRegistry, type ApprovalVerifier, type DealCommitment, type Settl
 import { createLocalAdapters, LocalChainAdapter } from './adapters/local.js';
 import { createLightningService } from './adapters/lightning/index.js';
 import { LightningLegAdapter } from './adapters/lightning/legAdapter.js';
-import { verumEvmConfig, solanaConfig, tronConfig, bitcoinConfig } from './config.js';
+import { verumEvmConfig, solanaConfig, tronConfig, bitcoinConfig, verumSwapEngineConfig, verumEvmMainnetConfig, bitcoinMainnetConfig, ETH_MAINNET_TOKENS } from './config.js';
+import { IndexedPricingService } from './indexing/service.js';
+import { VerumSwapIndexProvider, MockIndexProvider } from './indexing/provider.js';
+import type { IndexPriceProvider } from './indexing/types.js';
 import { BitcoinChainAdapter } from './adapters/bitcoin.js';
 import { VerumEvmAdapter } from './adapters/verum/evm.js';
 import { VerumEvmV2Adapter } from './adapters/verum/evmV2.js';
 import { VerumSolanaAdapter } from './adapters/verum/solana.js';
 import { VerumTronAdapter } from './adapters/verum/tron.js';
+import { VerumTronV2Adapter } from './adapters/verum/tronV2.js';
 import { VerumEvmDevKeyring, TronDevKeyring } from './adapters/verum/keyring.js';
 import { AssetRegistry, defaultRegistry } from './engines/assetRegistry.js';
 import { PriceEngine, StaticPriceSource, type PriceSource } from './engines/price.js';
+import { CoinGeckoRefresher, LivePriceSource } from './engines/priceLive.js';
 import { LiquidityEngine, StaticLiquiditySource, type LiquiditySource } from './engines/liquidity.js';
 import { RouterEngine } from './engines/router.js';
 import { SignatureEngine, envelopeFor, verifyEvm, verifySolana, verifyBitcoin, verifyTron } from './engines/signature.js';
@@ -45,8 +50,8 @@ import type { Config } from './config.js';
 import type { Deal, Network, Participant, Role } from './domain/types.js';
 import type { ApprovalSignature } from './adapters/types.js';
 
-export interface AppOverrides { autoSettle?: boolean; store?: Store; adapters?: SettlementAdapter[]; priceSources?: PriceSource[]; liquiditySources?: LiquiditySource[]; screening?: WalletScreening; now?: () => number; denylist?: string[]; balanceReaders?: import('./mesa/balances.js').BalanceReaders; btcAddressOf?: (dealId: string, role: Role) => Promise<string | null>; evmAddressOf?: (dealId: string, role: Role) => Promise<string | null>; /** Runner de swap resumível (testnet): preimage HTLC fixa p/ recriar a deal com o mesmo htlcHash de um lock confirmado. */ htlcPreimageHex?: string; /** Nó Lightning injetado (rota LIGHTNING_SWAP) — mock in-process nos testes; senão vem de createLightningService. */ lightning?: import('./adapters/lightning/types.js').LightningService }
-export interface App { config: Config; store: Store; adapters: AdapterRegistry; local?: { evm: LocalChainAdapter; solana: LocalChainAdapter; bitcoin: LocalChainAdapter; tron?: LocalChainAdapter }; verumEvm?: VerumEvmAdapter; verumSolana?: VerumSolanaAdapter; verumTron?: VerumTronAdapter; verumEvmKeyring?: VerumEvmDevKeyring; tronKeyring?: TronDevKeyring; registry: AssetRegistry; price: PriceEngine; liquidity: LiquidityEngine; router: RouterEngine; signature: SignatureEngine; risk: RiskEngine; audit: AuditLog; deals: DealEngine; settlement: SettlementEngine; auth: WalletAuth; identity: IdentityService; rooms: RoomService; proposals: ProposalService; mesa: import('./mesa/mesaService.js').MesaService; lightning: import('./adapters/lightning/types.js').LightningService; lightningReal: boolean; api: Awaited<ReturnType<typeof buildApi>>; sources: { price: StaticPriceSource[]; liquidity: StaticLiquiditySource[] }; startScheduler(): void; stopScheduler(): void; close(): Promise<void> }
+export interface AppOverrides { autoSettle?: boolean; store?: Store; adapters?: SettlementAdapter[]; /** Adapters registrados como MAINNET (testes do ambiente por mesa; produção usa os grupos *_MAINNET_*). */ mainnetAdapters?: SettlementAdapter[]; priceSources?: PriceSource[]; liquiditySources?: LiquiditySource[]; screening?: WalletScreening; now?: () => number; denylist?: string[]; balanceReaders?: import('./mesa/balances.js').BalanceReaders; btcAddressOf?: (dealId: string, role: Role) => Promise<string | null>; evmAddressOf?: (dealId: string, role: Role) => Promise<string | null>; tronAddressOf?: (dealId: string, role: Role) => Promise<string | null>; /** Força o flag de hashlock Tron (testes do guard BTC↔Tron sem escrow V2 real). */ tronHashlock?: boolean; /** Runner de swap resumível (testnet): preimage HTLC fixa p/ recriar a deal com o mesmo htlcHash de um lock confirmado. */ htlcPreimageHex?: string; /** Nó Lightning injetado (rota LIGHTNING_SWAP) — mock in-process nos testes; senão vem de createLightningService. */ lightning?: import('./adapters/lightning/types.js').LightningService; /** Fonte do índice (Operar Indexado) injetada nos testes; senão vem do motor real ou do mock de dev. */ indexProvider?: IndexPriceProvider }
+export interface App { config: Config; store: Store; adapters: AdapterRegistry; local?: { evm: LocalChainAdapter; solana: LocalChainAdapter; bitcoin: LocalChainAdapter; tron?: LocalChainAdapter }; verumEvm?: VerumEvmAdapter; verumSolana?: VerumSolanaAdapter; verumTron?: VerumTronAdapter; verumTronV2?: VerumTronV2Adapter; verumEvmKeyring?: VerumEvmDevKeyring; tronKeyring?: TronDevKeyring; registry: AssetRegistry; price: PriceEngine; liquidity: LiquidityEngine; router: RouterEngine; signature: SignatureEngine; risk: RiskEngine; audit: AuditLog; deals: DealEngine; settlement: SettlementEngine; auth: WalletAuth; identity: IdentityService; rooms: RoomService; proposals: ProposalService; mesa: import('./mesa/mesaService.js').MesaService; indexedPricing: IndexedPricingService; lightning: import('./adapters/lightning/types.js').LightningService; lightningReal: boolean; api: Awaited<ReturnType<typeof buildApi>>; sources: { price: StaticPriceSource[]; liquidity: StaticLiquiditySource[] }; startScheduler(): void; stopScheduler(): void; close(): Promise<void> }
 
 /** Mint canônico do Wrapped SOL (mesmo em todos os clusters) — SOL como token SPL. */
 export const WSOL_MINT = 'So11111111111111111111111111111111111111112';
@@ -69,7 +74,7 @@ export async function createApp(config: Config, o: AppOverrides = {}): Promise<A
   await store.init();
   const audit = new AuditLog(store, now);
   const adapters = new AdapterRegistry();
-  const escrowByChain = (network: string) => adapters.get(network as Participant['network'])?.escrowAddress() ?? '0x0000000000000000000000000000000000000000';
+  const escrowByChain = (network: string, netEnv?: 'mainnet' | 'testnet') => adapters.get(network as Participant['network'], netEnv ?? 'testnet')?.escrowAddress() ?? '0x0000000000000000000000000000000000000000';
   /** O mesmo verificador criptográfico do Signature Engine é injetado nos simuladores (equivalência off-chain ↔ on-chain). */
   const verifier: ApprovalVerifier = async (dealHash, participant, sig: ApprovalSignature) => {
     // O simulador recomputa o hash; o verificador só valida a assinatura do envelope contra o participante.
@@ -89,11 +94,14 @@ export async function createApp(config: Config, o: AppOverrides = {}): Promise<A
   const verumEvmCfg = o.adapters ? null : verumEvmConfig(config);
   const solCfg = o.adapters ? null : solanaConfig(config);
   const tronCfg = o.adapters ? null : tronConfig(config);
+  // Grupos MAINNET (mesa.environment='mainnet') — adapters paralelos; null = mainnet desligada.
+  const evmMainCfg = o.adapters ? null : verumEvmMainnetConfig(config);
+  const btcMainCfg = o.adapters ? null : bitcoinMainnetConfig(config);
   const dealDeps = { getDeal: (id: string) => store.getDeal(id) };
   let portalRef: PortalService | null = null; // preenchido quando o portal sobe (resolvedor BTC multichain)
   let demoKeyringRef: DemoMesaKeyring | null = null; // preenchido quando a conta demo é semeada (assina txs Solana dev)
   let verumEvm: VerumEvmAdapter | undefined; let verumEvmV2: VerumEvmV2Adapter | undefined; let verumEvmKeyring: VerumEvmDevKeyring | undefined;
-  let verumSolana: VerumSolanaAdapter | undefined; let verumTron: VerumTronAdapter | undefined; let tronKeyring: TronDevKeyring | undefined;
+  let verumSolana: VerumSolanaAdapter | undefined; let verumTron: VerumTronAdapter | undefined; let verumTronV2: VerumTronV2Adapter | undefined; let tronKeyring: TronDevKeyring | undefined;
   if (o.adapters) o.adapters.forEach(a => adapters.register(a));
   else { local = createLocalAdapters(verifier, now); adapters.register(local.evm).register(local.solana).register(local.bitcoin);
     local.evm.addToken({ contract: LOCAL_TOKENS.usdtEth, symbol: 'USDT', decimals: 6, standard: 'ERC-20', codeHash: LOCAL_CODE_HASHES.usdtEth }).addToken({ contract: LOCAL_TOKENS.usdcEth, symbol: 'USDC', decimals: 6, standard: 'ERC-20', codeHash: LOCAL_CODE_HASHES.usdcEth });
@@ -142,8 +150,25 @@ export async function createApp(config: Config, o: AppOverrides = {}): Promise<A
     }
     if (tronCfg) {
       tronKeyring = config.OTC_ENV === 'prod' ? undefined : new TronDevKeyring(config.identityMasterSecret);
-      verumTron = new VerumTronAdapter(tronCfg, tronKeyring ?? null, dealDeps); adapters.register(verumTron);
-      logger.info({ chainId: tronCfg.chainId, escrow: tronCfg.escrow }, 'modo TRON ativo: escrow VerumOTCEscrowTron real');
+      if (tronCfg.escrowV2) {
+        // Escrow V2 Tron (ADR-v4): cadeiras 2–4 + perna HTLC + TRX nativo — substitui o V1 na rede.
+        // Participante da perna externa (ex.: vendedor de BTC) precisa de endereço Tron para
+        // RECEBER o TRC-20/TRX: resolve pela carteira multichain da cadeira da mesa.
+        const tronAddressOf = o.tronAddressOf ?? (async (dealId: string, role: Role) => {
+          for (const m of Object.values(portalRef?.mesas() ?? {})) {
+            if (m.dealId !== dealId && !(m.dealIds ?? []).includes(dealId)) continue;
+            const w = m.chairs.find(c => c.role === role)?.wallet;
+            if (!w) return null;
+            return (w.addresses ?? []).find(a => /^T[1-9A-HJ-NP-Za-km-z]{33}$/.test(a.address))?.address ?? (/^T[1-9A-HJ-NP-Za-km-z]{33}$/.test(w.address) ? w.address : null);
+          }
+          return null;
+        });
+        verumTronV2 = new VerumTronV2Adapter(tronCfg, tronKeyring ?? null, { ...dealDeps, tronAddressOf }); adapters.register(verumTronV2);
+        logger.info({ chainId: tronCfg.chainId, escrowV2: tronCfg.escrowV2 }, 'modo TRON_V2 ativo: escrow VerumOTCEscrowV2Tron (2–4 cadeiras + HTLC + TRX nativo)');
+      } else {
+        verumTron = new VerumTronAdapter(tronCfg, tronKeyring ?? null, dealDeps); adapters.register(verumTron);
+        logger.info({ chainId: tronCfg.chainId, escrow: tronCfg.escrow }, 'modo TRON ativo: escrow VerumOTCEscrowTron real');
+      }
     }
     // Bitcoin REAL (HTLC P2WSH via Esplora): substitui o simulador regtest quando BITCOIN_* está completo.
     const btcCfg = bitcoinConfig(config);
@@ -165,7 +190,41 @@ export async function createApp(config: Config, o: AppOverrides = {}): Promise<A
       adapters.register(btcReal);
       logger.info({ network: btcCfg.network, esplora: btcCfg.esploraUrl, csvBlocks: btcCfg.csvBlocks }, 'modo BITCOIN ativo: HTLC P2WSH real na rede Bitcoin');
     }
+    // ---- AMBIENTE MAINNET (mesa.environment='mainnet'): adapters PARALELOS aos de testnet. ----
+    // Fail-closed por construção: deals mainnet só resolvem adapters registrados como 'mainnet'
+    // (registry.require(net,'mainnet') lança sem eles) e NUNCA nasce keyring dev aqui — todo passo
+    // on-chain de participante sai da carteira real.
+    if (evmMainCfg) {
+      const evmAddressOf = o.evmAddressOf ?? (async (dealId: string, role: Role) => {
+        for (const m of Object.values(portalRef?.mesas() ?? {})) {
+          if (m.dealId !== dealId && !(m.dealIds ?? []).includes(dealId)) continue;
+          const w = m.chairs.find(c => c.role === role)?.wallet;
+          if (!w) return null;
+          return (w.addresses ?? []).find(a => /^0x[0-9a-fA-F]{40}$/.test(a.address))?.address ?? (/^0x[0-9a-fA-F]{40}$/.test(w.address) ? w.address : null);
+        }
+        return null;
+      });
+      adapters.register(new VerumEvmV2Adapter(evmMainCfg, null, { ...dealDeps, evmAddressOf }), 'mainnet');
+      logger.info({ chainId: 1, escrowV2: evmMainCfg.escrowV2 }, 'modo VERUM_EVM_V2 MAINNET ativo (ambiente por mesa)');
+    }
+    if (btcMainCfg) {
+      const btcAddressOf = o.btcAddressOf ?? (async (dealId: string, role: Role) => {
+        for (const m of Object.values(portalRef?.mesas() ?? {})) {
+          if (m.dealId !== dealId && !(m.dealIds ?? []).includes(dealId)) continue;
+          const w = m.chairs.find(c => c.role === role)?.wallet;
+          if (!w) return null;
+          return (w.addresses ?? []).find(a => a.network === 'bitcoin')?.address ?? (w.network === 'bitcoin' ? w.address : null);
+        }
+        return null;
+      });
+      const btcMain = new BitcoinChainAdapter(btcMainCfg, { ...dealDeps, btcAddressOf });
+      btcMain.now = now;
+      adapters.register(btcMain, 'mainnet');
+      logger.info({ esplora: btcMainCfg.esploraUrl, csvBlocks: btcMainCfg.csvBlocks }, 'modo BITCOIN MAINNET ativo (ambiente por mesa)');
+    }
   }
+  // Injeção de adapters MAINNET para testes (fakes/simuladores) — produção nunca passa por aqui.
+  if (o.mainnetAdapters) for (const a of o.mainnetAdapters) adapters.register(a, 'mainnet');
   const tokens = verumEvmCfg ? { ...LOCAL_TOKENS, usdtEth: verumEvmCfg.tusdt } : LOCAL_TOKENS;
   const registry = defaultRegistry({ ethereum: adapters.require('ethereum').chain.chainId, solana: adapters.require('solana').chain.chainId, bitcoin: adapters.require('bitcoin').chain.chainId }, tokens, LOCAL_CODE_HASHES, { usdtSol: null, usdcSol: null });
   // BTC via Lightning (rota LIGHTNING_SWAP) — ativo nativo da "rede" lightning; entrega pelo nó LN.
@@ -179,8 +238,15 @@ export async function createApp(config: Config, o: AppOverrides = {}): Promise<A
   const tronChainId = adapters.require('tron').chain.chainId;
   const tronUsdt = tronCfg ? tronCfg.tusdt : LOCAL_TOKENS.usdtTron;
   const tronTbtc = tronCfg ? tronCfg.tbtc : LOCAL_TOKENS.btcTron;
-  registry.add({ code: 'USDT', network: 'tron', chainId: tronChainId, contractOrMint: tronUsdt, assetId: `tron:${tronChainId}/trc20:${tronUsdt}`, decimals: 6, tokenStandard: 'TRC-20', issuer: tronCfg ? 'USDT (Nile faucet)' : 'Tether (demo)', status: 'active' });
+  // Rótulo do emissor segue a REDE REAL do adaptador (antes dizia "Nile" fixo mesmo na Shasta).
+  const tronNetLabel = tronCfg ? (/shasta/i.test(tronCfg.fullHost) ? 'Shasta' : /nile/i.test(tronCfg.fullHost) ? 'Nile' : 'Tron') : null;
+  registry.add({ code: 'USDT', network: 'tron', chainId: tronChainId, contractOrMint: tronUsdt, assetId: `tron:${tronChainId}/trc20:${tronUsdt}`, decimals: 6, tokenStandard: 'TRC-20', issuer: tronNetLabel ? `USDT de teste (${tronNetLabel})` : 'Tether (demo)', status: 'active' });
   registry.add({ code: 'BTC', network: 'tron', chainId: tronChainId, contractOrMint: tronTbtc, assetId: `tron:${tronChainId}/trc20:${tronTbtc}`, decimals: 8, tokenStandard: 'TRC-20', issuer: 'Verum tBTC (mock)', status: 'active' });
+  // TRX NATIVO: só quando a liquidação suporta a perna nativa — escrow V2 Tron (sentinela
+  // EIP-7528, callValue no signV2) ou o simulador local. O V1 real é só-token: registrar TRX
+  // com ele ativo criaria deals impossíveis de liquidar.
+  const tronNativeOk = !tronCfg || !!tronCfg.escrowV2;
+  if (tronNativeOk) registry.add({ code: 'TRX', network: 'tron', chainId: tronChainId, contractOrMint: null, assetId: `tron:${tronChainId}/slip44:195`, decimals: 6, tokenStandard: 'native', issuer: 'native', status: 'active' });
   // Mints Solana reais (devnet) quando o modo SOLANA está ativo.
   if (solCfg) {
     const solChainId = adapters.require('solana').chain.chainId;
@@ -191,16 +257,51 @@ export async function createApp(config: Config, o: AppOverrides = {}): Promise<A
     // A carteira embrulha SOL→wSOL antes de depositar e desembrulha na ponta.
     registry.add({ code: 'wSOL', network: 'solana', chainId: solChainId, contractOrMint: WSOL_MINT, assetId: `solana:${solChainId}/token:${WSOL_MINT}`, decimals: 9, tokenStandard: 'SPL', issuer: 'Wrapped SOL (nativo embrulhado)', status: 'active' });
   }
+  // ---- Ativos ETHEREUM/BITCOIN MAINNET (mesa.environment='mainnet'): chainIds distintos dos de
+  // testnet convivem no MESMO registry (keyed por network|chainId|contrato). Par suportado: BTC
+  // nativo ↔ ETH nativo | USDT | USDC | WBTC reais.
+  if (evmMainCfg) {
+    registry.add({ code: 'ETH', network: 'ethereum', chainId: '1', contractOrMint: null, assetId: 'eip155:1/slip44:60', decimals: 18, tokenStandard: 'native', issuer: 'native', status: 'active' });
+    registry.add({ code: 'USDT', network: 'ethereum', chainId: '1', contractOrMint: ETH_MAINNET_TOKENS.USDT.address, assetId: `eip155:1/erc20:${ETH_MAINNET_TOKENS.USDT.address.toLowerCase()}`, decimals: 6, tokenStandard: 'ERC-20', issuer: 'Tether', status: 'active' });
+    registry.add({ code: 'USDC', network: 'ethereum', chainId: '1', contractOrMint: ETH_MAINNET_TOKENS.USDC.address, assetId: `eip155:1/erc20:${ETH_MAINNET_TOKENS.USDC.address.toLowerCase()}`, decimals: 6, tokenStandard: 'ERC-20', issuer: 'Circle', status: 'active' });
+    registry.add({ code: 'WBTC', network: 'ethereum', chainId: '1', contractOrMint: ETH_MAINNET_TOKENS.WBTC.address, assetId: `eip155:1/erc20:${ETH_MAINNET_TOKENS.WBTC.address.toLowerCase()}`, decimals: 8, tokenStandard: 'ERC-20', issuer: 'Wrapped BTC', status: 'active' });
+    registry.add({ code: 'WETH', network: 'ethereum', chainId: '1', contractOrMint: ETH_MAINNET_TOKENS.WETH.address, assetId: `eip155:1/erc20:${ETH_MAINNET_TOKENS.WETH.address.toLowerCase()}`, decimals: 18, tokenStandard: 'ERC-20', issuer: 'Wrapped ETH (nativo embrulhado)', status: 'active' });
+  }
+  if (btcMainCfg) {
+    const btcMainChainId = adapters.require('bitcoin', 'mainnet').chain.chainId;
+    registry.add({ code: 'BTC', network: 'bitcoin', chainId: btcMainChainId, contractOrMint: null, assetId: `bip122:${btcMainChainId}/slip44:0`, decimals: 8, tokenStandard: 'native', issuer: 'native', status: 'active' });
+  }
   // Preços/profundidade dev: assetIds reais das testnets entram na fonte estática.
   const prices: Record<string, number> = { ...LOCAL_PRICES };
+  // Ativos mainnet: os valores abaixo são só SEMENTES do mapa — em runtime o CoinGeckoRefresher os
+  // sobrescreve com o mercado AO VIVO, e sem busca boa a cotação é rejeitada (nunca serve a semente).
+  if (evmMainCfg) { prices['eip155:1/slip44:60'] = 2_418.75; prices[`eip155:1/erc20:${ETH_MAINNET_TOKENS.USDT.address.toLowerCase()}`] = 1.0; prices[`eip155:1/erc20:${ETH_MAINNET_TOKENS.USDC.address.toLowerCase()}`] = 1.0; prices[`eip155:1/erc20:${ETH_MAINNET_TOKENS.WBTC.address.toLowerCase()}`] = 64_230.5; prices[`eip155:1/erc20:${ETH_MAINNET_TOKENS.WETH.address.toLowerCase()}`] = 2_418.75; }
+  if (btcMainCfg) prices[`bip122:${adapters.require('bitcoin', 'mainnet').chain.chainId}/slip44:0`] = 64_230.5;
   if (verumEvmCfg) { prices[`eip155:${verumEvmCfg.chainId}/erc20:${verumEvmCfg.tbtc.toLowerCase()}`] = 64_230.5; prices[`eip155:${verumEvmCfg.chainId}/erc20:${verumEvmCfg.tusdt.toLowerCase()}`] = 1.0002; prices[`eip155:${verumEvmCfg.chainId}/slip44:60`] = 2_418.75; prices[`eip155:${verumEvmCfg.chainId}/erc20:${WETH_SEPOLIA.toLowerCase()}`] = 2_418.75; }
-  prices[`tron:${tronChainId}/trc20:${tronUsdt}`] = 1.0001; prices[`tron:${tronChainId}/trc20:${tronTbtc}`] = 64_230.5;
+  prices[`tron:${tronChainId}/trc20:${tronUsdt}`] = 1.0001; prices[`tron:${tronChainId}/trc20:${tronTbtc}`] = 64_230.5; prices[`tron:${tronChainId}/slip44:195`] = 0.33;
   // BTC nativo na chainId REAL do adapter (testnet/mainnet via BITCOIN_*; o regtest já está em LOCAL_PRICES).
   prices[`bip122:${adapters.require('bitcoin').chain.chainId}/slip44:0`] = 64_230.5;
   prices['lightning:ln/btc'] = 64_230.5; // BTC via Lightning — mesmo preço do BTC nativo
   if (solCfg) { const solChainId = adapters.require('solana').chain.chainId; prices[`solana:${solChainId}/token:${solCfg.tusdtMint}`] = 1.0001; prices[`solana:${solChainId}/token:${solCfg.tbtcMint}`] = 64_230.5; prices[`solana:${solChainId}/token:${WSOL_MINT}`] = 151.2; prices[`solana:${solChainId}/slip44:501`] = 151.2; }
   const depth: Record<string, number> = Object.fromEntries(Object.keys(prices).map(k => [k, 8_000_000]));
-  const priceSources = (o.priceSources as StaticPriceSource[] | undefined) ?? [new StaticPriceSource('Pyth', 1.0, prices), new StaticPriceSource('Chainlink', 1.0, prices), new StaticPriceSource('Coinbase', 0.8, prices), new StaticPriceSource('Kraken', 0.8, prices)];
+  // PREÇO AO VIVO (CoinGecko) nos ativos MAINNET — fundos reais nunca na tabela estática (incidente
+  // op 3: BTC fixado em $64k vs mercado → perna do Comprador ~24% abaixo do justo). Uma busca única
+  // (single-flight, TTL 45s) atualiza o MAPA compartilhado; as 4 fontes servem o mesmo valor (consenso
+  // interno, sem disparar o disjuntor de dispersão) e o carimbo real faz o maxQuoteAgeMs rejeitar
+  // cotação velha → deal mainnet FALHA (fail-closed) se o CoinGecko ficar fora, nunca volta ao estático.
+  const liveIds: Record<string, string> = {};
+  if (btcMainCfg) liveIds[`bip122:${adapters.require('bitcoin', 'mainnet').chain.chainId}/slip44:0`] = 'bitcoin';
+  if (evmMainCfg) {
+    liveIds['eip155:1/slip44:60'] = 'ethereum';
+    liveIds[`eip155:1/erc20:${ETH_MAINNET_TOKENS.WBTC.address.toLowerCase()}`] = 'wrapped-bitcoin';
+    liveIds[`eip155:1/erc20:${ETH_MAINNET_TOKENS.WETH.address.toLowerCase()}`] = 'weth';
+    liveIds[`eip155:1/erc20:${ETH_MAINNET_TOKENS.USDT.address.toLowerCase()}`] = 'tether';
+    liveIds[`eip155:1/erc20:${ETH_MAINNET_TOKENS.USDC.address.toLowerCase()}`] = 'usd-coin';
+  }
+  const cgRefresher = Object.keys(liveIds).length ? new CoinGeckoRefresher(prices, liveIds) : null;
+  const liveSet = new Set(Object.keys(liveIds));
+  const mkPriceSrc = (name: string, w: number): StaticPriceSource => cgRefresher ? new LivePriceSource(name, w, prices, cgRefresher, liveSet) : new StaticPriceSource(name, w, prices);
+  const priceSources = (o.priceSources as StaticPriceSource[] | undefined) ?? [mkPriceSrc('Pyth', 1.0), mkPriceSrc('Chainlink', 1.0), mkPriceSrc('Coinbase', 0.8), mkPriceSrc('Kraken', 0.8)];
   const liquiditySources = (o.liquiditySources as StaticLiquiditySource[] | undefined) ?? [new StaticLiquiditySource('Binance', 1.0, depth), new StaticLiquiditySource('Coinbase', 0.9, depth), new StaticLiquiditySource('Jupiter', 0.7, depth)];
   const price = new PriceEngine(priceSources, undefined, now); const liquidity = new LiquidityEngine(liquiditySources, undefined, now);
   const router = new RouterEngine(adapters); const signature = new SignatureEngine(store, config.OTC_ENV, escrowByChain, now);
@@ -287,7 +388,7 @@ export async function createApp(config: Config, o: AppOverrides = {}): Promise<A
   // nativo — sem WETH no fluxo. BTC sempre teve HTLC nativo próprio. O hook permanece para uma
   // futura rede que exija token na liquidação.
   const nativeWrapOf = (_network: string, _counterpartyNetwork: string | null): { contractOrMint: string; decimals: number } | null => null;
-  const mesa = new MesaService({ portal, store, audit, auth, getDeal: id => store.getDeal(id), baseUrl: `https://${config.APP_DOMAIN}`, now, nativeWrapOf, btcSimulated: () => adapters.get('bitcoin') instanceof LocalChainAdapter });
+  const mesa = new MesaService({ portal, store, audit, auth, getDeal: id => store.getDeal(id), baseUrl: `https://${config.APP_DOMAIN}`, now, nativeWrapOf, btcSimulated: () => adapters.get('bitcoin') instanceof LocalChainAdapter, tronHashlock: () => o.tronHashlock ?? !!verumTronV2 });
   // Web Push "é sua vez": serviço (gracioso se VAPID ausente) + hook real do DealEngine. Procura a
   // mesa do deal, acha a cadeira do papel da vez e dispara a notificação para a inscrição dela.
   // Lightning (rota LIGHTNING_SWAP): nó real quando o grupo LND_* está completo; senão o simulador
@@ -323,21 +424,38 @@ export async function createApp(config: Config, o: AppOverrides = {}): Promise<A
   deals.events.on('deal', (ev: { dealId: string; type: string }) => { if (ev.type === 'turn.deferred') notifyRegister(ev.dealId); });
   // Ativação de token na allowlist on-chain do escrow V2 (ex.: WETH) — só quando o V2 está ativo.
   const escrowAddToken = verumEvmV2 ? ((t: `0x${string}`, d: number, s: string) => verumEvmV2!.addToken(t, d, s)) : undefined;
-  const api = await buildApi({ deals, settlement, price, liquidity, router, registry, adapters, platformFeeBps: config.PLATFORM_FEE_BPS, mesa, lightning, push, escrowAddToken, networkCostUsd: async n => adapters.require(n).estimateCostUsd('settle'), auth, portal, identity, identityDev, rooms, proposals, store, audit, balanceReaders: o.balanceReaders, mesaHtmlPath: config.MESA_HTML_PATH, portalHtmlPath: config.PORTAL_HTML_PATH, conviteHtmlPath: config.CONVITE_HTML_PATH, operacaoHtmlPath: config.OPERACAO_HTML_PATH, env: config.OTC_ENV, demoDeferFunding: config.DEMO_DEFER_FUNDING, rateLimit: { windowMs: 60_000, max: config.OTC_ENV === 'dev' ? 100_000 : 120 }, dev: local ? { solanaChainId: adapters.require('solana').chain.chainId, mint: (a, c, amt) => local!.solana.mint(a, c, amt), demo, ensureOnChain, seed: (network, address, contract, amount) => { const a = adapters.get(network as Network); if (a instanceof LocalChainAdapter) a.mint(address, contract, amount); }, evm: verumEvm && verumEvmKeyring && verumEvmCfg ? { chainId: String(verumEvmCfg.chainId), escrow: verumEvmCfg.escrow, tbtc: verumEvmCfg.tbtc, tusdt: verumEvmCfg.tusdt, explorerBase: verumEvmCfg.explorerBase, keyring: verumEvmKeyring, mintToken: (t, to, amt) => verumEvm!.mintToken(t, to, amt) } : undefined } : undefined });
+  // Operar Indexado: fonte do índice. Motor real quando o grupo VERUM_SWAP_ENGINE_* está completo;
+  // senão, em dev/testnet, um MockIndexProvider in-process (NUNCA em prod — lá fica desligado e a UI
+  // mostra o motivo). Injetável nos testes via AppOverrides.indexProvider.
+  const swapCfg = verumSwapEngineConfig(config);
+  const DEV_INDEX_USD: Record<string, number> = { BTC: 64_230.5, ETH: 3_120.4, SOL: 168.3, USDT: 1, USDC: 1, ZEC: 32.1, XMR: 158.7, WETH: 3_120.4, TBTC: 64_230.5, TUSDT: 1 };
+  const indexProvider: IndexPriceProvider | null = o.indexProvider
+    ?? (swapCfg ? new VerumSwapIndexProvider(swapCfg, fetch, now)
+      : config.OTC_ENV !== 'prod' ? MockIndexProvider.staticUsd(DEV_INDEX_USD, { minProviders: config.VERUM_SWAP_MIN_PROVIDERS, maxDispersionBps: config.VERUM_SWAP_MAX_DISPERSION_BPS }, now)
+      : null);
+  if (swapCfg) logger.info({ minProviders: swapCfg.minProviders }, 'modo Operar Indexado ativo: motor Verum Swap real');
+  const indexedPricing = new IndexedPricingService({ store, audit, provider: indexProvider, now, limits: { spreadBpsMin: config.VERUM_SWAP_SPREAD_BPS_MIN, spreadBpsMax: config.VERUM_SWAP_SPREAD_BPS_MAX, minProviders: config.VERUM_SWAP_MIN_PROVIDERS, maxDispersionBps: config.VERUM_SWAP_MAX_DISPERSION_BPS, maxMoveBps: config.VERUM_SWAP_MAX_MOVE_BPS, fixingTtlSec: config.VERUM_SWAP_FIXING_TTL_SEC, timeoutMs: config.VERUM_SWAP_TIMEOUT_MS } });
+  const api = await buildApi({ deals, settlement, price, liquidity, router, registry, adapters, platformFeeBps: config.PLATFORM_FEE_BPS, mesa, indexedPricing, lightning, push, escrowAddToken, networkCostUsd: async n => adapters.require(n).estimateCostUsd('settle'), auth, portal, identity, identityDev, rooms, proposals, store, audit, balanceReaders: o.balanceReaders, mesaHtmlPath: config.MESA_HTML_PATH, portalHtmlPath: config.PORTAL_HTML_PATH, conviteHtmlPath: config.CONVITE_HTML_PATH, operacaoHtmlPath: config.OPERACAO_HTML_PATH, env: config.OTC_ENV, demoDeferFunding: config.DEMO_DEFER_FUNDING, rateLimit: { windowMs: 60_000, max: config.OTC_ENV === 'dev' ? 100_000 : 120 }, dev: local ? { solanaChainId: adapters.require('solana').chain.chainId, mint: (a, c, amt) => local!.solana.mint(a, c, amt), demo, ensureOnChain, seed: (network, address, contract, amount) => { const a = adapters.get(network as Network); if (a instanceof LocalChainAdapter) a.mint(address, contract, amount); }, evm: verumEvm && verumEvmKeyring && verumEvmCfg ? { chainId: String(verumEvmCfg.chainId), escrow: verumEvmCfg.escrow, tbtc: verumEvmCfg.tbtc, tusdt: verumEvmCfg.tusdt, explorerBase: verumEvmCfg.explorerBase, keyring: verumEvmKeyring, mintToken: (t, to, amt) => verumEvm!.mintToken(t, to, amt) } : undefined } : undefined });
   let timer: NodeJS.Timeout | null = null;
   let ticks = 0;
   const tick = async () => { try { const ids = await deals.expireDue(); if (ids.length) logger.info({ ids }, 'deals expiradas');
     // REEMBOLSO AUTOMÁTICO (auditoria 2026-10-19): deals em REFUNDING com legs PENDING são
     // retentadas pelo keeper — é assim que o refund BTC pós-CSV (~48h) sai SOZINHO quando o
     // timelock vence, sem operador rodar script. Espaçado (~2 min) p/ não spammar RPC/Esplora.
-    if (ticks % 24 === 0) { for (const d of await store.listDeals({ states: ['REFUNDING'] })) { if (!d.refunds.some(r => r.status === 'PENDING')) continue; try { await deals.retryRefunds(d.id); } catch (e) { logger.warn({ dealId: d.id, err: (e as Error).message }, 'retryRefunds agendado falhou'); } } }
+    if (ticks % 24 === 0) { for (const d of await store.listDeals({ states: ['REFUNDING', 'BLOCKED'] })) { if (!d.refunds.some(r => r.status === 'PENDING')) continue; try { await deals.retryRefunds(d.id); } catch (e) { logger.warn({ dealId: d.id, err: (e as Error).message }, 'retryRefunds agendado falhou'); } } }
+    // CURA DE FUNDOS PRESOS (incidente refund BTC 2026-10-22): deal que expirou ANTES do lock BTC
+    // confirmar nunca chegava a REFUNDING (reconciliação de expireNow é one-shot + exige confs).
+    // Relemos o on-chain das EXPIRED com funding exigido e ainda sem reembolso; se o depósito
+    // apareceu, abrimos o reembolso e o retry acima o completa quando o CSV vencer. Espaçado p/ não
+    // martelar o Esplora.
+    if (ticks % 24 === 0) { for (const d of await store.listDeals({ states: ['EXPIRED'] })) { if (!d.refunds.length && d.participants.some(p => p.fundingRequired)) { try { await deals.recoverExpiredFunding(d.id); } catch (e) { logger.warn({ dealId: d.id, err: (e as Error).message }, 'recoverExpiredFunding agendado falhou'); } } } }
     // FRENTE C (auditoria 2026-10-20): deal em LIQUIDITY_VERIFIED com perna HTLC cujo lock BTC JÁ
     // confirmou on-chain abre SOZINHA — sem depender de alguém tocar o endpoint de depósito. O open()
     // detecta o lock (registra o cofre sem tx + lê o Esplora) e segue; se ainda não confirmou, lança
     // FUNDING_REQUIRED e tentamos no próximo ciclo. Espaçado p/ não martelar o Esplora.
     if (ticks % 4 === 0) { for (const d of await store.listDeals({ states: ['LIQUIDITY_VERIFIED'] })) { if (!d.terms?.legs.some(l => l.mode === 'HTLC')) continue; try { await deals.open(d.id, d.createdBy); logger.info({ dealId: d.id }, 'auto-open: lock BTC confirmado'); } catch { /* lock ainda não confirmou — próximo ciclo */ } } }
     if (++ticks % 720 === 0) { const purged = await store.purge(now(), 24 * 3600_000); logger.info(purged, 'retenção'); } metrics.priceBreakerOpen.set(price.breakerState().open ? 1 : 0); for (const s of ['AWAITING_SIGNATURES', 'SETTLING', 'SETTLEMENT_VALIDATION', 'REFUNDING'] as const) metrics.activeDeals.set({ state: s }, (await store.listDeals({ states: [s] })).length); } catch (e) { logger.error({ err: (e as Error).message }, 'scheduler'); } };
-  return { config, store, adapters, local, verumEvm, verumSolana, verumTron, verumEvmKeyring, tronKeyring, registry, price, liquidity, router, signature, risk, audit, deals, settlement, auth, identity, rooms, proposals, mesa, lightning, lightningReal, api, sources: { price: priceSources, liquidity: liquiditySources },
+  return { config, store, adapters, local, verumEvm, verumSolana, verumTron, verumTronV2, verumEvmKeyring, tronKeyring, registry, price, liquidity, router, signature, risk, audit, deals, settlement, auth, identity, rooms, proposals, mesa, indexedPricing, lightning, lightningReal, api, sources: { price: priceSources, liquidity: liquiditySources },
     startScheduler() { if (!timer) timer = setInterval(() => { void tick(); }, config.EXPIRY_SCAN_MS); }, stopScheduler() { if (timer) clearInterval(timer); timer = null; },
     async close() { if (timer) clearInterval(timer); timer = null; await api.close(); await store.close(); } };
 }
