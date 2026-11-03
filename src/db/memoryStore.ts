@@ -51,6 +51,7 @@ export class MemoryStore implements Store {
   }
   async getMesaInvite(inviteId: string): Promise<MesaInviteRow | null> { const r = this.mesaInvites.get(inviteId); return r ? { ...r } : null; }
   async listMesaInvites(mesaId: string): Promise<MesaInviteRow[]> { return [...this.mesaInvites.values()].filter(i => i.mesaId === mesaId).sort((a, b) => a.createdAt - b.createdAt).map(i => ({ ...i })); }
+  async findPendingMesaInvitesByPrefix(prefix: string): Promise<MesaInviteRow[]> { return [...this.mesaInvites.values()].filter(i => i.codePrefix === prefix && i.status === 'PENDING').sort((a, b) => a.createdAt - b.createdAt).map(i => ({ ...i })); }
   async consumeMesaInvite(inviteId: string, usedBy: { address: string; name: string }, at: number): Promise<boolean> {
     const r = this.mesaInvites.get(inviteId);
     if (!r || r.status !== 'PENDING' || r.expiresAt <= at) return false;

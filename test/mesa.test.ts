@@ -144,6 +144,25 @@ describe('MesaService — criação e convites', () => {
     const inv = await ctx.svc.createChairInvite(ctx.token, mesa.mesaId, mesa.chairs[0]!.chairId);
     expect(inv.expiresAt).toBe(ctx.clock.now() + INVITE_TTL_MS);
   });
+
+  it('resolveInviteByCode: localiza o convite só pelo código (normalizado); erro genérico p/ código errado, expirado ou usado', async () => {
+    const mesa = ctx.svc.createMesa(ctx.token, MESA_INPUT);
+    const inv = await ctx.svc.createChairInvite(ctx.token, mesa.mesaId, mesa.chairs[0]!.chairId);
+    // código exato, minúsculo e sem hífen resolvem para o mesmo convite
+    expect(await ctx.svc.resolveInviteByCode(inv.code)).toMatchObject({ inviteId: inv.inviteId });
+    expect(await ctx.svc.resolveInviteByCode(inv.code.toLowerCase().replace('-', ''))).toMatchObject({ inviteId: inv.inviteId });
+    // código com mesmo PREFIXO mas resto errado não resolve (confirmação é pelo hash)
+    const wrong = `${inv.code.slice(0, 4)}-${inv.code.slice(5) === 'AAAA' ? 'BBBB' : 'AAAA'}`;
+    await expect(ctx.svc.resolveInviteByCode(wrong)).rejects.toMatchObject({ code: 'INVALID_INPUT' });
+    await expect(ctx.svc.resolveInviteByCode('XX')).rejects.toMatchObject({ code: 'INVALID_INPUT' });
+    // convite USADO deixa de resolver
+    await joinAs(ctx, inv.inviteId, inv.code, 'Gabriel');
+    await expect(ctx.svc.resolveInviteByCode(inv.code)).rejects.toMatchObject({ code: 'INVALID_INPUT' });
+    // convite EXPIRADO deixa de resolver
+    const inv2 = await ctx.svc.createChairInvite(ctx.token, mesa.mesaId, mesa.chairs[1]!.chairId);
+    ctx.clock.advance(INVITE_TTL_MS + 1);
+    await expect(ctx.svc.resolveInviteByCode(inv2.code)).rejects.toMatchObject({ code: 'INVALID_INPUT' });
+  });
 });
 
 describe('MesaService — conexão com prova de posse', () => {

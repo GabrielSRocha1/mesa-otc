@@ -1523,6 +1523,13 @@ export async function buildApi(deps: ApiDeps): Promise<FastifyInstance> {
     const q = parse(z.object({ c: z.string().max(20).optional() }), req.query ?? {});
     return deps.mesa.resolveInvite(inviteId, q.c);
   });
+  // Página "Entrar com Código" do dashboard: localiza o convite só pelo código XXXX-XXXX
+  // (o link completo contém o inviteId; quem recebeu apenas o código entra por aqui).
+  app.post('/v1/mesa-invites/resolve-code', async (req, reply) => {
+    const b = parse(z.object({ code: z.string().min(4).max(20) }), req.body);
+    const r = await deps.mesa.resolveInviteByCode(b.code);
+    void reply.code(201); return r;
+  });
   // Validação com LOG (warn): os campos reprovados aparecem no runtime log — era impossível
   // diagnosticar o "Entrada inválida" do convite sem acesso ao f12 do usuário.
   const parseInvite = <T>(route: string, schema: z.ZodType<T>, v: unknown): T => {

@@ -317,6 +317,24 @@ export class MesaService {
     return { mesaId: mesa.mesaId, mesaCode: mesa.code, role: chair.role, roleLabel: CHAIR_ROLE_LABEL[chair.role], asset: chair.expectedAsset.symbol, network: mesa.network, networkLabel: getChain(mesa.network)?.displayName ?? mesa.network, status, expiresAt: invite.expiresAt, serverTime: now, codeValid };
   }
 
+  /** Localiza um convite PENDING só pelo código XXXX-XXXX (página "Entrar com Código" do dashboard).
+   *  O banco guarda apenas hash + prefixo: filtra candidatos pelo prefixo e confirma pelo hash
+   *  (inviteId + código). Resposta de erro é GENÉRICA — não revela se o prefixo existe. */
+  async resolveInviteByCode(code: string): Promise<{ inviteId: string; code: string }> {
+    const norm = normalizeCode(code);
+    if (norm.length !== 8) throw new DomainError('INVALID_INPUT', 'Convite inválido ou expirado.');
+    const now = this.now();
+    for (const inv of await this.d.store.findPendingMesaInvitesByPrefix(norm.slice(0, 4))) {
+      if (inv.expiresAt <= now) continue;
+      if (!hashesEqual(codeHashOf(inv.inviteId, norm), inv.codeHash)) continue;
+      const mesa = this.d.portal.mesas()[inv.mesaId];
+      if (!mesa || mesa.cancelled || (mesa.expiresAt != null && now >= mesa.expiresAt)) continue;
+      void this.audit('mesa.convite.resolvido-por-codigo', 'public', { mesaId: inv.mesaId, inviteId: inv.inviteId });
+      return { inviteId: inv.inviteId, code: norm };
+    }
+    throw new DomainError('INVALID_INPUT', 'Convite inválido ou expirado.');
+  }
+
   /** Challenge de entrada — texto exibido INTEGRALMENTE ao usuário e assinado pela Verum Wallet. */
   async joinChallenge(inviteId: string, input: { code: string; firstName: string; network: AuthNetwork; address: string }): Promise<{ message: string; nonce: string; expiresAt: number }> {
     const { invite, mesa, chair } = await this.inviteOrThrow(inviteId);

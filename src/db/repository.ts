@@ -50,6 +50,8 @@ export interface Store {
   insertMesaInvite(r: MesaInviteRow): Promise<void>;
   getMesaInvite(inviteId: string): Promise<MesaInviteRow | null>;
   listMesaInvites(mesaId: string): Promise<MesaInviteRow[]>;
+  /** Convites PENDING cujo code_prefix bate — candidatos para resolver "entrar só com o código". */
+  findPendingMesaInvitesByPrefix(prefix: string): Promise<MesaInviteRow[]>;
   /** Consumo ATÔMICO: UPDATE … WHERE status='PENDING' AND expires_at > now RETURNING — exatamente uma tentativa vence. */
   consumeMesaInvite(inviteId: string, usedBy: { address: string; name: string }, at: number): Promise<boolean>;
   /** Revoga um convite ainda pendente (ação administrativa explícita). */

@@ -715,6 +715,7 @@ window.addEventListener('unhandledrejection',function(e){try{console.warn('[veru
       <a href="#" class="active" data-view="carteiras"><svg viewBox="0 0 24 24"><rect x="4" y="4" width="16" height="16" rx="2"/><path d="M8 9h8M8 13h5"/></svg>Operações</a>
       <a href="#" data-view="mesa"><svg viewBox="0 0 24 24"><rect x="3" y="6" width="18" height="13" rx="2"/><path d="M16 12h2M3 10h18"/></svg>Mesa</a>
       <a href="#" data-view="indexado"><svg viewBox="0 0 24 24"><path d="M3 17l6-6 4 4 7-7M14 8h6v6"/></svg>Operar Indexado</a>
+      <a href="#" data-view="entrar-codigo"><svg viewBox="0 0 24 24"><circle cx="8" cy="15" r="4"/><path d="M11 12L21 2M16 7l3 3"/></svg>Entrar com Código</a>
       <a href="#" data-view="seguranca"><svg viewBox="0 0 24 24"><path d="M12 3l7 3v5c0 5-3 8-7 10-4-2-7-5-7-10V6z"/><path d="M9 12l2 2 4-4"/></svg>Segurança</a>
       <a href="#" data-view="config"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3.2"/><path d="M19 12a7 7 0 00-.1-1.3l2-1.5-2-3.4-2.3 1a7 7 0 00-2.2-1.3L14 3h-4l-.4 2.5a7 7 0 00-2.2 1.3l-2.3-1-2 3.4 2 1.5A7 7 0 005 12c0 .4 0 .9.1 1.3l-2 1.5 2 3.4 2.3-1a7 7 0 002.2 1.3L10 21h4l.4-2.5a7 7 0 002.2-1.3l2.3 1 2-3.4-2-1.5c.1-.4.1-.9.1-1.3z"/></svg>Configurações</a>
     </nav>
@@ -1223,6 +1224,22 @@ window.addEventListener('unhandledrejection',function(e){try{console.warn('[veru
           <div class="form-row"><div class="fl">Comissão padrão (%)</div><input class="inp" id="cfgCommission" type="number" min="0" max="100" step="0.1" inputmode="decimal" value="10,00"></div>
           <div class="form-row"><div class="fl">Slippage máximo (%)</div><input class="inp" id="cfgSlippage" type="number" min="0.01" max="10" step="0.01" inputmode="decimal" value="0,50"></div>
           <div class="form-row"><div><div class="fl">Notificações por e-mail</div><div class="fh">Resumo diário de operações</div></div><button class="sw on" data-toggle data-setting="emailNotifs"></button></div>
+        </section>
+      </div>
+    </section>
+
+    <!-- ===================== VIEW: ENTRAR COM CÓDIGO ===================== -->
+    <section class="view" id="view-entrar-codigo">
+      <div class="page-head">
+        <div><h1>Entrar com Código</h1><p>Recebeu um convite para uma mesa? Informe o código (XXXX-XXXX) ou cole o link completo do convite.</p></div>
+      </div>
+      <div class="grid" style="grid-template-columns:1fr">
+        <section class="card" style="max-width:560px">
+          <div class="card-h"><div class="t">Código do convite</div></div>
+          <div class="form-row"><div class="fl">Código ou link</div><input class="inp" id="ecCode" placeholder="ABCD-2345 ou https://…/otc/convite/…" autocomplete="off" spellcheck="false"></div>
+          <button class="btn btn-primary btn-block" id="ecGo" type="button" style="margin-top:12px;height:48px">Entrar na mesa</button>
+          <div id="ecMsg" style="margin-top:10px;font-size:13px;color:var(--ink-2)"></div>
+          <p style="margin-top:12px;font-size:12.5px;color:var(--ink-3)">Você será redirecionado para a página do convite, onde conecta sua Verum Wallet e confirma a entrada na mesa.</p>
         </section>
       </div>
     </section>
@@ -4738,6 +4755,37 @@ window.addEventListener('unhandledrejection',function(e){try{console.warn('[veru
     pEnsureInsideWallet().then(ok=>{ if(ok) pReentry(); });
     return;
   }
+  /* ---------- Entrar com Código: resolve o convite (código XXXX-XXXX ou link colado) e
+     redireciona para o fluxo de convite existente (/otc/convite/<id>?c=<código>). ---------- */
+  (function(){
+    const inp=$('#ecCode'), btn=$('#ecGo'), msg=$('#ecMsg');
+    if(!inp||!btn) return;
+    function setMsg(t,err){ if(msg){ msg.textContent=t||''; msg.style.color=err?'#ef4444':'var(--ink-2)'; } }
+    // Link completo colado: extrai inviteId do path e o código do ?c= (mesmo parse do verum-convite).
+    function parseLink(v){ const m=v.match(/\/otc\/convite\/([^/?#]+)/); if(!m) return null; let c=''; try{ const qi=v.indexOf('?'); if(qi>=0) c=(new URLSearchParams(v.slice(qi))).get('c')||''; }catch(e){} return { inviteId:decodeURIComponent(m[1]), code:c }; }
+    function goInvite(inviteId,code){ window.location.href='/otc/convite/'+encodeURIComponent(inviteId)+(code?'?c='+encodeURIComponent(code):''); }
+    async function enter(){
+      const v=(inp.value||'').trim();
+      if(!v){ setMsg('Informe o código do convite ou cole o link completo.',true); return; }
+      const link=parseLink(v);
+      if(link){ setMsg('Redirecionando…'); goInvite(link.inviteId,link.code); return; }
+      btn.disabled=true; setMsg('Verificando código…');
+      try{
+        const res=await fetch(API+'/v1/mesa-invites/resolve-code',{method:'POST',headers:{'accept':'application/json','content-type':'application/json'},body:JSON.stringify({code:v})});
+        let j=null; try{ j=await res.json(); }catch(e){}
+        if(!res.ok||!j||!j.inviteId){ setMsg((j&&j.message)||'Código inválido ou expirado.',true); return; }
+        setMsg('Convite encontrado. Redirecionando…');
+        goInvite(j.inviteId,j.code||v);
+      }catch(e){ setMsg('Falha de rede ao verificar o código. Tente novamente.',true); }
+      finally{ btn.disabled=false; }
+    }
+    btn.addEventListener('click',enter);
+    inp.addEventListener('keydown',e=>{ if(e.key==='Enter'){ e.preventDefault(); enter(); } });
+    // Deep-link: /mesa#view=entrar-codigo (botão "Mesa OTC" da Verum Wallet) cai direto nesta view.
+    // setTimeout(0) roda DEPOIS do init síncrono (que chama showView('carteiras')).
+    try{ if(/[#&]view=entrar-codigo/.test(location.hash)) setTimeout(()=>{ try{ showView('entrar-codigo'); }catch(e){} },0); }catch(e){}
+  })();
+
   opInit();
   cfgInit();
   loadNetCatalog();
