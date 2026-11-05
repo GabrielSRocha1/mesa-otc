@@ -6,9 +6,10 @@
  * (DEPLOYER_PK → TKpUibh1…, o owner TRON); owner/guardian = deployer; attestor = TRON_ATTESTOR_KEY
  * do .env; treasury = PLATFORM_TREASURY.tron.
  *
- * ⚠️ CUSTO: ~24,5 KB de bytecode ≈ 2.000–2.500 TRX queimados sem energia staked. Na Shasta, pegue
- * TRX no faucet (https://shasta.tronex.io) para o deployer ANTES de rodar. O script aborta se o
- * saldo < 2.600 TRX.
+ * CUSTO MEDIDO (deploy 2026-11-05, Shasta): lib + escrow ≈ 255 TRX no total — bem abaixo do pior
+ * caso teórico. Faucet: https://shasta.tronex.io (2.000 TRX/dia). Gate de saldo: 400 TRX.
+ * ⚠️ O ABI do forge traz enums como "VerumOTCEscrowBase.Role" que o TronWeb rejeita — o
+ * sanitizeAbi abaixo os troca por uint8 (enum = uint8 no ABI canônico).
  *
  * Depois do deploy: atualizar no .env → TRON_ESCROW_V2_ADDRESS=<novo> e TRON_TERMS_VERSION=3.
  *
@@ -37,11 +38,13 @@ console.log(`deployer/owner ${deployer} · attestor ${attestorB58} · treasury $
 
 const bal = await tw.trx.getBalance(deployer);
 console.log(`saldo ${bal / 1e6} TRX`);
-if (bal < 2_600_000_000) { console.error('precisa de ≥2.600 TRX na Shasta (faucet: https://shasta.tronex.io) — deploy do escrow queima ~2.000–2.500 TRX sem energia staked'); process.exit(1); }
+if (bal < 400_000_000) { console.error('precisa de ≥400 TRX na Shasta (faucet: https://shasta.tronex.io) — deploy medido em ~255 TRX'); process.exit(1); }
 
+/** Enums do forge ("VerumOTCEscrowBase.Role") → uint8 (o TronWeb rejeita tipos com ponto). */
+const sanitizeAbi = (abi: unknown[]): unknown[] => JSON.parse(JSON.stringify(abi), (k, v) => k === 'type' && typeof v === 'string' && v.includes('.') ? 'uint8' : v) as unknown[];
 const artifact = (rel: string): { abi: unknown[]; bytecode: string } => {
   const j = JSON.parse(readFileSync(`${OUT}/${rel}`, 'utf8')) as { abi: unknown[]; bytecode: { object: string } };
-  return { abi: j.abi, bytecode: j.bytecode.object.replace(/^0x/, '') };
+  return { abi: sanitizeAbi(j.abi), bytecode: j.bytecode.object.replace(/^0x/, '') };
 };
 
 const deploy = async (label: string, abi: unknown[], bytecode: string, parameters: unknown[]): Promise<string> => {
