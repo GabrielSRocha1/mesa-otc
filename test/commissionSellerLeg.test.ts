@@ -8,6 +8,8 @@
 import { describe, it, expect } from 'vitest';
 import { PriceEngine, StaticPriceSource, DEFAULT_PRICE_CONFIG } from '../src/engines/price.js';
 import { buildVerumTermsV2 } from '../src/adapters/verum/evmV2.js';
+import { buildVerumTermsV2Tron } from '../src/adapters/verum/tronV2.js';
+import { testSigning } from '../src/engines/signature.js';
 import { commissionInSellerAsset } from '../src/onchain/core/fee.js';
 import type { DealCommitment } from '../src/adapters/types.js';
 import type { CanonicalAsset } from '../src/domain/types.js';
@@ -96,6 +98,27 @@ describe('buildVerumTermsV2 — comprador externo (BTC)', () => {
     expect(t.termsVersion).toBe(2);
     expect(t.commissionPm1).toBe(0n);
     expect(t.commissionPm2).toBe(0n);
+  });
+
+  it('Tron v3: comprador externo ⇒ comissão em sellerAsset; v2 legado ⇒ zerada', () => {
+    const roles = ['SELLER', 'PAYMASTER_1', 'BUYER'];
+    const participants = roles.map(role => ({ role, network: 'tron', chainId: '2494104990', keyScheme: 'secp256k1', address: testSigning.tron().address }));
+    const c = {
+      dealId: 'OTC-v3-tron', revision: 1, dealHash: 'h', expiresAt: Date.now() + 2400_000, participants,
+      legs: [
+        { index: 0, from: 'SELLER', to: 'BUYER', escrowChain: 'tron', escrowContract: 'T...', mode: 'ESCROW_NN', amountBase: '1000000000', asset: { network: 'tron', chainId: '2494104990', contractOrMint: 'TMc2iDSmxK7QzoSzQ3R6qWrfaBhS884tuD', code: 'tUSDT', decimals: 6, tokenStandard: 'trc20', assetId: 'x' } },
+        { index: 1, from: 'BUYER', to: 'SELLER', escrowChain: 'bitcoin', escrowContract: 'bc1...', mode: 'HTLC', amountBase: '75000000', asset: asset('bitcoin', null) },
+      ],
+      pricingHash: '', routeHash: '', domainHash: '', dealNonce: 'n1', feeBps: 3, treasury: 'T' + '9'.repeat(33),
+      htlcHash,
+      terms: { pricing: { commissionBps: 200, discountBps: 300, maxSlippageBps: 50, commissionSplitBps: [150, 50], commissionLeg: 'SELLER' } },
+    } as unknown as DealCommitment;
+    const v3 = buildVerumTermsV2Tron(c, 1_800_000_000, null, 3).terms;
+    expect(v3.termsVersion).toBe(3);
+    expect(v3.commissionPm1 + v3.commissionPm2).toBe(19_400_000n); // 1e9 × 0,97 × 2%
+    const v2 = buildVerumTermsV2Tron(c, 1_800_000_000, null).terms;
+    expect(v2.termsVersion).toBe(2);
+    expect(v2.commissionPm1 + v2.commissionPm2).toBe(0n);
   });
 
   it('termsVersion 3 same-chain: comissão segue em buyerAsset (regra atual intacta)', () => {

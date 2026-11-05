@@ -77,6 +77,8 @@ const Schema = z.object({
   TRON_TUSDT: z.string().regex(/^T[1-9A-HJ-NP-Za-km-z]{33}$/).optional(),
   TRON_TBTC: z.string().regex(/^T[1-9A-HJ-NP-Za-km-z]{33}$/).optional(),
   TRON_CONFIRMATIONS: z.coerce.number().int().min(1).max(64).default(19),
+  /** Idem VERUM_EVM_V2_TERMS_VERSION, para o escrow V2 Tron (subir p/ 3 junto com o endereço novo). */
+  TRON_TERMS_VERSION: z.coerce.number().int().min(2).max(3).default(2),
   // Bitcoin nativo (HTLC P2WSH real via Esplora — blockstream/mempool/regtest local).
   // Força o SIMULADOR de Bitcoin mesmo com o grupo BITCOIN_* completo — preview/teste do fluxo
   // de usuário com blocos instantâneos sem mexer nas envs reais herdadas da produção.
@@ -254,10 +256,10 @@ export function verumSwapEngineConfig(c: Config): VerumSwapSettings | null {
 }
 
 /** Escrow canônico Verum — Tron (Nile). null = grupo ausente. */
-export interface TronSettings { fullHost: string; chainId: number; escrow: string; escrowV2?: string; executorKey: string; attestorKey: `0x${string}`; tusdt: string; tbtc: string; confirmations: number }
+export interface TronSettings { fullHost: string; chainId: number; escrow: string; escrowV2?: string; executorKey: string; attestorKey: `0x${string}`; tusdt: string; tbtc: string; confirmations: number; /** TERMS_VERSION_V2 do escrow Tron configurado (2 = legado; 3 = comissão na perna on-chain). */ termsVersionV2: number }
 export function tronConfig(c: Config): TronSettings | null {
   if (!c.TRON_FULL_HOST || !c.TRON_CHAIN_ID || !c.TRON_ESCROW_ADDRESS || !c.TRON_EXECUTOR_KEY || !c.TRON_ATTESTOR_KEY || !c.TRON_TUSDT || !c.TRON_TBTC) return null;
   const hex = (k: string) => (k.startsWith('0x') ? k : '0x' + k) as `0x${string}`;
-  return { fullHost: c.TRON_FULL_HOST, chainId: Number(c.TRON_CHAIN_ID), escrow: c.TRON_ESCROW_ADDRESS, escrowV2: c.TRON_ESCROW_V2_ADDRESS, executorKey: c.TRON_EXECUTOR_KEY.replace(/^0x/, ''), attestorKey: hex(c.TRON_ATTESTOR_KEY), tusdt: c.TRON_TUSDT, tbtc: c.TRON_TBTC, confirmations: c.TRON_CONFIRMATIONS };
+  return { fullHost: c.TRON_FULL_HOST, chainId: Number(c.TRON_CHAIN_ID), escrow: c.TRON_ESCROW_ADDRESS, escrowV2: c.TRON_ESCROW_V2_ADDRESS, executorKey: c.TRON_EXECUTOR_KEY.replace(/^0x/, ''), attestorKey: hex(c.TRON_ATTESTOR_KEY), tusdt: c.TRON_TUSDT, tbtc: c.TRON_TBTC, confirmations: c.TRON_CONFIRMATIONS, termsVersionV2: c.TRON_TERMS_VERSION };
 }
 

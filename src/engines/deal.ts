@@ -196,8 +196,9 @@ export class DealEngine {
       // deriveSettlementPlan); escrow legado/Tron/Solana seguem no modo atual (comissão zerada lá).
       const buyerExternal = (dr.assetOut.network === 'bitcoin' && !dr.assetOut.contractOrMint)
         || (dr.assetIn.network === 'ethereum' && dr.assetOut.network === 'solana');
-      const commissionLeg: 'BUYER' | 'SELLER' = buyerExternal && dr.assetIn.network === 'ethereum'
-        && this.d.adapters.get('ethereum', this.envOf(deal))?.capabilities().commissionOnSellerLeg ? 'SELLER' : 'BUYER';
+      // A capability da rede do VENDEDOR decide (EVM/Tron com escrow v3 anunciam; legados não).
+      const commissionLeg: 'BUYER' | 'SELLER' = buyerExternal
+        && this.d.adapters.get(dr.assetIn.network, this.envOf(deal))?.capabilities().commissionOnSellerLeg ? 'SELLER' : 'BUYER';
       if (deal.state === 'WALLETS_CONNECTED') {
         for (const a of [dr.assetIn, dr.assetOut]) { this.d.registry.resolve(a); await this.d.registry.verifyOnChain(a, this.d.adapters, this.envOf(deal)); }
         const seller = deal.participants.find(p => p.role === 'SELLER') as Participant; const bal = await this.d.adapters.require(dr.assetIn.network, this.envOf(deal)).getBalance(seller.address, dr.assetIn);

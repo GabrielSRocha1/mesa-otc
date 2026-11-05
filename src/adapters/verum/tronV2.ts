@@ -18,6 +18,7 @@ import { NATIVE_ASSET_EVM } from '../../onchain/core/index.js';
 import { signApprovalEvm, signWalletAttestationEvm, computeTradeIdEvm, evmDomain, evmToTronAddress, APPROVAL_TYPES } from '../../onchain/crypto/index.js';
 import { tronAddrToHex20 } from '../../onchain/router/adapters/tron.js';
 import { commissionAmountOf } from '../../engines/signature.js';
+import { commissionInSellerAsset } from '../../onchain/core/fee.js';
 import ESCROW_V2_ABI from '../../onchain/router/abi/verumOtcEscrowV2.js';
 import type { AdapterCapabilities, ApprovalSignature, AssetVerification, DealCommitment, OnChainDealState, OnChainDealStatus, ParticipantStepProvider, RegisterResult, SettlementAdapter, TxRef, TxStatus } from '../types.js';
 import { deriveNonce, ROLE_TO_ONCHAIN, bindingOf, type VerumAdapterDeps, type VerumMeta } from './common.js';
@@ -74,7 +75,7 @@ const isTronB58 = (a: string): boolean => /^T[1-9A-HJ-NP-Za-km-z]{33}$/.test(a);
 
 /** TermsV2 on-chain (hex20) a partir do commitment. `externalTron`: endereço Tron do papel da
  *  perna externa (ex.: vendedor de BTC) — é onde o contrato paga o TRC-20/TRX no settle. */
-export function buildVerumTermsV2Tron(c: DealCommitment, chainNow: number, externalTron?: string | null): { terms: TermsV2Call; b58ByHex: Map<string, string> } {
+export function buildVerumTermsV2Tron(c: DealCommitment, chainNow: number, externalTron?: string | null, termsVersion = 2): { terms: TermsV2Call; b58ByHex: Map<string, string> } {
   const map = tronLegMapOf(c);
   const order: Role[] = ['SELLER', 'PAYMASTER_1', 'PAYMASTER_2', 'BUYER'];
   const present = order.map(r => c.participants.find(p => p.role === r)).filter(Boolean) as DealCommitment['participants'];
@@ -97,10 +98,14 @@ export function buildVerumTermsV2Tron(c: DealCommitment, chainNow: number, exter
   const commissionBps = clamp(c.terms.pricing.commissionBps);
   const buyerBase = BigInt((buyerLeg ?? externalLeg)?.amountBase ?? '0');
   const hasPm1 = present.some(p => p.role === 'PAYMASTER_1');
-  // Tron segue no contrato v2: comprador EXTERNO ⇒ comissão ZERADA (o contrato reverte > 0 nesse
-  // modo). A regra v3 "comissão na perna do Vendedor" (ver evmV2.ts) entra aqui quando o escrow
-  // Tron for redeployado com TERMS_VERSION_V2 = 3 — follow-up da Fase 6 do épico.
-  const cTotal = (map.externalSide === 'BUYER' || !hasPm1) ? 0n : commissionAmountOf(buyerBase, clamp(c.terms.pricing.discountBps), commissionBps);
+  // Comissão na perna que a CUSTODIA (mesma regra do evmV2.ts): comprador on-chain ⇒ buyerAsset;
+  // comprador EXTERNO + escrow v3 ⇒ sellerAsset (Vendedor deposita junto de principal + fee);
+  // comprador EXTERNO + escrow v2 legado ⇒ zerada (o contrato v2 reverte > 0 nesse modo).
+  const sellerBase = BigInt((sellerLeg ?? externalLeg)?.amountBase ?? '0');
+  const cTotal = !hasPm1 ? 0n
+    : map.externalSide === 'BUYER'
+      ? (termsVersion >= 3 ? commissionInSellerAsset(sellerBase, clamp(c.terms.pricing.discountBps), commissionBps) : 0n)
+      : commissionAmountOf(buyerBase, clamp(c.terms.pricing.discountBps), commissionBps);
   const split = c.terms.pricing.commissionSplitBps ?? [];
   const pm2Bps = split[1] ?? 0;
   const commissionPm2 = commissionBps > 0 ? cTotal * BigInt(clamp(pm2Bps)) / BigInt(commissionBps) : 0n;
@@ -114,7 +119,7 @@ export function buildVerumTermsV2Tron(c: DealCommitment, chainNow: number, exter
     buyerAsset: assetOf(buyerLeg),
     buyerAmount: buyerBase,
     platformFeeBps: c.feeBps, commissionBps, discountBps: clamp(c.terms.pricing.discountBps), slippageBps: clamp(c.terms.pricing.maxSlippageBps),
-    createdAt: BigInt(chainNow), expiresAt: BigInt(chainNow + 2400), termsVersion: 2,
+    createdAt: BigInt(chainNow), expiresAt: BigInt(chainNow + 2400), termsVersion,
     nonce: deriveNonce(c.dealId, c.revision, c.dealNonce),
     htlcHash: map.external ? ('0x' + c.htlcHash) as Hex : ZERO32,
     commissionPm1, commissionPm2,
@@ -223,16 +228,21 @@ export class VerumTronV2Adapter implements SettlementAdapter, ParticipantStepPro
     if (!b) throw new DomainError('SETTLEMENT_NOT_ALLOWED', `deal ${dealId} sem registro on-chain (meta ausente)`);
     return b as never;
   }
-  /** callValue (SUN) exigido no signV2 do papel: perna TRX NATIVA do depositante. */
+  /** callValue (SUN) exigido no signV2 do papel: perna TRX NATIVA do depositante.
+   *  v3: comprador EXTERNO (buyerAsset = 0x0) ⇒ comissões entram no depósito do VENDEDOR
+   *  (no escrow v2 legado elas são 0 nos termos — soma inócua). */
   private signValueOf(role: OnchainRole, t: RawTradeV2Tron): bigint {
-    if (role === OnchainRole.SELLER && !t.sellerExternal && isNativeAsset(t.sellerAsset)) return t.sellerAmount + t.feeAmount;
+    const buyerExternal = t.buyerAsset === ZERO20;
+    if (role === OnchainRole.SELLER && !t.sellerExternal && isNativeAsset(t.sellerAsset)) {
+      return t.sellerAmount + t.feeAmount + (buyerExternal ? t.commissionPm1 + t.commissionPm2 : 0n);
+    }
     if (role === OnchainRole.BUYER && isNativeAsset(t.buyerAsset)) return t.buyerAmount + t.commissionPm1 + t.commissionPm2 + (t.sellerExternal ? t.feeAmount : 0n);
     return 0n;
   }
   /** base58 da carteira hex20 nos termos — conversão PURA (base58check de 0x41‖hex20). */
   private b58Of(hex20: string): string { return evmToTronAddress(hex20 as Hex); }
 
-  capabilities(): AdapterCapabilities { return { escrowNN: true, htlc: false, verifiableSigSchemes: ['secp256k1'], finalityConfirmations: this.cfg.confirmations, nativeCode: 'TRX' }; }
+  capabilities(): AdapterCapabilities { return { escrowNN: true, htlc: false, verifiableSigSchemes: ['secp256k1'], finalityConfirmations: this.cfg.confirmations, nativeCode: 'TRX', commissionOnSellerLeg: this.cfg.termsVersionV2 >= 3 }; }
   escrowAddress(): string { return this.escrowV2; }
   validateAddress(address: string): boolean { return isTronB58(address); }
   async estimateCostUsd(op: 'deposit' | 'register' | 'settle' | 'refund'): Promise<string> { return op === 'settle' ? '2.80' : '1.40'; }
@@ -281,7 +291,7 @@ export class VerumTronV2Adapter implements SettlementAdapter, ParticipantStepPro
       const extRole = map.externalSide === 'BUYER' ? 'BUYER' as const : 'SELLER' as const;
       const extPart = c.participants.find(pp => pp.role === extRole);
       const externalTron = extPart && isTronB58(extPart.address) ? extPart.address : await this.deps.tronAddressOf?.(c.dealId, extRole) ?? null;
-      const { terms, b58ByHex } = buildVerumTermsV2Tron(c, now, externalTron);
+      const { terms, b58ByHex } = buildVerumTermsV2Tron(c, now, externalTron, this.cfg.termsVersionV2);
       await this.assertAssetsAcceptable(terms);
       // Hash pelo PRÓPRIO contrato (pure) — zero divergência de EIP-712 off-chain.
       const esc = await this.escrowWith(await this.twExecutor());
@@ -339,7 +349,11 @@ export class VerumTronV2Adapter implements SettlementAdapter, ParticipantStepPro
       const ownerHex = isSellerLeg ? t.seller : t.buyer;
       const ownerB58 = this.b58Of(ownerHex);
       const token = isSellerLeg ? t.sellerAsset : t.buyerAsset;
-      const base = isSellerLeg ? t.sellerAmount : t.buyerAmount + t.commissionPm1 + t.commissionPm2;
+      // v3: comprador EXTERNO ⇒ comissões no depósito do Vendedor (0 nos termos do v2 legado).
+      const buyerExternal = t.buyerAsset === ZERO20;
+      const base = isSellerLeg
+        ? t.sellerAmount + (buyerExternal ? t.commissionPm1 + t.commissionPm2 : 0n)
+        : t.buyerAmount + t.commissionPm1 + t.commissionPm2;
       const paysFee = isSellerLeg ? !t.sellerExternal : t.sellerExternal;
       const due = base + (paysFee ? t.feeAmount : 0n);
       const tw = await this.twExecutor();
@@ -472,7 +486,10 @@ export class VerumTronV2Adapter implements SettlementAdapter, ParticipantStepPro
     if ((onRole === OnchainRole.SELLER && !t.sellerExternal || onRole === OnchainRole.BUYER) && valueSun === 0n) {
       const isSeller = onRole === OnchainRole.SELLER;
       const token = isSeller ? t.sellerAsset : t.buyerAsset;
-      const base = isSeller ? t.sellerAmount : t.buyerAmount + t.commissionPm1 + t.commissionPm2;
+      // v3: comprador EXTERNO ⇒ comissões no approve do Vendedor (0 nos termos do v2 legado).
+      const base = isSeller
+        ? t.sellerAmount + (t.buyerAsset === ZERO20 ? t.commissionPm1 + t.commissionPm2 : 0n)
+        : t.buyerAmount + t.commissionPm1 + t.commissionPm2;
       const due = base + ((isSeller ? !t.sellerExternal : t.sellerExternal) ? t.feeAmount : 0n);
       const tw = await this.twExecutor();
       const tokenB58 = tw.address.fromHex('41' + token.slice(2));
