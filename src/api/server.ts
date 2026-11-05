@@ -154,6 +154,15 @@ export async function buildApi(deps: ApiDeps): Promise<FastifyInstance> {
       envGroups: {
         verumEvm: `${count(['VERUM_EVM_RPC_URL', 'VERUM_EVM_CHAIN_ID', 'VERUM_EVM_ESCROW_ADDRESS', 'VERUM_EVM_KEEPER_KEY', 'VERUM_EVM_ATTESTOR_KEY', 'VERUM_EVM_TBTC', 'VERUM_EVM_TUSDT'])}/7`,
         verumEvmV2: count(['VERUM_EVM_V2_ESCROW_ADDRESS']),
+        // Endereços de ESCROW (públicos on-chain, não-secretos) + versão dos termos: verificação
+        // de campo do flip v3 — o incidente de DRIFT DE ENV (2026-10-22, escrow antigo no env)
+        // ficava invisível sem isto.
+        escrowV2: process.env.VERUM_EVM_V2_ESCROW_ADDRESS ?? null,
+        escrowV2TermsVersion: Number(process.env.VERUM_EVM_V2_TERMS_VERSION ?? 2),
+        escrowV2Mainnet: process.env.VERUM_EVM_MAINNET_ESCROW_V2_ADDRESS ?? null,
+        escrowV2MainnetTermsVersion: Number(process.env.VERUM_EVM_MAINNET_TERMS_VERSION ?? 2),
+        escrowV2Tron: process.env.TRON_ESCROW_V2_ADDRESS ?? null,
+        escrowV2TronTermsVersion: Number(process.env.TRON_TERMS_VERSION ?? 2),
         solana: `${count(['SOLANA_RPC_URL', 'SOLANA_CHAIN_ID', 'SOLANA_PROGRAM_ID', 'SOLANA_EXECUTOR_KEYPAIR', 'SOLANA_ATTESTOR_KEYPAIR', 'SOLANA_TUSDT_MINT', 'SOLANA_TBTC_MINT'])}/7`,
         tron: `${count(['TRON_FULL_HOST', 'TRON_CHAIN_ID', 'TRON_ESCROW_ADDRESS', 'TRON_EXECUTOR_KEY', 'TRON_ATTESTOR_KEY', 'TRON_TUSDT', 'TRON_TBTC'])}/7`,
         tronV2: count(['TRON_ESCROW_V2_ADDRESS']),
