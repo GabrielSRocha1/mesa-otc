@@ -25,6 +25,7 @@ import { Role as OnchainRole, type WalletAttestation } from '../../onchain/types
 import { NATIVE_ASSET_EVM } from '../../onchain/core/index.js';
 import { signApprovalEvm, signWalletAttestationEvm, computeTradeIdEvm, evmDomain, APPROVAL_TYPES } from '../../onchain/crypto/index.js';
 import { commissionAmountOf } from '../../engines/signature.js';
+import { commissionInSellerAsset } from '../../onchain/core/fee.js';
 import ESCROW_V2_ABI_JSON from '../../onchain/router/abi/verumOtcEscrowV2.js';
 import type { AdapterCapabilities, ApprovalSignature, AssetVerification, DealCommitment, OnChainDealState, OnChainDealStatus, ParticipantStepProvider, RegisterResult, SettlementAdapter, TxRef, TxStatus } from '../types.js';
 import { deriveNonce, ROLE_TO_ONCHAIN, bindingOf, type VerumAdapterDeps, type VerumMeta } from './common.js';
@@ -108,7 +109,7 @@ export function evmLegMapOf(c: DealCommitment): EvmLegMap {
  * `sellerEvm`: endereço EVM do VENDEDOR quando o participante está na rede bitcoin (deal HTLC) —
  * é nele que o contrato paga o token do comprador no settle.
  */
-export function buildVerumTermsV2(c: DealCommitment, chainNow: number, externalEvm?: string | null): TermsV2Call {
+export function buildVerumTermsV2(c: DealCommitment, chainNow: number, externalEvm?: string | null, termsVersion = 2): TermsV2Call {
   const map = evmLegMapOf(c);
   const order: Role[] = ['SELLER', 'PAYMASTER_1', 'PAYMASTER_2', 'BUYER'];
   const present = order.map(r => c.participants.find(p => p.role === r)).filter(Boolean) as DealCommitment['participants'];
@@ -123,16 +124,24 @@ export function buildVerumTermsV2(c: DealCommitment, chainNow: number, externalE
   const buyerLeg = legOf(map.buyerLegIndex);
   const externalLeg = map.external ? c.legs.find(l => l.escrowChain !== 'ethereum') : null;
   const clamp = (n: number) => Math.min(Math.max(0, n), 10000);
-  // Comissão ON-CHAIN: total em unidades do buyerAsset (commissionAmountOf = amountOut·c/(1−d−c))
-  // repartido pelo split assinado; resto da divisão inteira fica com o PM1. Tudo explícito nos
-  // termos. Com perna do COMPRADOR externa não há buyerAsset on-chain → comissões zeradas (o
-  // contrato valida) — a comissão desse modo vive na perna de lá/fora do contrato.
+  // Comissão ON-CHAIN repartida pelo split assinado (resto da divisão inteira → PM1), em unidades
+  // da perna que a CUSTODIA:
+  //  - comprador on-chain: buyerAsset (commissionAmountOf = amountOut·c/(1−d−c)), depositada pelo
+  //    Comprador no signV2 dele;
+  //  - comprador EXTERNO + escrow v3: sellerAsset (commissionInSellerAsset = amountIn·(1−d)·c),
+  //    depositada pelo Vendedor junto de principal + fee;
+  //  - comprador EXTERNO + escrow v2 (legado): zerada (o contrato v2 reverte comissão nesse modo —
+  //    a comissão fica fora do contrato até o redeploy).
   const commissionBps = clamp(c.terms.pricing.commissionBps);
   const buyerBase = BigInt((buyerLeg ?? externalLeg)?.amountBase ?? '0');
+  const sellerBase = BigInt((sellerLeg ?? externalLeg)?.amountBase ?? '0');
   // Sem PM1 nos participantes não há comissão on-chain (o contrato reverte commissionPm>0 sem a
   // cadeira) — zera aqui, como faz a rota Solana (common.ts), em vez de travar na criação.
   const hasPm1 = present.some(p => p.role === 'PAYMASTER_1');
-  const cTotal = (map.externalSide === 'BUYER' || !hasPm1) ? 0n : commissionAmountOf(buyerBase, clamp(c.terms.pricing.discountBps), commissionBps);
+  const cTotal = !hasPm1 ? 0n
+    : map.externalSide === 'BUYER'
+      ? (termsVersion >= 3 ? commissionInSellerAsset(sellerBase, clamp(c.terms.pricing.discountBps), commissionBps) : 0n)
+      : commissionAmountOf(buyerBase, clamp(c.terms.pricing.discountBps), commissionBps);
   const split = c.terms.pricing.commissionSplitBps ?? [];
   const pm2Bps = split[1] ?? 0;
   const commissionPm2 = commissionBps > 0 ? cTotal * BigInt(clamp(pm2Bps)) / BigInt(commissionBps) : 0n;
@@ -147,7 +156,7 @@ export function buildVerumTermsV2(c: DealCommitment, chainNow: number, externalE
     buyerAsset: assetOf(buyerLeg),
     buyerAmount: buyerBase,
     platformFeeBps: c.feeBps, commissionBps: clamp(c.terms.pricing.commissionBps), discountBps: clamp(c.terms.pricing.discountBps), slippageBps: clamp(c.terms.pricing.maxSlippageBps),
-    createdAt: BigInt(chainNow), expiresAt: BigInt(chainNow + 2400), termsVersion: 2,
+    createdAt: BigInt(chainNow), expiresAt: BigInt(chainNow + 2400), termsVersion,
     nonce: deriveNonce(c.dealId, c.revision, c.dealNonce),
     htlcHash: map.external ? ('0x' + c.htlcHash) as Hex : ZERO32,
     commissionPm1, commissionPm2,
@@ -202,9 +211,14 @@ export class VerumEvmV2Adapter implements SettlementAdapter, ParticipantStepProv
     if (rc.status !== 'success') throw new Error(`tx ${fn} revertida (${hash})`);
     return hash;
   }
-  /** msg.value exigido no signV2 do papel: perna NATIVA do depositante (0 nas demais). */
+  /** msg.value exigido no signV2 do papel: perna NATIVA do depositante (0 nas demais).
+   *  v3: com a perna do comprador EXTERNA (buyerAsset = address(0)), as comissões dos PMs entram
+   *  no depósito do VENDEDOR (no escrow v2 legado elas são 0 nos termos — soma inócua). */
   private signValueOf(role: OnchainRole, t: RawTradeV2): bigint {
-    if (role === OnchainRole.SELLER && !t.sellerExternal && isNativeAsset(t.sellerAsset)) return t.sellerAmount + t.feeAmount;
+    const buyerExternal = t.buyerAsset === zeroAddress;
+    if (role === OnchainRole.SELLER && !t.sellerExternal && isNativeAsset(t.sellerAsset)) {
+      return t.sellerAmount + t.feeAmount + (buyerExternal ? t.commissionPm1 + t.commissionPm2 : 0n);
+    }
     if (role === OnchainRole.BUYER && isNativeAsset(t.buyerAsset)) return t.buyerAmount + t.commissionPm1 + t.commissionPm2 + (t.sellerExternal ? t.feeAmount : 0n);
     return 0n;
   }
@@ -246,7 +260,7 @@ export class VerumEvmV2Adapter implements SettlementAdapter, ParticipantStepProv
     return b;
   }
 
-  capabilities(): AdapterCapabilities { return { escrowNN: true, htlc: false, verifiableSigSchemes: ['secp256k1'], finalityConfirmations: this.cfg.confirmations, nativeCode: 'ETH' }; }
+  capabilities(): AdapterCapabilities { return { escrowNN: true, htlc: false, verifiableSigSchemes: ['secp256k1'], finalityConfirmations: this.cfg.confirmations, nativeCode: 'ETH', commissionOnSellerLeg: this.cfg.termsVersionV2 >= 3 }; }
   escrowAddress(): string { return this.escrowV2; }
   validateAddress(address: string): boolean { return /^0x[0-9a-fA-F]{40}$/.test(address) && isAddress(address); }
   async estimateCostUsd(op: 'deposit' | 'register' | 'settle' | 'refund'): Promise<string> { return op === 'settle' ? '3.50' : '1.20'; }
@@ -306,7 +320,7 @@ export class VerumEvmV2Adapter implements SettlementAdapter, ParticipantStepProv
       const extRole = mapX.externalSide === 'BUYER' ? 'BUYER' as const : 'SELLER' as const;
       const extPart = c.participants.find(pp => pp.role === extRole);
       const externalEvm = extPart && /^0x[0-9a-fA-F]{40}$/.test(extPart.address) ? extPart.address : await this.deps.evmAddressOf?.(c.dealId, extRole) ?? null;
-      const terms = buildVerumTermsV2(c, now, externalEvm);
+      const terms = buildVerumTermsV2(c, now, externalEvm, this.cfg.termsVersionV2);
       const map = evmLegMapOf(c);
       await this.assertAssetsAcceptable(terms); // falha cedo e claro se o escrow não aceitar o ativo (ex.: env no escrow errado)
       // Hash pelo PRÓPRIO contrato (função pure) — zero chance de divergência de EIP-712 off-chain.
@@ -354,8 +368,12 @@ export class VerumEvmV2Adapter implements SettlementAdapter, ParticipantStepProv
       if (Number(t.state) !== StateV2.SIGNING || CANON.indexOf(onRole) < Number(t.nextIdx)) return this.ref('deposited');
       const owner = isSellerLeg ? t.seller : t.buyer;
       const token = isSellerLeg ? t.sellerAsset : t.buyerAsset;
-      // Comprador deposita líquido + comissões on-chain dos PMs (pagas no settle).
-      const base = isSellerLeg ? t.sellerAmount : t.buyerAmount + t.commissionPm1 + t.commissionPm2;
+      // Comissões acompanham a perna on-chain que as custodia: comprador no modo normal; VENDEDOR
+      // quando a perna do comprador é externa (v3 — no escrow v2 legado elas são 0 nos termos).
+      const buyerExternal = t.buyerAsset === zeroAddress;
+      const base = isSellerLeg
+        ? t.sellerAmount + (buyerExternal ? t.commissionPm1 + t.commissionPm2 : 0n)
+        : t.buyerAmount + t.commissionPm1 + t.commissionPm2;
       // Fee acompanha a perna que a paga: vendedor on-chain OU comprador quando a perna do vendedor é externa.
       const paysFee = isSellerLeg ? !t.sellerExternal : t.sellerExternal;
       const due = base + (paysFee ? t.feeAmount : 0n);
@@ -532,20 +550,28 @@ export class VerumEvmV2Adapter implements SettlementAdapter, ParticipantStepProv
     };
     // Perna NATIVA (ETH puro): nada de wrap nem approve — o pagamento é o msg.value do signV2.
     const valueWei = this.signValueOf(onRole, t);
+    // Decomposição do total que o depositante paga na assinatura — a carteira/mesa exibe o
+    // "por quê" do número (principal + taxa + comissão dos PMs), em unidades base do ativo.
+    let dueBreakdown: Record<string, string> | null = null;
     if (onRole === OnchainRole.SELLER && !t.sellerExternal && valueWei === 0n) {
-      const due = t.sellerAmount + t.feeAmount;
+      // v3: com a perna do comprador externa, as comissões dos PMs entram no approve do Vendedor
+      // (no escrow v2 legado elas são 0 nos termos — soma inócua).
+      const commissions = t.buyerAsset === zeroAddress ? t.commissionPm1 + t.commissionPm2 : 0n;
+      const due = t.sellerAmount + t.feeAmount + commissions;
+      dueBreakdown = { asset: t.sellerAsset, principal: t.sellerAmount.toString(), fee: t.feeAmount.toString(), commission: commissions.toString(), total: due.toString() };
       const allowance = await this.pub.readContract({ address: t.sellerAsset, abi: ERC20_ABI, functionName: 'allowance', args: [signer as Hex, this.escrowV2] }) as bigint;
       if (allowance < due) approve = { token: t.sellerAsset, spender: this.escrowV2, amount: due.toString() };
       await wrapIfNeeded(t.sellerAsset, signer as Hex, due);
     } else if (onRole === OnchainRole.BUYER && valueWei === 0n) {
       const due = t.buyerAmount + t.commissionPm1 + t.commissionPm2 + (t.sellerExternal ? t.feeAmount : 0n);
+      dueBreakdown = { asset: t.buyerAsset, principal: t.buyerAmount.toString(), fee: (t.sellerExternal ? t.feeAmount : 0n).toString(), commission: (t.commissionPm1 + t.commissionPm2).toString(), total: due.toString() };
       const allowance = await this.pub.readContract({ address: t.buyerAsset, abi: ERC20_ABI, functionName: 'allowance', args: [signer as Hex, this.escrowV2] }) as bigint;
       if (allowance < due) approve = { token: t.buyerAsset, spender: this.escrowV2, amount: due.toString() };
       await wrapIfNeeded(t.buyerAsset, signer as Hex, due);
     }
     const typedData = { domain: { ...evmDomain(this.cfg.chainId, this.escrowV2), chainId: this.cfg.chainId }, types: APPROVAL_TYPES, primaryType: 'Approval' as const, message: { tradeId: b.meta.tradeId as Hex, termsHash: b.meta.termsHash as Hex, role: onRole, deadline: BigInt(deadline) } };
     return {
-      kind: 'evm', chainId: this.cfg.chainId, escrow: this.escrowV2, fn: 'signV2', deadline, approve, wrap,
+      kind: 'evm', chainId: this.cfg.chainId, escrow: this.escrowV2, fn: 'signV2', deadline, approve, wrap, dueBreakdown,
       // Perna nativa: a carteira envia o signV2 com ESTE value (string wei; '0' nas demais pernas).
       valueWei: valueWei.toString(),
       typedData: { ...typedData, message: { ...typedData.message, deadline: String(deadline) } },

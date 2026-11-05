@@ -51,8 +51,12 @@ export class PriceEngine {
     return { id: newId('PS'), takenAt: this.now(), validUntil: this.now() + this.cfg.ttlMs, quotes, reference, dispersionBps, anomaly: anomalyReasons.length > 0, anomalyReasons, sourcesOk };
   }
 
-  /** Economia da operação (RF-033). Inteiros em unidades base; USD como decimal string. */
-  computeEconomics(p: { assetIn: CanonicalAsset; assetOut: CanonicalAsset; amountInBase: string; snapshot: PriceSnapshot; discountBps: number; commissionBps?: number; commissionSplitBps?: number[]; platformFeeBps: number; paymasterShareBps: number; maxSlippageBps: number; maxPriceDriftBps: number; networkCostUsd: { in: string; out: string } }): { pricing: Pricing; amountOutBase: string; amountInEffectiveBase: string; feeBase: string } {
+  /** Economia da operação (RF-033). Inteiros em unidades base; USD como decimal string.
+   *  `commissionLeg` (v3): em qual perna a comissão dos PMs é cobrada — 'BUYER' (default, modo
+   *  atual: a perna do comprador sai LÍQUIDA da comissão, que ele deposita por cima) ou 'SELLER'
+   *  (comprador EXTERNO pagando BTC/HTLC em escrow v3: a perna do comprador é o valor CHEIO com
+   *  deságio e a comissão é depositada pelo VENDEDOR em assetIn, junto de principal + fee). */
+  computeEconomics(p: { assetIn: CanonicalAsset; assetOut: CanonicalAsset; amountInBase: string; snapshot: PriceSnapshot; discountBps: number; commissionBps?: number; commissionSplitBps?: number[]; platformFeeBps: number; paymasterShareBps: number; maxSlippageBps: number; maxPriceDriftBps: number; networkCostUsd: { in: string; out: string }; commissionLeg?: 'BUYER' | 'SELLER' }): { pricing: Pricing; amountOutBase: string; amountInEffectiveBase: string; feeBase: string } {
     const pIn = p.snapshot.reference[p.assetIn.assetId]; const pOut = p.snapshot.reference[p.assetOut.assetId];
     if (!pIn || !pOut) throw new DomainError('PRICE_UNAVAILABLE', 'snapshot não cobre os ativos');
     // usdIn = amountIn * pIn ; amountOut = usdIn*(1-comm)/pOut — feito com inteiros escalados para evitar erro de ponto flutuante.
@@ -67,15 +71,21 @@ export class PriceEngine {
     // usdIn × (1−deságio) × (1−comissão); o total on-chain do comprador = usdIn × (1−deságio) + taxa.
     const usdAfterDiscountS = usdInS * BigInt(10000 - p.discountBps) / 10000n;
     const usdCommissionS = usdAfterDiscountS * BigInt(commissionBps) / 10000n;
-    const usdOutS = usdAfterDiscountS - usdCommissionS;
+    // commissionLeg 'SELLER' (comprador externo, escrow v3): a perna do comprador é o valor CHEIO
+    // com deságio — a comissão NÃO sai dela (o Vendedor a deposita em assetIn; o contrato a paga).
+    const sellerLegCommission = p.commissionLeg === 'SELLER';
+    const usdOutS = sellerLegCommission ? usdAfterDiscountS : usdAfterDiscountS - usdCommissionS;
     const amountOut = usdOutS * decOut / pOutS;
     const amountInEffective = amountIn; // o Vendedor entrega o valor CHEIO escrito — nada descontado da perna dele
-    const fee = amountOut * BigInt(p.platformFeeBps) / 10000n; const net = amountOut - fee;
+    // Fee de protocolo: no modo 'SELLER' ela também é cobrada na perna do Vendedor (em assetIn,
+    // pelo contrato) — nada é debitado da perna de saída: net = amountOut inteiro.
+    const fee = sellerLegCommission ? 0n : amountOut * BigInt(p.platformFeeBps) / 10000n; const net = amountOut - fee;
     const usd = (s: bigint) => (Number(s) / 1e12).toFixed(2);
     return { amountOutBase: amountOut.toString(), amountInEffectiveBase: amountInEffective.toString(), feeBase: fee.toString(), pricing: {
       referencePriceInUsd: toDec(pIn), referencePriceOutUsd: toDec(pOut), quoteTimestamp: p.snapshot.takenAt, priceValidUntil: p.snapshot.validUntil,
       usdValueIn: usd(usdInS), usdValueOut: usd(usdOutS), discountBps: p.discountBps, commissionBps, commissionSplitBps: p.commissionSplitBps ?? [], usdCommission: usd(usdCommissionS), platformFeeBps: p.platformFeeBps, paymasterShareBps: p.paymasterShareBps, maxSlippageBps: p.maxSlippageBps, maxPriceDriftBps: p.maxPriceDriftBps,
-      networkCostEstimateUsd: p.networkCostUsd, netAmountSellerBase: net.toString(), priceSnapshotId: p.snapshot.id } };
+      networkCostEstimateUsd: p.networkCostUsd, netAmountSellerBase: net.toString(), priceSnapshotId: p.snapshot.id,
+      ...(sellerLegCommission ? { commissionLeg: 'SELLER' as const } : {}) } };
   }
 
   /** Deriva de preço entre a cotação assinada e o mercado atual (ADR-009): fora da banda ⇒ não liquida. */

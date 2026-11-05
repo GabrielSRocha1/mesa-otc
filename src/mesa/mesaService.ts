@@ -18,6 +18,7 @@ import type { Deal, Role } from '../domain/types.js';
 import { verifySolana, verifyTron, verifyBitcoin } from '../engines/signature.js';
 import { getChain } from '../chains/registry.js';
 import { deriveMesaStatus } from './status.js';
+import { commissionInSellerAsset } from '../onchain/core/fee.js';
 import { deriveSettlementPlan } from './settlementPlan.js';
 import { INVITABLE_CHAIR_ROLES, type ChairAsset, type MesaChair, type MesaChairRole, type MesaOperationConfig, type MesaRecord, type MesaStatus } from './types.js';
 
@@ -763,6 +764,18 @@ export class MesaService {
         // fluxo. Se alguma carteira descontar a taxa do envio, o cofre fica subfinanciado e a proteção
         // existente cobre: top-up no MESMO endereço soma, e o reembolso automático varre cofre parcial.
         return { address: meta.htlcAddress, requiredSat: leg.amountBase, depositSat: leg.amountBase, from: leg.from, legIndex: leg.index, simulated: this.d.btcSimulated?.() ?? false };
+      })(),
+      // v3 — comissão na perna do VENDEDOR (comprador externo paga BTC): a UI mostra ao Vendedor o
+      // total DECOMPOSTO que a carteira vai autorizar (principal + taxa + comissão dos PMs, tudo
+      // em assetIn). null no modo normal — o layout atual não muda.
+      sellerDue: (() => {
+        const pr = deal.terms?.pricing; if (pr?.commissionLeg !== 'SELLER') return null;
+        const leg = deal.terms?.legs.find(l => l.from === 'SELLER'); if (!leg) return null;
+        const principal = BigInt(leg.amountBase);
+        const fee = principal * BigInt(pr.platformFeeBps) / 10000n;
+        const commission = commissionInSellerAsset(principal, pr.discountBps, pr.commissionBps);
+        return { asset: deal.draft?.assetIn?.code ?? null, decimals: deal.draft?.assetIn?.decimals ?? 6,
+          principal: principal.toString(), fee: fee.toString(), commission: commission.toString(), total: (principal + fee + commission).toString() };
       })(),
       // REGISTRO on-chain pendente (createTradeV2 do PM1): o auto-envio do approve é one-shot e
       // se perde em recusa/reload — sem este campo no poll a mesa ficava SEM retry, presa em

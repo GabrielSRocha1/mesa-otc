@@ -84,7 +84,7 @@ const terms = {
   participants: [{ wallet: seller.address, role: 0 }, { wallet: buyer.address, role: 3 }],
   sellerAsset: evm.tusdt, sellerAmount: SELL, buyerAsset: NATIVE_ASSET_EVM as `0x${string}`, buyerAmount: BUY,
   platformFeeBps: 3, commissionBps: 0, discountBps: 0, slippageBps: 0,
-  createdAt: BigInt(now), expiresAt: BigInt(EXPIRES), termsVersion: 2, nonce: BigInt(Date.now()), htlcHash: ('0x' + '0'.repeat(64)) as `0x${string}`,
+  createdAt: BigInt(now), expiresAt: BigInt(EXPIRES), termsVersion: evm.termsVersionV2, nonce: BigInt(Date.now()), htlcHash: ('0x' + '0'.repeat(64)) as `0x${string}`,
   commissionPm1: 0n, commissionPm2: 0n, dealType: 0, swapRouter: ('0x' + '0'.repeat(40)) as `0x${string}`, minAmountOut: 0n,
 };
 const termsHash = await pub.readContract({ address: ESCROW, abi: ABI, functionName: 'hashTermsV2', args: [terms] }) as `0x${string}`;

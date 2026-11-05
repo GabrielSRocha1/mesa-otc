@@ -98,6 +98,11 @@ export interface Pricing {
    *  (omitido por canonicalize → hash byte-idêntico ao fluxo atual). O contrato on-chain NÃO muda:
    *  ele sempre liquida os valores fixos das pernas; este campo é só do envelope off-chain assinado. */
   indexedFixingHash?: string;
+  /** v3 (comissão na perna on-chain): 'SELLER' quando a perna do COMPRADOR é externa (BTC/HTLC) e
+   *  o escrow cobra a comissão dos PMs do Vendedor em assetIn (perna do comprador = valor CHEIO
+   *  com deságio). undefined = modo atual (comissão debitada da perna do comprador) — omitido por
+   *  canonicalize, hash byte-idêntico ao fluxo existente. */
+  commissionLeg?: 'SELLER';
 }
 
 export interface RouteLegPlan { escrowChain: Network; escrowContract: string; mode: SettlementMode; fundingOrder: number; timelockSec: number }

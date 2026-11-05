@@ -16,7 +16,7 @@ function makeAdapter(view: (fn: string, args?: unknown[]) => Promise<unknown>): 
     rpcUrl: 'http://127.0.0.1:1', chainId: 11155111, escrow: ('0x' + '11'.repeat(20)) as `0x${string}`,
     escrowV2: ('0x' + '22'.repeat(20)) as `0x${string}`, keeperKey: ('0x' + '11'.repeat(32)) as `0x${string}`,
     attestorKey: ('0x' + '22'.repeat(32)) as `0x${string}`, tbtc: ('0x' + '33'.repeat(20)) as `0x${string}`,
-    tusdt: TOKEN as `0x${string}`, confirmations: 1, explorerBase: null,
+    tusdt: TOKEN as `0x${string}`, confirmations: 1, explorerBase: null, termsVersionV2: 2,
   };
   const a = new VerumEvmV2Adapter(cfg, null, {} as never);
   (a as unknown as { view: unknown }).view = (fn: string, args?: unknown[]) => view(fn, args);

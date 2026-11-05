@@ -6,6 +6,7 @@
  */
 import { sha256Hex, canonicalize, legHashOf, ROLE_ORDER, NETWORK_KEY_SCHEME, type CanonicalAsset, type ChainRef, type KeyScheme, type Network, type Role } from '../domain/types.js';
 import { DomainError } from '../domain/errors.js';
+import { commissionInSellerAsset } from '../onchain/core/fee.js';
 import { hexToBytes } from '@noble/hashes/utils.js';
 import type { AdapterCapabilities, ApprovalSignature, ApprovalVerifier, AssetVerification, DealCommitment, OnChainDealState, SettlementAdapter, TxRef, TxStatus } from './types.js';
 
@@ -37,7 +38,9 @@ export class LocalChainAdapter implements SettlementAdapter {
   private rpc(): void { if (this.faults.rpcDown) throw new DomainError('ADAPTER_UNAVAILABLE', `RPC ${this.chain.network} indisponível`); }
   private tx(ok = true, err?: string): TxRef { this.txSeq += 1; const ref = (this.chain.network === 'solana' ? '' : '0x') + sha256Hex(`${this.chain.network}:${this.txSeq}:${this.now()}`).slice(0, this.chain.network === 'solana' ? 64 : 64); this.txs.set(ref, { ref, status: ok ? 'final' : 'reverted', confirmations: ok ? this.opts.finality : 0, error: err }); return { chain: this.chain.network, ref, submittedAt: this.now() }; }
 
-  capabilities(): AdapterCapabilities { return { escrowNN: this.opts.escrowNN, htlc: this.opts.htlc, verifiableSigSchemes: this.opts.verifiable, finalityConfirmations: this.opts.finality, nativeCode: this.opts.nativeCode }; }
+  // commissionOnSellerLeg: o simulador emula o escrow V2 v3 (commissionPlan custodia pela perna do
+  // Vendedor quando pricing.commissionLeg === 'SELLER') — dev/teste exercitam o fluxo novo.
+  capabilities(): AdapterCapabilities { return { escrowNN: this.opts.escrowNN, htlc: this.opts.htlc, verifiableSigSchemes: this.opts.verifiable, finalityConfirmations: this.opts.finality, nativeCode: this.opts.nativeCode, commissionOnSellerLeg: true }; }
   escrowAddress(): string { return this.escrow; }
   validateAddress(address: string): boolean { return ADDR_RULES[this.chain.network].test(address); }
 
@@ -75,15 +78,25 @@ export class LocalChainAdapter implements SettlementAdapter {
   }
   private legOf(d: StoredDeal, idx: number) { const leg = d.commit.legs.find(l => l.index === idx); if (!leg || leg.escrowChain !== this.chain.network) throw new DomainError('SETTLEMENT_FAILED', `leg ${idx} não pertence a ${this.chain.network}`); return leg; }
   /**
-   * Paridade com o VerumOTCEscrowV2: comissão dos PMs ON-CHAIN em unidades do ativo da leg do
-   * COMPRADOR (total = out·c/(1−d−c), split pelos commissionSplitBps assinados; resto → PM1).
-   * null quando a leg do comprador não é desta cadeia ou a comissão é zero.
+   * Paridade com o VerumOTCEscrowV2: comissão dos PMs ON-CHAIN na perna que a CUSTODIA.
+   *  - Modo normal: leg do COMPRADOR nesta cadeia (total = out·c/(1−d−c), split pelos
+   *    commissionSplitBps assinados; resto → PM1), depositada pelo comprador.
+   *  - v3 (pricing.commissionLeg === 'SELLER', comprador externo): leg do VENDEDOR nesta cadeia
+   *    (total = in·(1−d)·c), depositada pelo vendedor junto do principal.
+   * null quando a leg de custódia não é desta cadeia ou a comissão é zero.
    */
   private commissionPlan(c: DealCommitment): { leg: DealCommitment['legs'][number]; pm1: bigint; pm2: bigint; pm1Addr: string | null; pm2Addr: string | null } | null {
-    const leg = c.legs.find(l => l.from === 'BUYER' && l.escrowChain === this.chain.network);
-    const p = c.terms?.pricing; if (!leg || !p || !p.commissionBps) return null;
-    const rest = 10000 - p.discountBps - p.commissionBps; if (rest <= 0) return null;
-    const total = BigInt(leg.amountBase) * BigInt(p.commissionBps) / BigInt(rest);
+    const p = c.terms?.pricing; if (!p || !p.commissionBps) return null;
+    const custodyRole = p.commissionLeg === 'SELLER' ? 'SELLER' : 'BUYER';
+    const leg = c.legs.find(l => l.from === custodyRole && l.escrowChain === this.chain.network);
+    if (!leg) return null;
+    let total: bigint;
+    if (custodyRole === 'SELLER') {
+      total = commissionInSellerAsset(BigInt(leg.amountBase), p.discountBps, p.commissionBps);
+    } else {
+      const rest = 10000 - p.discountBps - p.commissionBps; if (rest <= 0) return null;
+      total = BigInt(leg.amountBase) * BigInt(p.commissionBps) / BigInt(rest);
+    }
     const pm2Bps = p.commissionSplitBps?.[1] ?? 0;
     const pm2 = total * BigInt(Math.min(pm2Bps, p.commissionBps)) / BigInt(p.commissionBps);
     return { leg, pm1: total - pm2, pm2, pm1Addr: c.participants.find(x => x.role === 'PAYMASTER_1')?.address ?? null, pm2Addr: c.participants.find(x => x.role === 'PAYMASTER_2')?.address ?? null };

@@ -97,6 +97,9 @@ export function buildVerumTermsV2Tron(c: DealCommitment, chainNow: number, exter
   const commissionBps = clamp(c.terms.pricing.commissionBps);
   const buyerBase = BigInt((buyerLeg ?? externalLeg)?.amountBase ?? '0');
   const hasPm1 = present.some(p => p.role === 'PAYMASTER_1');
+  // Tron segue no contrato v2: comprador EXTERNO ⇒ comissão ZERADA (o contrato reverte > 0 nesse
+  // modo). A regra v3 "comissão na perna do Vendedor" (ver evmV2.ts) entra aqui quando o escrow
+  // Tron for redeployado com TERMS_VERSION_V2 = 3 — follow-up da Fase 6 do épico.
   const cTotal = (map.externalSide === 'BUYER' || !hasPm1) ? 0n : commissionAmountOf(buyerBase, clamp(c.terms.pricing.discountBps), commissionBps);
   const split = c.terms.pricing.commissionSplitBps ?? [];
   const pm2Bps = split[1] ?? 0;

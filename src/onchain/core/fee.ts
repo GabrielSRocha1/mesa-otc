@@ -30,3 +30,17 @@ export function feeBreakdown(t: Terms): FeeBreakdown {
 export function sellerRequiredBalance(t: Terms): bigint {
   return t.sellerAmount + computeFee(t.sellerAmount, t.platformFeeBps);
 }
+
+/**
+ * Comissão dos PMs em unidades do ATIVO DO VENDEDOR — modo v3 com a perna do COMPRADOR externa
+ * (pagamento em BTC/HTLC fora da rede): comissão = sellerAmount × (1−deságio) × comissão (piso).
+ * O vendedor a deposita no signV2 junto de principal + fee; o settle a distribui aos PMs.
+ * No modo normal (comprador on-chain) a comissão segue em buyerAsset — use commissionAmountOf lá.
+ */
+export function commissionInSellerAsset(sellerAmount: bigint, discountBps: number, commissionBps: number): bigint {
+  for (const [k, v] of [["discountBps", discountBps], ["commissionBps", commissionBps]] as const) {
+    if (!Number.isInteger(v) || v < 0 || v > 10_000) throw new RangeError(`${k} inválido: ${v}`);
+  }
+  if (sellerAmount < 0n) throw new RangeError("sellerAmount negativo");
+  return (sellerAmount * BigInt(10_000 - discountBps) * BigInt(commissionBps)) / (BPS_DENOMINATOR * BPS_DENOMINATOR);
+}

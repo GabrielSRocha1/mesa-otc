@@ -9,6 +9,7 @@ import { computeDealHash, newId, randomHex, sha256Hex, canonicalize, NETWORK_KEY
 
 import { SIGN_WINDOW_MS } from '../domain/constants.js';
 import { CREATION_WINDOW_SECONDS } from '../onchain/core/constants.js';
+import { commissionInSellerAsset } from '../onchain/core/fee.js';
 /** Janela rolante por assinante: cada papel tem SIGN_WINDOW_MINUTES QUANDO chega a vez dele. */
 const SIGNER_WINDOW_MS = SIGN_WINDOW_MS;
 import { DomainError } from '../domain/errors.js';
@@ -188,15 +189,28 @@ export class DealEngine {
     const end = metrics.verificationSeconds.startTimer(); const dr = deal.draft;
     if (deal.state !== 'WALLETS_CONNECTED' && deal.state !== 'ASSETS_VERIFIED') throw new DomainError('ILLEGAL_TRANSITION', `Verificação não permitida em ${deal.state}`);
     try {
+      // v3 — comissão na perna on-chain: com a perna do COMPRADOR externa (paga BTC nativo em HTLC,
+      // ou lock Solana com escrow EVM) e o escrow do Vendedor capaz (termsVersion ≥ 3), a comissão
+      // dos PMs migra para assetIn: o Vendedor a deposita junto de principal + fee e a perna do
+      // comprador vira o valor CHEIO com deságio. Determinístico pelos ativos (espelha o
+      // deriveSettlementPlan); escrow legado/Tron/Solana seguem no modo atual (comissão zerada lá).
+      const buyerExternal = (dr.assetOut.network === 'bitcoin' && !dr.assetOut.contractOrMint)
+        || (dr.assetIn.network === 'ethereum' && dr.assetOut.network === 'solana');
+      const commissionLeg: 'BUYER' | 'SELLER' = buyerExternal && dr.assetIn.network === 'ethereum'
+        && this.d.adapters.get('ethereum', this.envOf(deal))?.capabilities().commissionOnSellerLeg ? 'SELLER' : 'BUYER';
       if (deal.state === 'WALLETS_CONNECTED') {
         for (const a of [dr.assetIn, dr.assetOut]) { this.d.registry.resolve(a); await this.d.registry.verifyOnChain(a, this.d.adapters, this.envOf(deal)); }
         const seller = deal.participants.find(p => p.role === 'SELLER') as Participant; const bal = await this.d.adapters.require(dr.assetIn.network, this.envOf(deal)).getBalance(seller.address, dr.assetIn);
-        if (bal < BigInt(dr.amountInBase)) throw new DomainError('FUNDING_REQUIRED', 'Saldo do Vendedor insuficiente para a quantidade', { balance: bal.toString() });
+        // No modo comissão-no-Vendedor o saldo precisa cobrir principal + fee + comissão (tudo em assetIn).
+        const required = commissionLeg === 'SELLER'
+          ? BigInt(dr.amountInBase) + BigInt(dr.amountInBase) * BigInt(this.d.config.platformFeeBps) / 10000n + commissionInSellerAsset(BigInt(dr.amountInBase), dr.discountBps, dr.commissionBps ?? 0)
+          : BigInt(dr.amountInBase);
+        if (bal < required) throw new DomainError('FUNDING_REQUIRED', commissionLeg === 'SELLER' ? 'Saldo do Vendedor insuficiente para quantidade + taxa + comissão dos Pay Masters' : 'Saldo do Vendedor insuficiente para a quantidade', { balance: bal.toString(), required: required.toString() });
         await this.transition(deal, 'ASSETS_VERIFIED', actor);
       }
       const snapshot = await this.d.price.quote([dr.assetIn.assetId, dr.assetOut.assetId]);
       if (snapshot.anomaly) { metrics.priceAnomalies.inc(); await this.d.risk.priceAnomaly(deal.id, snapshot.anomalyReasons); throw new DomainError('PRICE_ANOMALY', 'Anomalia de preço entre fontes', { reasons: snapshot.anomalyReasons }); }
-      const econ = this.d.price.computeEconomics({ assetIn: dr.assetIn, assetOut: dr.assetOut, amountInBase: dr.amountInBase, snapshot, discountBps: dr.discountBps, commissionBps: dr.commissionBps ?? 0, commissionSplitBps: dr.commissionSplitBps ?? [], platformFeeBps: this.d.config.platformFeeBps, paymasterShareBps: this.d.config.paymasterShareBps, maxSlippageBps: dr.maxSlippageBps, maxPriceDriftBps: dr.maxPriceDriftBps, networkCostUsd: { in: await this.d.config.networkCostUsd(dr.assetIn.network), out: await this.d.config.networkCostUsd(dr.assetOut.network) } });
+      const econ = this.d.price.computeEconomics({ assetIn: dr.assetIn, assetOut: dr.assetOut, amountInBase: dr.amountInBase, snapshot, discountBps: dr.discountBps, commissionBps: dr.commissionBps ?? 0, commissionSplitBps: dr.commissionSplitBps ?? [], platformFeeBps: this.d.config.platformFeeBps, paymasterShareBps: this.d.config.paymasterShareBps, maxSlippageBps: dr.maxSlippageBps, maxPriceDriftBps: dr.maxPriceDriftBps, networkCostUsd: { in: await this.d.config.networkCostUsd(dr.assetIn.network), out: await this.d.config.networkCostUsd(dr.assetOut.network) }, commissionLeg });
       const riskDecision = await this.d.risk.assessDeal(deal, Number(econ.pricing.usdValueIn)); if (riskDecision === 'BLOCK') { await this.blockInternal(deal, 'Limite de risco excedido', 'RS-050 · limits', 'system'); throw new DomainError('RISK_BLOCKED', 'Operação bloqueada por limites de risco'); }
       const liq = await this.d.liquidity.assess({ assetIn: dr.assetIn, assetOut: dr.assetOut, sizeUsd: Number(econ.pricing.usdValueIn), maxSlippageBps: dr.maxSlippageBps });
       if (!liq.sufficient) { await this.persist(deal, 'liquidity.insufficient', actor, { reasons: liq.reasons }); throw new DomainError('LIQUIDITY_INSUFFICIENT', liq.reasons.join('; '), { assessment: liq }); }

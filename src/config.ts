@@ -44,12 +44,19 @@ const Schema = z.object({
   VERUM_EVM_EXPLORER_BASE: z.string().optional(),
   // Escrow V2 (ADR-v4: cadeiras 2–4 + htlcHash). Definido → o adapter V2 SUBSTITUI o V1 na rede EVM.
   VERUM_EVM_V2_ESCROW_ADDRESS: z.string().regex(/^0x[0-9a-fA-F]{40}$/).optional(),
+  // Versão dos TermsV2 que o escrow CONFIGURADO exige (deve bater com TERMS_VERSION_V2 do contrato):
+  // 2 = escrow legado (comissão ZERADA com comprador externo); 3 = comissão acompanha a perna
+  // on-chain (comprador externo ⇒ comissão em sellerAsset depositada pelo Vendedor). Subir para 3
+  // JUNTO com a troca do endereço para o escrow redeployado — nunca antes (createTradeV2 reverte).
+  VERUM_EVM_V2_TERMS_VERSION: z.coerce.number().int().min(2).max(3).default(2),
   // ---- EVM Ethereum MAINNET (grupo paralelo — mesa.environment='mainnet'). chainId fixo 1. ----
   VERUM_EVM_MAINNET_RPC_URL: z.string().optional(),
   VERUM_EVM_MAINNET_ESCROW_V2_ADDRESS: z.string().regex(/^0x[0-9a-fA-F]{40}$/).optional(),
   VERUM_EVM_MAINNET_KEEPER_KEY: z.string().regex(/^0x[0-9a-fA-F]{64}$/).optional(),
   VERUM_EVM_MAINNET_ATTESTOR_KEY: z.string().regex(/^0x[0-9a-fA-F]{64}$/).optional(),
   VERUM_EVM_MAINNET_CONFIRMATIONS: z.coerce.number().int().min(1).max(64).default(2),
+  /** Idem VERUM_EVM_V2_TERMS_VERSION, para o escrow MAINNET (subir junto com o endereço novo). */
+  VERUM_EVM_MAINNET_TERMS_VERSION: z.coerce.number().int().min(2).max(3).default(2),
   // Solana (programa verum_otc em devnet/localnet). Keypairs = JSON array de 64 bytes.
   SOLANA_RPC_URL: z.string().optional(),
   SOLANA_CHAIN_ID: z.enum(['101', '102', '103']).optional(),
@@ -162,10 +169,10 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
 }
 
 /** Escrow canônico Verum — EVM. null = grupo ausente (modo simulado). */
-export interface VerumEvmSettings { rpcUrl: string; chainId: number; escrow: `0x${string}`; escrowV2: `0x${string}` | null; keeperKey: `0x${string}`; attestorKey: `0x${string}`; tbtc: `0x${string}`; tusdt: `0x${string}`; confirmations: number; explorerBase: string | null }
+export interface VerumEvmSettings { rpcUrl: string; chainId: number; escrow: `0x${string}`; escrowV2: `0x${string}` | null; keeperKey: `0x${string}`; attestorKey: `0x${string}`; tbtc: `0x${string}`; tusdt: `0x${string}`; confirmations: number; explorerBase: string | null; /** TERMS_VERSION_V2 do escrow configurado (2 = legado; 3 = comissão na perna on-chain). */ termsVersionV2: number }
 export function verumEvmConfig(c: Config): VerumEvmSettings | null {
   if (!c.VERUM_EVM_RPC_URL || !c.VERUM_EVM_CHAIN_ID || !c.VERUM_EVM_ESCROW_ADDRESS || !c.VERUM_EVM_KEEPER_KEY || !c.VERUM_EVM_ATTESTOR_KEY || !c.VERUM_EVM_TBTC || !c.VERUM_EVM_TUSDT) return null;
-  return { rpcUrl: c.VERUM_EVM_RPC_URL, chainId: Number(c.VERUM_EVM_CHAIN_ID), escrow: c.VERUM_EVM_ESCROW_ADDRESS as `0x${string}`, escrowV2: (c.VERUM_EVM_V2_ESCROW_ADDRESS as `0x${string}` | undefined) ?? null, keeperKey: c.VERUM_EVM_KEEPER_KEY as `0x${string}`, attestorKey: c.VERUM_EVM_ATTESTOR_KEY as `0x${string}`, tbtc: c.VERUM_EVM_TBTC as `0x${string}`, tusdt: c.VERUM_EVM_TUSDT as `0x${string}`, confirmations: c.VERUM_EVM_CONFIRMATIONS, explorerBase: c.VERUM_EVM_EXPLORER_BASE?.replace(/\/$/, '') ?? null };
+  return { rpcUrl: c.VERUM_EVM_RPC_URL, chainId: Number(c.VERUM_EVM_CHAIN_ID), escrow: c.VERUM_EVM_ESCROW_ADDRESS as `0x${string}`, escrowV2: (c.VERUM_EVM_V2_ESCROW_ADDRESS as `0x${string}` | undefined) ?? null, keeperKey: c.VERUM_EVM_KEEPER_KEY as `0x${string}`, attestorKey: c.VERUM_EVM_ATTESTOR_KEY as `0x${string}`, tbtc: c.VERUM_EVM_TBTC as `0x${string}`, tusdt: c.VERUM_EVM_TUSDT as `0x${string}`, confirmations: c.VERUM_EVM_CONFIRMATIONS, explorerBase: c.VERUM_EVM_EXPLORER_BASE?.replace(/\/$/, '') ?? null, termsVersionV2: c.VERUM_EVM_V2_TERMS_VERSION };
 }
 
 /**
@@ -198,6 +205,7 @@ export function verumEvmMainnetConfig(c: Config): VerumEvmSettings | null {
     keeperKey: c.VERUM_EVM_MAINNET_KEEPER_KEY as `0x${string}`, attestorKey: c.VERUM_EVM_MAINNET_ATTESTOR_KEY as `0x${string}`,
     tbtc: ETH_MAINNET_TOKENS.WBTC.address, tusdt: ETH_MAINNET_TOKENS.USDT.address,
     confirmations: c.VERUM_EVM_MAINNET_CONFIRMATIONS, explorerBase: 'https://etherscan.io',
+    termsVersionV2: c.VERUM_EVM_MAINNET_TERMS_VERSION,
   };
 }
 

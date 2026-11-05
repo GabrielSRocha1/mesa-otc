@@ -96,7 +96,9 @@ function buildVerumTermsXchain(
   const clamp = (n: number) => Math.min(Math.max(0, n), 10000);
   const commissionBps = clamp(c.terms.pricing.commissionBps);
   // Comissão só é pagável on-chain quando o COMPRADOR deposita o token (vendedor externo); se o
-  // comprador é externo (paga BTC), comissão = 0 (o contrato exige isso no create_trade).
+  // comprador é externo (paga BTC), comissão = 0 (o programa Solana atual exige isso no
+  // create_trade). A regra v3 "comissão na perna do Vendedor" (ver evmV2.ts) entra quando o
+  // programa for atualizado — follow-up da Fase 6 do épico.
   const cTotal = (buyerExternal || !pm1) ? 0n : commissionAmountOf(BigInt(buyerLeg.amountBase), clamp(c.terms.pricing.discountBps), commissionBps);
   const split = c.terms.pricing.commissionSplitBps ?? [];
   const pm2Bps = split[1] ?? 0;

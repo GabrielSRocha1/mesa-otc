@@ -3,7 +3,10 @@
  */
 import type { CanonicalAsset, ChainRef, KeyScheme, Leg, NetEnv, Network, Participant, Role, Terms } from '../domain/types.js';
 
-export interface AdapterCapabilities { escrowNN: boolean; htlc: boolean; verifiableSigSchemes: KeyScheme[]; finalityConfirmations: number; nativeCode: string }
+export interface AdapterCapabilities { escrowNN: boolean; htlc: boolean; verifiableSigSchemes: KeyScheme[]; finalityConfirmations: number; nativeCode: string;
+  /** v3: o escrow desta rede cobra a comissão dos PMs na perna do VENDEDOR quando a perna do
+   *  comprador é externa (BTC/HTLC). Ausente/false = legado (comissão zerada nesse modo). */
+  commissionOnSellerLeg?: boolean }
 export interface AssetVerification { ok: boolean; reasons: string[]; observed: { exists: boolean; decimals?: number; symbol?: string; codeHash?: string; mintAuthority?: string | null; standard?: string }; checkedAt: number }
 export type OnChainDealStatus = 'NONE' | 'REGISTERED' | 'FUNDED' | 'SETTLED' | 'REFUNDED' | 'SUPERSEDED';
 export interface OnChainDealState { status: OnChainDealStatus; revision: number; deposits: Record<number, string>; settledLegs: Record<number, string>; settledTx?: string; refundedTx?: string; dealHash?: string; expiresAt?: number; tradeId?: string;

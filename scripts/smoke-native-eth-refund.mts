@@ -73,7 +73,7 @@ const terms = {
   sellerAsset: evm.tusdt, sellerAmount: SELL,
   buyerAsset: NATIVE_ASSET_EVM as `0x${string}`, buyerAmount: BUY,
   platformFeeBps: 3, commissionBps: 0, discountBps: 0, slippageBps: 0,
-  createdAt: BigInt(CREATED), expiresAt: BigInt(EXPIRES), termsVersion: 2,
+  createdAt: BigInt(CREATED), expiresAt: BigInt(EXPIRES), termsVersion: evm.termsVersionV2,
   nonce: BigInt(Date.now()), htlcHash: ('0x' + '0'.repeat(64)) as `0x${string}`,
   commissionPm1: 0n, commissionPm2: 0n, dealType: 0, swapRouter: ('0x' + '0'.repeat(40)) as `0x${string}`, minAmountOut: 0n,
 };
